@@ -1,6 +1,10 @@
 // Frontend controller: renders the library/playlists and drives the native Rust
-// core through Tauri IPC. Falls back to a small mock when opened in a plain browser
-// (no window.__TAURI__), so the UI stays explorable without the toolchain.
+// core through Tauri IPC. Gapless playback: the engine pre-queues the next track
+// into the same sink; the frontend watches the sink's queue length to know when a
+// boundary was crossed. The progress bar runs off a wall clock (not the engine's
+// per-source position, whose reset semantics across the gapless boundary are
+// ambiguous) so it stays correct through transitions.
+// Falls back to a mock when opened in a plain browser (no window.__TAURI__).
 
 import * as PL from "./playlists.js";
 
@@ -9,38 +13,49 @@ const IS_NATIVE = !!(T && T.core && typeof T.core.invoke === "function");
 
 // ─── IPC layer (native) or mock (browser preview) ───
 const MOCK_TRACKS = [
-  { path: "/demo/a.flac", title: "Aurora", artist: "Kioku", album: "Night Drive", duration_secs: 214 },
-  { path: "/demo/b.mp3",  title: "Low Tide", artist: "Kioku", album: "Night Drive", duration_secs: 187 },
-  { path: "/demo/c.opus", title: "Paper Planes", artist: "Halcyon", album: "Kites", duration_secs: 243 },
+  { path: "/demo/a.flac", title: "Aurora", artist: "Kioku", album: "Night Drive", duration_secs: 214, gain: 1 },
+  { path: "/demo/b.mp3",  title: "Low Tide", artist: "Kioku", album: "Night Drive", duration_secs: 187, gain: 1 },
+  { path: "/demo/c.opus", title: "Paper Planes", artist: "Halcyon", album: "Kites", duration_secs: 243, gain: 1 },
 ];
 
 async function invoke(cmd, args) {
   if (IS_NATIVE) return T.core.invoke(cmd, args);
   if (cmd === "scan") return MOCK_TRACKS;
-  if (cmd === "status") return { position: 0, finished: false };
+  if (cmd === "status") return { queued: 0, finished: false, position: 0 };
   return null;
 }
 
 // ─── State ───
 let library = [];
-let view = [];               // filtered library currently shown
-let queue = [];              // paths in play order
-let current = -1;            // index into queue
+let view = [];                // filtered library currently shown
+let queue = [];               // paths in play order
+let curIndex = -1;            // index into queue of the playing track
+let preIndex = -1;            // index of the pre-queued (gapless) next track
+let expectedQueued = 0;       // how many sources the sink should hold right now
+let queueSettled = false;     // sink has caught up with our last Play/Preload
 let playing = false;
 let shuffle = false;
-let history = [];            // played indices, for prev during shuffle
-let trackStartedAt = 0;      // ms timestamp when the current track started
-let lastPos = 0;             // last polled position (s)
-let seeking = false;         // user is dragging the seek bar
-const selected = new Set();  // selected track paths (multi-select)
+let normalize = true;
+let history = [];             // played indices, for Prev
+let seeking = false;          // user dragging the seek bar
+const selected = new Set();   // selected track paths (multi-select)
 
 const $ = (s) => document.querySelector(s);
+
+// ─── Wall clock (drives the progress bar independently of the engine) ───
+const clock = { origin: 0, pausedAt: null };
+function wallStart(atSec = 0) { clock.origin = performance.now() - atSec * 1000; clock.pausedAt = null; }
+function wallPause() { if (clock.pausedAt === null) clock.pausedAt = performance.now(); }
+function wallResume() { if (clock.pausedAt !== null) { clock.origin += performance.now() - clock.pausedAt; clock.pausedAt = null; } }
+function wallSeek(sec) { clock.origin = performance.now() - sec * 1000; if (clock.pausedAt !== null) clock.pausedAt = performance.now(); }
+function wallPos() { const now = clock.pausedAt !== null ? clock.pausedAt : performance.now(); return Math.max(0, (now - clock.origin) / 1000); }
 
 // ─── helpers ───
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function escAttr(s) { return esc(s); }
 function fmtDur(s) { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), x = String(s % 60).padStart(2, "0"); return `${m}:${x}`; }
-function curTrack() { const p = queue[current]; return library.find(t => t.path === p) || view.find(t => t.path === p) || null; }
+function trackByPath(p) { return library.find(t => t.path === p) || view.find(t => t.path === p) || null; }
+function gainFor(t) { if (!normalize) return 1.0; const g = t && Number(t.gain); return Number.isFinite(g) && g > 0 ? g : 1.0; }
 
 function flash(msg) {
   let el = $("#toast");
@@ -60,8 +75,9 @@ function renderTracks(list) {
     host.innerHTML = `<div class="empty">No tracks. Add a music folder in the sidebar.</div>`;
     return;
   }
+  const nowPath = curIndex >= 0 ? queue[curIndex] : null;
   host.innerHTML = list.map((t, i) => {
-    const isNow = queue[current] === t.path;
+    const isNow = nowPath === t.path;
     const sel = selected.has(t.path);
     return `<div class="track ${isNow ? "playing" : ""} ${sel ? "selected" : ""}" data-path="${escAttr(t.path)}" data-idx="${i}">
       <input type="checkbox" class="sel-cb" ${sel ? "checked" : ""} aria-label="Select">
@@ -76,7 +92,7 @@ function renderTracks(list) {
 
   host.querySelectorAll(".track").forEach(el => {
     el.addEventListener("click", (e) => {
-      if (e.target.classList.contains("sel-cb")) return; // checkbox handles itself
+      if (e.target.classList.contains("sel-cb")) return;
       playFrom(Number(el.dataset.idx));
     });
   });
@@ -167,81 +183,113 @@ function openPlaylist(id) {
   renderTracks(tracks);
 }
 
-// ─── Playback ───
-async function playFrom(viewIdx) {
-  queue = view.map(t => t.path);
-  history = [];
-  await playIndex(viewIdx);
+// ─── Playback (gapless) ───
+function nextIndex(from) {
+  if (!queue.length) return -1;
+  if (shuffle) {
+    if (queue.length === 1) return -1;
+    let r; do { r = Math.floor(Math.random() * queue.length); } while (r === from);
+    return r;
+  }
+  return from + 1 <= queue.length - 1 ? from + 1 : -1;
 }
 
-async function playIndex(i) {
-  if (i < 0 || i >= queue.length) return;
-  current = i;
-  const path = queue[current];
-  const t = curTrack();
-  await invoke("play", { path });
-  playing = true;
-  trackStartedAt = Date.now();
-  lastPos = 0;
+function updateNowPlaying(t, path) {
   $("#playBtn").textContent = "⏸";
-  $("#nowTitle").textContent = t ? t.title : path.split("/").pop();
+  $("#nowTitle").textContent = t ? t.title : (path || "").split("/").pop();
   $("#nowSub").textContent = t ? `${t.artist} — ${t.album}` : "";
   const dur = t?.duration_secs || 0;
   $("#totTime").textContent = fmtDur(dur);
   $("#seek").max = dur > 0 ? dur : 1;
   $("#seek").value = 0;
   $("#curTime").textContent = "0:00";
+}
+
+async function playFrom(viewIdx) {
+  queue = view.map(t => t.path);
+  history = [];
+  await hardPlay(viewIdx);
+}
+
+// Hard start: fresh sink (drops any pre-queued track), then pre-queue the next.
+async function hardPlay(i) {
+  if (i < 0 || i >= queue.length) return;
+  curIndex = i;
+  const t = trackByPath(queue[i]);
+  await invoke("play", { path: queue[i], gain: gainFor(t) });
+  playing = true;
+  wallStart(0);
+  updateNowPlaying(t, queue[i]);
   renderTracks(view);
+  await schedulePreload();
+}
+
+// Pre-queue the next track into the same sink for a gapless transition.
+async function schedulePreload() {
+  const j = nextIndex(curIndex);
+  if (j >= 0 && j !== curIndex) {
+    const t = trackByPath(queue[j]);
+    await invoke("preload", { path: queue[j], gain: gainFor(t) });
+    preIndex = j;
+    expectedQueued = 2;
+  } else {
+    preIndex = -1;
+    expectedQueued = 1;
+  }
+  queueSettled = false;
 }
 
 async function togglePlay() {
-  if (current < 0 && view.length) return playFrom(0);
-  if (playing) { await invoke("pause"); playing = false; $("#playBtn").textContent = "▶"; }
-  else { await invoke("resume"); playing = true; $("#playBtn").textContent = "⏸"; }
+  if (curIndex < 0 && view.length) return playFrom(0);
+  if (playing) { await invoke("pause"); playing = false; wallPause(); $("#playBtn").textContent = "▶"; }
+  else { await invoke("resume"); playing = true; wallResume(); $("#playBtn").textContent = "⏸"; }
   renderTracks(view);
 }
 
-function nextIndex() {
-  if (!queue.length) return -1;
-  if (shuffle) {
-    if (queue.length === 1) return current;
-    let r; do { r = Math.floor(Math.random() * queue.length); } while (r === current);
-    return r;
-  }
-  return current + 1 <= queue.length - 1 ? current + 1 : -1;
-}
-
 async function next() {
-  const ni = nextIndex();
-  if (ni < 0) { playing = false; $("#playBtn").textContent = "▶"; return; } // end of linear queue
-  history.push(current);
-  await playIndex(ni);
+  const j = nextIndex(curIndex);
+  if (j < 0) { playing = false; $("#playBtn").textContent = "▶"; return; }
+  history.push(curIndex);
+  await hardPlay(j);
 }
 
 async function prev() {
-  if (lastPos > 3) { await invoke("seek", { secs: 0 }); lastPos = 0; return; } // restart if >3s in
-  if (history.length) { await playIndex(history.pop()); }
-  else if (current > 0) { await playIndex(current - 1); }
-  else { await invoke("seek", { secs: 0 }); }
+  if (wallPos() > 3) { await invoke("seek", { secs: 0 }); wallSeek(0); return; }
+  if (history.length) { await hardPlay(history.pop()); }
+  else if (curIndex > 0) { await hardPlay(curIndex - 1); }
+  else { await invoke("seek", { secs: 0 }); wallSeek(0); }
 }
 
-// ─── Progress polling (position + auto-advance) ───
+// ─── Poll: progress bar + gapless boundary / end detection ───
 function startPolling() {
   setInterval(async () => {
-    if (current < 0) return;
+    if (curIndex < 0) return;
+    if (!seeking && playing) {
+      const p = wallPos();
+      $("#seek").value = p;
+      $("#curTime").textContent = fmtDur(p);
+    }
     const st = await invoke("status");
     if (!st) return;
-    lastPos = st.position || 0;
-    if (!seeking) {
-      $("#seek").value = lastPos;
-      $("#curTime").textContent = fmtDur(lastPos);
+    const queued = st.queued || 0;
+
+    // Wait until the sink reflects our last Play/Preload before trusting deltas.
+    if (!queueSettled) { if (queued >= expectedQueued) queueSettled = true; return; }
+
+    if (queued < expectedQueued && queued >= 1 && preIndex >= 0) {
+      // Boundary crossed: the pre-queued track is now the one playing.
+      history.push(curIndex);
+      curIndex = preIndex;
+      const t = trackByPath(queue[curIndex]);
+      wallStart(0);
+      updateNowPlaying(t, queue[curIndex]);
+      renderTracks(view);
+      await schedulePreload();
+    } else if (queued === 0 && playing) {
+      playing = false;
+      $("#playBtn").textContent = "▶";
     }
-    // Auto-advance when the track finished (guard against the false "empty" right
-    // after starting: require ≥1.5s of playback before trusting `finished`).
-    if (playing && st.finished && (Date.now() - trackStartedAt) > 1500) {
-      next();
-    }
-  }, 500);
+  }, 300);
 }
 
 // ─── Library scan ───
@@ -259,7 +307,6 @@ async function scanPath(path, { merge = false } = {}) {
   renderTracks(library);
 }
 
-// Native folder picker (tauri-plugin-dialog via core.invoke — no bundler needed).
 async function pickFolder() {
   if (!IS_NATIVE) { document.querySelector(".manual")?.setAttribute("open", ""); $("#folderInput")?.focus(); return; }
   const btn = $("#pickBtn");
@@ -292,7 +339,7 @@ function setActiveNav(v) {
 
 // ─── Wire up ───
 async function init() {
-  await PL.initPlaylists(); // load persisted playlists before the first render
+  await PL.initPlaylists();
 
   if (!IS_NATIVE) {
     const banner = document.createElement("div");
@@ -311,13 +358,23 @@ async function init() {
   $("#shuffleBtn").addEventListener("click", () => {
     shuffle = !shuffle;
     $("#shuffleBtn").classList.toggle("active", shuffle);
+    // Re-target the pre-queued next track to match the new mode.
+    if (curIndex >= 0) schedulePreload();
     flash(shuffle ? "Shuffle on" : "Shuffle off");
+  });
+  $("#normChk").addEventListener("change", e => {
+    normalize = e.target.checked;
+    flash(normalize ? "Loudness normalize on (next tracks)" : "Loudness normalize off");
   });
   $("#volume").addEventListener("input", e => invoke("set_volume", { level: Number(e.target.value) / 100 }));
 
-  // Seek bar: preview while dragging, commit on release.
   $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });
-  $("#seek").addEventListener("change", async () => { await invoke("seek", { secs: Number($("#seek").value) }); seeking = false; });
+  $("#seek").addEventListener("change", async () => {
+    const s = Number($("#seek").value);
+    await invoke("seek", { secs: s });
+    wallSeek(s);
+    seeking = false;
+  });
 
   $("#search").addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();

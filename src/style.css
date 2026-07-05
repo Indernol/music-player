@@ -119,6 +119,8 @@ input:focus { border-color: var(--accent); }
 .ctrl.active { color: var(--accent-2); background: var(--vio-glow, rgba(139,92,246,0.15)); }
 .volume { display: flex; align-items: center; gap: 8px; justify-self: end; color: var(--tx-2); }
 .volume input[type="range"] { width: 120px; accent-color: var(--accent); }
+.norm { display: flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--tx-3); cursor: pointer; user-select: none; }
+.norm input { accent-color: var(--accent); cursor: pointer; }
 
 /* Seekable progress bar */
 .progress { display: flex; align-items: center; gap: 10px; }

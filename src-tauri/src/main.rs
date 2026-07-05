@@ -19,8 +19,13 @@ fn scan(paths: Vec<String>) -> Vec<Track> {
 }
 
 #[tauri::command]
-fn play(path: String, state: State<AppState>) {
-    state.audio.play(path);
+fn play(path: String, gain: f32, state: State<AppState>) {
+    state.audio.play(path, gain);
+}
+
+#[tauri::command]
+fn preload(path: String, gain: f32, state: State<AppState>) {
+    state.audio.preload(path, gain);
 }
 
 #[tauri::command]
@@ -60,7 +65,7 @@ fn main() {
             audio: AudioController::new(),
         })
         .invoke_handler(tauri::generate_handler![
-            scan, play, pause, resume, stop, set_volume, seek, status,
+            scan, play, preload, pause, resume, stop, set_volume, seek, status,
             playlists::load_playlists, playlists::save_playlists
         ])
         .run(tauri::generate_context!())

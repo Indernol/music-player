@@ -99,8 +99,12 @@ For hot-reload development instead of a one-off binary:
 1. ~~Native folder picker (`tauri-plugin-dialog`)~~ ✅ done.
 2. ~~Playlist persistence to app-data JSON~~ ✅ done (`playlists.json` in the app data
    dir, written atomically by the Rust backend; localStorage only as browser fallback).
-3. Gapless playback + crossfade + ReplayGain (rodio queue / `symphonia`).
-4. Google OAuth2 read-only metadata sync (`docs/oauth-sync.md`).
+3. ~~Gapless playback + ReplayGain loudness~~ ✅ done (engine pre-queues the next
+   track into the same sink; per-track `amplify()` from ReplayGain tags; 20 ms
+   anti-click fade-in). True crossfade is out — it needs a mixing layer rodio's
+   sequential `Sink` doesn't provide.
+4. Google OAuth2 read-only metadata sync (`docs/oauth-sync.md`) — needs a
+   user-provided Google Cloud Client ID.
 5. Optional official YouTube IFrame provider (separate, opt-in — see COMPLIANCE).
 
 ## Versioning / GitHub
