@@ -96,8 +96,9 @@ For hot-reload development instead of a one-off binary:
 
 ## Roadmap (opt-in, in order)
 
-1. Native folder picker (`tauri-plugin-dialog`) — scaffold uses a path input for now.
-2. Playlist persistence to app-data JSON (scaffold uses localStorage).
+1. ~~Native folder picker (`tauri-plugin-dialog`)~~ ✅ done.
+2. ~~Playlist persistence to app-data JSON~~ ✅ done (`playlists.json` in the app data
+   dir, written atomically by the Rust backend; localStorage only as browser fallback).
 3. Gapless playback + crossfade + ReplayGain (rodio queue / `symphonia`).
 4. Google OAuth2 read-only metadata sync (`docs/oauth-sync.md`).
 5. Optional official YouTube IFrame provider (separate, opt-in — see COMPLIANCE).

@@ -3,6 +3,7 @@
 
 mod audio;
 mod library;
+mod playlists;
 
 use audio::AudioController;
 use library::Track;
@@ -59,7 +60,8 @@ fn main() {
             audio: AudioController::new(),
         })
         .invoke_handler(tauri::generate_handler![
-            scan, play, pause, resume, stop, set_volume, seek, status
+            scan, play, pause, resume, stop, set_volume, seek, status,
+            playlists::load_playlists, playlists::save_playlists
         ])
         .run(tauri::generate_context!())
         .expect("error while running Music Player");

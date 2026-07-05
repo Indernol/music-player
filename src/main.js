@@ -291,7 +291,9 @@ function setActiveNav(v) {
 }
 
 // ─── Wire up ───
-function init() {
+async function init() {
+  await PL.initPlaylists(); // load persisted playlists before the first render
+
   if (!IS_NATIVE) {
     const banner = document.createElement("div");
     banner.className = "mock-banner";
@@ -334,4 +336,4 @@ function init() {
   if (!IS_NATIVE) { library = MOCK_TRACKS; renderTracks(library); }
 }
 
-init();
+init().catch(e => console.error("[init] failed:", e));
