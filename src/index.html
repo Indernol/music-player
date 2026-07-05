@@ -11,28 +11,28 @@
     <aside class="sidebar">
       <div class="brand">🎵 <span>Music Player</span></div>
 
-      <nav class="nav">
-        <button class="nav-item active" data-view="library"><span class="ni-ico">📚</span> Library</button>
-        <button class="nav-item" data-view="playlists"><span class="ni-ico">🎧</span> Playlists</button>
-      </nav>
+      <button id="navLibrary" class="nav-item active"><span class="ni-ico">📚</span> Library</button>
 
-      <div class="folder-add">
-        <div class="fa-head">
-          <label>Music folders</label>
-          <button id="rescanBtn" class="icon-btn" title="Rescan folders">⟳</button>
+      <div class="side-section">
+        <div class="ss-head">
+          <span class="ss-title">Sources</span>
+          <button id="rescanBtn" class="icon-btn" title="Check all folders for new songs">⟳</button>
         </div>
         <button id="pickBtn" class="btn btn-block">📂 Add folder…</button>
         <details class="manual">
           <summary>or enter a path manually</summary>
           <div class="row">
             <input id="folderInput" type="text" placeholder="/path/to/music" spellcheck="false">
-            <button id="scanBtn" class="btn">Scan</button>
+            <button id="scanBtn" class="btn">Add</button>
           </div>
         </details>
+        <div class="src-list" id="sourcesList"></div>
       </div>
 
-      <div class="section-label">Your playlists</div>
-      <div class="playlists-list" id="playlistsList"></div>
+      <div class="side-section grow">
+        <div class="ss-head"><span class="ss-title">Playlists</span></div>
+        <div class="playlists-list" id="playlistsList"></div>
+      </div>
 
       <button id="settingsBtn" class="settings-btn">⚙ Settings</button>
     </aside>
@@ -46,8 +46,15 @@
         <span id="count" class="count"></span>
       </header>
 
+      <div id="viewHead" class="view-head"></div>
+
+      <div class="list-head" id="listHead">
+        <span class="lh-idx">#</span><span></span><span>TITLE</span>
+        <span class="lh-album">ALBUM</span><span class="lh-dur">🕓</span><span></span>
+      </div>
+
       <section id="trackList" class="tracklist">
-        <div class="empty"><div class="empty-ico">🎵</div>Add a music folder to start — your local files, played by a native engine.</div>
+        <div class="empty"><div class="empty-ico">🎵</div>Add a folder as a source to start.</div>
       </section>
     </main>
   </div>
@@ -82,10 +89,8 @@
     </div>
   </footer>
 
-  <!-- Right-click context menu (Spotify-style) -->
   <div id="ctxMenu" class="ctx-menu" hidden></div>
 
-  <!-- Settings modal -->
   <div id="settingsModal" class="modal-backdrop" hidden>
     <div class="modal">
       <div class="modal-head">

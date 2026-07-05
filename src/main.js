@@ -1,8 +1,6 @@
-// Frontend controller. Drives the native Rust core over Tauri IPC; gapless engine
-// (pre-queues the next track, watches the sink queue length for boundaries), a wall
-// clock for the progress bar, a persisted library + playlists + settings, Spotify-
-// style selection (click / ctrl / shift / double-click / right-click menu), desktop
-// notifications and optional Discord Rich Presence on track change.
+// Frontend controller. Native Rust core over Tauri IPC: gapless engine, wall-clock
+// progress, persisted library + sources + playlists + settings, Spotify-style
+// selection + context menu, desktop notifications + optional Discord Rich Presence.
 
 import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
@@ -26,7 +24,7 @@ async function invoke(cmd, args) {
 
 // ─── State ───
 let library = [];
-let folders = [];             // scanned folder roots (persisted)
+let folders = [];
 let view = [];
 let queue = [];
 let curIndex = -1, preIndex = -1;
@@ -36,11 +34,12 @@ let history = [];
 let seeking = false;
 const selected = new Set();
 let anchorIdx = -1;
+let active = { type: "library", id: "" }; // current view for highlighting
 
 const $ = (s) => document.querySelector(s);
 const S = () => SETTINGS.getSettings();
 
-// ─── Wall clock (progress bar) ───
+// ─── Wall clock ───
 const clock = { origin: 0, pausedAt: null };
 function wallStart(atSec = 0) { clock.origin = performance.now() - atSec * 1000; clock.pausedAt = null; }
 function wallPause() { if (clock.pausedAt === null) clock.pausedAt = performance.now(); }
@@ -51,6 +50,8 @@ function wallPos() { const now = clock.pausedAt !== null ? clock.pausedAt : perf
 // ─── helpers ───
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function fmtDur(s) { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), x = String(s % 60).padStart(2, "0"); return `${m}:${x}`; }
+function baseName(p) { return String(p || "").split("/").filter(Boolean).pop() || p; }
+function inFolder(t, f) { return t.path === f || t.path.startsWith(f.endsWith("/") ? f : f + "/"); }
 function trackByPath(p) { return library.find(t => t.path === p) || view.find(t => t.path === p) || null; }
 function gainFor(t) { if (!normalize) return 1.0; const g = t && Number(t.gain); return Number.isFinite(g) && g > 0 ? g : 1.0; }
 function artColor(s) { let h = 0; for (const c of String(s || "?")) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${h % 360} 42% 40%)`; }
@@ -63,20 +64,30 @@ function flash(msg) {
   clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 1800);
 }
 
+// ─── View header ───
+function setViewHead({ icon = "", title = "", subtitle = "" }) {
+  $("#viewHead").innerHTML = `<div class="vh-icon">${icon}</div><div class="vh-txt"><div class="vh-title">${esc(title)}</div><div class="vh-sub">${esc(subtitle)}</div></div>`;
+}
+
 // ─── Track list ───
 function renderTracks(list) {
   view = list;
   updateCount();
   const host = $("#trackList");
-  if (!list.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">🎵</div>No tracks here yet.</div>`; return; }
+  $("#listHead").style.display = list.length ? "" : "none";
+  if (!list.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">🎵</div>Nothing here yet.</div>`; return; }
   const nowPath = curIndex >= 0 ? queue[curIndex] : null;
-  host.innerHTML = list.map((t, i) => `
-    <div class="track ${nowPath === t.path ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
-      <div class="art" style="background:${artColor(t.artist + t.album)}">${nowPath === t.path && playing ? "♪" : esc(artInitial(t))}</div>
-      <div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)} — ${esc(t.album)}</div></div>
+  host.innerHTML = list.map((t, i) => {
+    const isNow = nowPath === t.path;
+    return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
+      <div class="tk-idx"><span class="idx-num">${i + 1}</span><span class="idx-play">▶</span>${isNow && playing ? `<span class="eq"><i></i><i></i><i></i></span>` : ""}</div>
+      <div class="art" style="background:${artColor(t.artist + t.album)}">${esc(artInitial(t))}</div>
+      <div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
+      <div class="album">${esc(t.album)}</div>
       <span class="dur">${fmtDur(t.duration_secs)}</span>
       <button class="more" title="More" data-more="${i}">⋯</button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 
   host.querySelectorAll(".track").forEach(el => {
     const idx = Number(el.dataset.idx), path = el.dataset.path;
@@ -86,10 +97,9 @@ function renderTracks(list) {
   });
   host.querySelectorAll("[data-more]").forEach(btn => btn.addEventListener("click", (e) => {
     e.stopPropagation();
-    const idx = Number(btn.dataset.more), path = view[idx]?.path;
-    ensureSelected(path, idx);
-    const r = btn.getBoundingClientRect();
-    openContextMenu(r.left, r.bottom);
+    const idx = Number(btn.dataset.more);
+    ensureSelected(view[idx]?.path, idx);
+    const r = btn.getBoundingClientRect(); openContextMenu(r.left, r.bottom);
   }));
 }
 
@@ -102,56 +112,92 @@ function refreshSelectionUI() {
   updateCount();
 }
 
-// ─── Spotify-style selection ───
+// ─── Selection ───
 function rowClick(e, idx, path) {
-  if (e.ctrlKey || e.metaKey) {
-    if (selected.has(path)) selected.delete(path); else selected.add(path);
-    anchorIdx = idx;
-  } else if (e.shiftKey && anchorIdx >= 0) {
-    const a = Math.min(anchorIdx, idx), b = Math.max(anchorIdx, idx);
-    selected.clear();
-    for (let i = a; i <= b; i++) if (view[i]) selected.add(view[i].path);
-  } else {
-    selected.clear(); selected.add(path); anchorIdx = idx;
-  }
+  if (e.ctrlKey || e.metaKey) { if (selected.has(path)) selected.delete(path); else selected.add(path); anchorIdx = idx; }
+  else if (e.shiftKey && anchorIdx >= 0) { const a = Math.min(anchorIdx, idx), b = Math.max(anchorIdx, idx); selected.clear(); for (let i = a; i <= b; i++) if (view[i]) selected.add(view[i].path); }
+  else { selected.clear(); selected.add(path); anchorIdx = idx; }
   refreshSelectionUI();
 }
-function ensureSelected(path, idx) {
-  if (!selected.has(path)) { selected.clear(); selected.add(path); anchorIdx = idx; refreshSelectionUI(); }
-}
+function ensureSelected(path, idx) { if (path && !selected.has(path)) { selected.clear(); selected.add(path); anchorIdx = idx; refreshSelectionUI(); } }
 
 // ─── Context menu ───
 function openContextMenu(x, y) {
-  const paths = [...selected];
-  if (!paths.length) return;
+  const paths = [...selected]; if (!paths.length) return;
   const menu = $("#ctxMenu");
   const pls = PL.getPlaylists();
   menu.innerHTML =
-    `<div class="ctx-item" data-play="1">▶ Play</div>` +
-    `<div class="ctx-sep"></div>` +
+    `<div class="ctx-item" data-play="1">▶ Play</div><div class="ctx-sep"></div>` +
     `<div class="ctx-label">Add ${paths.length > 1 ? paths.length + " tracks" : "track"} to</div>` +
     pls.map(p => `<div class="ctx-item" data-add="${p.id}">🎧 ${esc(p.name)}</div>`).join("") +
     `<div class="ctx-item" data-add="__new">➕ New playlist…</div>`;
   menu.hidden = false;
   menu.style.left = Math.min(x, window.innerWidth - 224) + "px";
   menu.style.top = Math.min(y, window.innerHeight - Math.min(menu.offsetHeight + 8, 340)) + "px";
-
-  menu.querySelector("[data-play]")?.addEventListener("click", () => {
-    const i = view.findIndex(t => t.path === paths[0]);
-    if (i >= 0) playFrom(i);
-    closeCtx();
-  });
+  menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playFrom(i); closeCtx(); });
   menu.querySelectorAll("[data-add]").forEach(it => it.addEventListener("click", () => {
     let id = it.dataset.add;
     if (id === "__new") { const name = prompt("New playlist name:"); if (!name) { closeCtx(); return; } id = PL.createPlaylist(name).id; }
     let n = 0; for (const p of paths) { PL.addToPlaylist(id, p); n++; }
     const nm = PL.getPlaylists().find(p => p.id === id)?.name || "playlist";
-    renderPlaylists();
-    flash(`Added ${n} track${n === 1 ? "" : "s"} to “${nm}”`);
-    closeCtx();
+    renderPlaylists(); flash(`Added ${n} track${n === 1 ? "" : "s"} to “${nm}”`); closeCtx();
   }));
 }
 function closeCtx() { const m = $("#ctxMenu"); if (m && !m.hidden) { m.hidden = true; m.innerHTML = ""; } }
+
+// ─── Sources (folders) ───
+function renderSources() {
+  const host = $("#sourcesList");
+  if (!folders.length) { host.innerHTML = `<div class="src-empty">No folders yet — add one above.</div>`; return; }
+  host.innerHTML = folders.map(f => {
+    const count = library.filter(t => inFolder(t, f)).length;
+    const on = active.type === "source" && active.id === f;
+    return `<div class="src-row ${on ? "active" : ""}" data-src="${esc(f)}" title="${esc(f)}">
+      <span class="src-ico">📁</span>
+      <span class="src-name">${esc(baseName(f))}</span>
+      <span class="src-count">${count}</span>
+      <button class="src-btn" data-refresh="${esc(f)}" title="Check for new songs">⟳</button>
+      <button class="src-btn" data-remove="${esc(f)}" title="Remove source">✕</button>
+    </div>`;
+  }).join("");
+  host.querySelectorAll("[data-src]").forEach(el => el.addEventListener("click", (e) => { if (e.target.dataset.refresh !== undefined || e.target.dataset.remove !== undefined) return; openSource(el.dataset.src); }));
+  host.querySelectorAll("[data-refresh]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); rescanFolder(b.dataset.refresh); }));
+  host.querySelectorAll("[data-remove]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); removeSource(b.dataset.remove); }));
+}
+
+function openSource(folder) {
+  active = { type: "source", id: folder };
+  markActive();
+  selected.clear();
+  const tracks = library.filter(t => inFolder(t, folder));
+  setViewHead({ icon: "📁", title: baseName(folder), subtitle: `${tracks.length} songs · ${folder}` });
+  renderTracks(tracks);
+}
+
+async function rescanFolder(folder) {
+  const tr = await invoke("scan", { paths: [folder] });
+  const found = Array.isArray(tr) ? tr : [];
+  const present = new Set(found.map(t => t.path));
+  const known = new Set(library.filter(t => inFolder(t, folder)).map(t => t.path));
+  const fresh = found.filter(t => !known.has(t.path));
+  // Keep tracks outside this folder + this folder's tracks that still exist, add new.
+  library = library.filter(t => !inFolder(t, folder) || present.has(t.path)).concat(fresh);
+  await saveLibrary();
+  renderSources();
+  if (active.type === "source" && active.id === folder) openSource(folder);
+  else if (active.type === "library") showLibrary();
+  flash(fresh.length ? `${fresh.length} new track${fresh.length === 1 ? "" : "s"} in ${baseName(folder)}` : `No new songs in ${baseName(folder)}`);
+}
+
+function removeSource(folder) {
+  if (!confirm(`Remove this source?\n${folder}\n\nIts tracks leave the library. The files on disk are NOT deleted.`)) return;
+  folders = folders.filter(f => f !== folder);
+  library = library.filter(t => !inFolder(t, folder));
+  saveLibrary();
+  renderSources();
+  showLibrary();
+  flash("Source removed");
+}
 
 // ─── Playlists sidebar ───
 function renderPlaylists() {
@@ -159,8 +205,11 @@ function renderPlaylists() {
   const pls = PL.getPlaylists();
   host.innerHTML =
     `<div class="pl-row" id="plNew">➕ New playlist</div>` +
-    pls.map(p => `<div class="pl-row" data-pl="${p.id}">🎧 ${esc(p.name)} <span style="color:var(--tx-3);font-size:11px;margin-left:auto">${p.paths.length}</span>
-      <button class="pl-del" data-del="${p.id}" title="Delete">✕</button></div>`).join("");
+    pls.map(p => {
+      const on = active.type === "playlist" && active.id === p.id;
+      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}">🎧 ${esc(p.name)} <span class="pl-count">${p.paths.length}</span>
+        <button class="pl-del" data-del="${p.id}" title="Delete">✕</button></div>`;
+    }).join("");
   host.querySelector("#plNew").addEventListener("click", () => { const name = prompt("Playlist name:"); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
   host.querySelectorAll("[data-pl]").forEach(el => el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined) return; openPlaylist(el.dataset.pl); }));
   host.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", (e) => { e.stopPropagation(); if (confirm("Delete this playlist?")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); } }));
@@ -168,10 +217,27 @@ function renderPlaylists() {
 function openPlaylist(id) {
   const pl = PL.getPlaylists().find(p => p.id === id);
   if (!pl) return;
+  active = { type: "playlist", id };
+  markActive();
   const byPath = new Map(library.map(t => [t.path, t]));
-  setActiveNav("playlists");
   selected.clear();
+  setViewHead({ icon: "🎧", title: pl.name, subtitle: `${pl.paths.length} songs` });
   renderTracks(pl.paths.map(p => byPath.get(p)).filter(Boolean));
+}
+
+function showLibrary() {
+  active = { type: "library", id: "" };
+  markActive();
+  selected.clear();
+  const artists = new Set(library.map(t => t.artist)).size;
+  setViewHead({ icon: "📚", title: "Your Library", subtitle: `${library.length} songs · ${artists} artist${artists === 1 ? "" : "s"} · ${folders.length} folder${folders.length === 1 ? "" : "s"}` });
+  renderTracks(library);
+}
+function markActive() {
+  $("#navLibrary").classList.toggle("active", active.type === "library");
+  renderSources();
+  // playlist highlight is refreshed by renderPlaylists on open; refresh to sync
+  document.querySelectorAll("#playlistsList .pl-row[data-pl]").forEach(el => el.classList.toggle("active", active.type === "playlist" && active.id === el.dataset.pl));
 }
 
 // ─── Playback (gapless) ───
@@ -189,8 +255,7 @@ function updateNowPlaying(t, path) {
   const dur = t?.duration_secs || 0;
   $("#totTime").textContent = fmtDur(dur);
   $("#seek").max = dur > 0 ? dur : 1; $("#seek").value = 0; $("#curTime").textContent = "0:00";
-  notifyTrack(t);
-  updateRPC(t, true);
+  notifyTrack(t); updateRPC(t, true);
 }
 async function playFrom(viewIdx) { queue = view.map(t => t.path); history = []; await hardPlay(viewIdx); }
 async function hardPlay(i) {
@@ -199,8 +264,7 @@ async function hardPlay(i) {
   const t = trackByPath(queue[i]);
   await invoke("play", { path: queue[i], gain: gainFor(t) });
   playing = true; wallStart(0);
-  updateNowPlaying(t, queue[i]);
-  renderTracks(view);
+  updateNowPlaying(t, queue[i]); renderTracks(view);
   await schedulePreload();
 }
 async function schedulePreload() {
@@ -213,14 +277,9 @@ async function togglePlay() {
   if (curIndex < 0 && view.length) return playFrom(0);
   if (playing) { await invoke("pause"); playing = false; wallPause(); $("#playBtn").textContent = "▶"; }
   else { await invoke("resume"); playing = true; wallResume(); $("#playBtn").textContent = "⏸"; }
-  updateRPC(trackByPath(queue[curIndex]), playing);
-  renderTracks(view);
+  updateRPC(trackByPath(queue[curIndex]), playing); renderTracks(view);
 }
-async function next() {
-  const j = nextIndex(curIndex);
-  if (j < 0) { playing = false; $("#playBtn").textContent = "▶"; return; }
-  history.push(curIndex); await hardPlay(j);
-}
+async function next() { const j = nextIndex(curIndex); if (j < 0) { playing = false; $("#playBtn").textContent = "▶"; return; } history.push(curIndex); await hardPlay(j); }
 async function prev() {
   if (wallPos() > 3) { await invoke("seek", { secs: 0 }); wallSeek(0); return; }
   if (history.length) await hardPlay(history.pop());
@@ -231,8 +290,7 @@ function startPolling() {
   setInterval(async () => {
     if (curIndex < 0) return;
     if (!seeking && playing) { const p = wallPos(); $("#seek").value = p; $("#curTime").textContent = fmtDur(p); }
-    const st = await invoke("status");
-    if (!st) return;
+    const st = await invoke("status"); if (!st) return;
     const queued = st.queued || 0;
     if (!queueSettled) { if (queued >= expectedQueued) queueSettled = true; return; }
     if (queued < expectedQueued && queued >= 1 && preIndex >= 0) {
@@ -273,43 +331,47 @@ async function loadLibrary() {
   const raw = await storeLoad("library");
   if (raw) { try { const d = JSON.parse(raw); folders = Array.isArray(d.folders) ? d.folders : []; library = Array.isArray(d.tracks) ? d.tracks : []; } catch {} }
 }
-async function scanPath(path, { merge = true } = {}) {
+async function addSource(path) {
   if (!path) return;
   const tracks = await invoke("scan", { paths: [path] });
   const found = Array.isArray(tracks) ? tracks : [];
-  if (merge) { const seen = new Set(library.map(t => t.path)); library = library.concat(found.filter(t => !seen.has(t.path))); }
-  else library = found;
+  const seen = new Set(library.map(t => t.path));
+  library = library.concat(found.filter(t => !seen.has(t.path)));
   if (!folders.includes(path)) folders.push(path);
-  setActiveNav("library");
-  renderTracks(library);
   await saveLibrary();
+  renderSources();
+  openSource(path);
+  flash(`Added ${baseName(path)} · ${found.length} song${found.length === 1 ? "" : "s"}`);
 }
 async function rescanAll() {
-  if (!folders.length) { flash("No folders to rescan"); return; }
-  library = [];
+  if (!folders.length) { flash("No sources to refresh"); return; }
+  let total = 0;
   for (const f of [...folders]) {
     const tr = await invoke("scan", { paths: [f] });
     const found = Array.isArray(tr) ? tr : [];
-    const seen = new Set(library.map(t => t.path));
-    library = library.concat(found.filter(t => !seen.has(t.path)));
+    const present = new Set(found.map(t => t.path));
+    const known = new Set(library.filter(t => inFolder(t, f)).map(t => t.path));
+    total += found.filter(t => !known.has(t.path)).length;
+    library = library.filter(t => !inFolder(t, f) || present.has(t.path)).concat(found.filter(t => !known.has(t.path)));
   }
-  renderTracks(library); await saveLibrary(); flash(`Rescanned ${folders.length} folder${folders.length === 1 ? "" : "s"}`);
+  await saveLibrary(); renderSources();
+  if (active.type === "source") openSource(active.id); else showLibrary();
+  flash(total ? `${total} new song${total === 1 ? "" : "s"} found` : "Library up to date");
 }
 async function pickFolder() {
   if (!IS_NATIVE) { document.querySelector(".manual")?.setAttribute("open", ""); $("#folderInput")?.focus(); return; }
   const btn = $("#pickBtn"); btn.disabled = true;
   try {
     const path = await T.core.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Choose a music folder" } });
-    if (path) await scanPath(path);
+    if (path) await addSource(path);
   } catch (e) { console.error("[dialog]", e); document.querySelector(".manual")?.setAttribute("open", ""); }
   finally { btn.disabled = false; }
 }
 async function scanFromInput() {
   const path = $("#folderInput").value.trim(); if (!path) return;
   $("#scanBtn").disabled = true; $("#scanBtn").textContent = "…";
-  try { await scanPath(path); } finally { $("#scanBtn").disabled = false; $("#scanBtn").textContent = "Scan"; }
+  try { await addSource(path); $("#folderInput").value = ""; } finally { $("#scanBtn").disabled = false; $("#scanBtn").textContent = "Add"; }
 }
-function setActiveNav(v) { document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.view === v)); }
 
 // ─── Settings ───
 function applyAccent() {
@@ -328,8 +390,7 @@ function openSettings() {
   $("#settingsBody").innerHTML = `
     <div class="set-group"><div class="set-title">Appearance</div>
       <div class="set-row"><label>Accent color</label>
-        <div class="swatches">${Object.entries(SETTINGS.ACCENTS).map(([k, v]) => `<button class="swatch ${s.accent === k ? "on" : ""}" data-accent="${k}" style="background:${v[0]};color:${v[0]}" title="${k}"></button>`).join("")}</div>
-      </div>
+        <div class="swatches">${Object.entries(SETTINGS.ACCENTS).map(([k, v]) => `<button class="swatch ${s.accent === k ? "on" : ""}" data-accent="${k}" style="background:${v[0]};color:${v[0]}" title="${k}"></button>`).join("")}</div></div>
     </div>
     <div class="set-group"><div class="set-title">Playback</div>
       <div class="set-row"><label>Default volume</label><input type="range" id="setVol" min="0" max="100" value="${s.defaultVolume}"></div>
@@ -365,12 +426,14 @@ async function init() {
     banner.className = "mock-banner";
     banner.textContent = "Browser preview (mock data, no audio). Run the app for real playback.";
     $(".main").prepend(banner);
+    if (!library.length) { library = MOCK_TRACKS; folders = ["/demo"]; }
   }
 
   $("#pickBtn").addEventListener("click", pickFolder);
   $("#rescanBtn").addEventListener("click", rescanAll);
   $("#scanBtn").addEventListener("click", scanFromInput);
   $("#folderInput").addEventListener("keydown", e => { if (e.key === "Enter") scanFromInput(); });
+  $("#navLibrary").addEventListener("click", showLibrary);
 
   $("#playBtn").addEventListener("click", togglePlay);
   $("#nextBtn").addEventListener("click", next);
@@ -385,9 +448,10 @@ async function init() {
   $("#search").addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();
     selected.clear();
-    renderTracks(!q ? library : library.filter(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q) || t.album.toLowerCase().includes(q)));
+    if (!q) { showLibrary(); return; }
+    setViewHead({ icon: "🔍", title: "Search", subtitle: `“${e.target.value.trim()}”` });
+    renderTracks(library.filter(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q) || t.album.toLowerCase().includes(q)));
   });
-  document.querySelectorAll(".nav-item").forEach(b => b.addEventListener("click", () => { setActiveNav(b.dataset.view); if (b.dataset.view === "library") { selected.clear(); renderTracks(library); } }));
 
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#settingsClose").addEventListener("click", () => $("#settingsModal").hidden = true);
@@ -400,8 +464,7 @@ async function init() {
   renderPlaylists();
   applySettings();
   startPolling();
-  if (!IS_NATIVE && !library.length) library = MOCK_TRACKS;
-  renderTracks(library);
+  showLibrary();
 }
 
 init().catch(e => console.error("[init] failed:", e));
