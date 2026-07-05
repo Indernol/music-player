@@ -55,20 +55,44 @@ Module boundaries (each folder = one responsibility):
 
 - **Rust** (stable) + Cargo — <https://rustup.rs>
 - **Node.js** ≥ 18 (only for the Tauri CLI)
-- Tauri v2 system deps — see <https://tauri.app/start/prerequisites/>
-  (Linux: `libwebkit2gtk-4.1-dev`, `libasound2-dev` for audio, `build-essential`, etc.)
+- Tauri v2 system deps: `webkit2gtk4.1-devel`, `alsa-lib-devel` (audio), `gtk3`,
+  `librsvg2-devel`, `libappindicator-gtk3-devel`, a C toolchain — see
+  <https://tauri.app/start/prerequisites/>.
 
-## Run
+### On immutable/atomic distros (Bazzite, Silverblue, Kinoite…)
+
+`dnf` is disabled on the host by design. **Do all dev inside a Distrobox container**
+(mutable, rootless, no host password, shares your `$HOME` and display):
 
 ```bash
-npm install          # installs @tauri-apps/cli only
-npm run dev          # tauri dev — launches the native window
-npm run build        # tauri build — produces a native binary/installer
+distrobox create --name mp-dev --image registry.fedoraproject.org/fedora:41 --yes
+distrobox enter mp-dev -- sudo dnf install -y \
+  webkit2gtk4.1-devel openssl-devel curl wget file librsvg2-devel \
+  libappindicator-gtk3-devel alsa-lib-devel gcc gcc-c++ nodejs
+distrobox enter mp-dev -- sudo dnf group install -y "c-development"
 ```
 
-> ⚠️ **Reviewed scaffold, not yet compiled in this environment.** The architecture and
-> logic are the deliverable; `cargo build` may need minor dependency-version nits
-> aligned (noted inline in `library.rs`). Run `npm run dev` and I'll fix any that surface.
+Rust lives in `~/.cargo` (shared home), so it's available inside the container too.
+
+## Build & run
+
+```bash
+npm install          # installs @tauri-apps/cli (host is fine)
+
+# Inside the dev container:
+distrobox enter mp-dev -- bash -lc 'source ~/.cargo/env; \
+  cd ~/Desktop/"for claude"/music-player/src-tauri && cargo build'
+
+# Launch the native window (embeds the static frontend — no dev server needed):
+distrobox enter mp-dev -- \
+  "$HOME/Desktop/for claude/music-player/src-tauri/target/debug/music-player"
+```
+
+For hot-reload development instead of a one-off binary:
+`distrobox enter mp-dev -- bash -lc 'source ~/.cargo/env; cd ~/Desktop/"for claude"/music-player && npm run dev'`.
+
+> ✅ **Verified**: builds clean inside a Fedora 41 distrobox (rodio 0.19 / lofty 0.21 /
+> tauri 2.11), `cargo build` → exit 0, all runtime libraries resolve.
 
 ## Roadmap (opt-in, in order)
 
