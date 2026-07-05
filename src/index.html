@@ -17,12 +17,15 @@
       </nav>
 
       <div class="folder-add">
-        <label>Add music folder</label>
-        <div class="row">
-          <input id="folderInput" type="text" placeholder="/path/to/music" spellcheck="false">
-          <button id="scanBtn" class="btn">Scan</button>
-        </div>
-        <p class="hint">Native folder picker = roadmap #1 (tauri-plugin-dialog).</p>
+        <label>Music folders</label>
+        <button id="pickBtn" class="btn btn-block">📂 Add folder…</button>
+        <details class="manual">
+          <summary>or enter a path manually</summary>
+          <div class="row">
+            <input id="folderInput" type="text" placeholder="/path/to/music" spellcheck="false">
+            <button id="scanBtn" class="btn">Scan</button>
+          </div>
+        </details>
       </div>
 
       <div class="playlists-list" id="playlistsList"></div>

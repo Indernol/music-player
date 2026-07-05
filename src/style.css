@@ -68,6 +68,11 @@ input:focus { border-color: var(--accent); }
   padding: 8px 12px; font-weight: 700; cursor: pointer; font-size: 13px;
 }
 .btn:hover { background: var(--accent-2); }
+.btn-block { width: 100%; margin-top: 6px; }
+.manual { margin-top: 8px; }
+.manual summary { font-size: 11px; color: var(--tx-3); cursor: pointer; user-select: none; list-style: none; }
+.manual summary:hover { color: var(--tx-2); }
+.manual .row { margin-top: 6px; }
 
 /* ─── Main ─── */
 .main { display: flex; flex-direction: column; min-height: 0; }

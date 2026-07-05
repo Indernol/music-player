@@ -44,6 +44,7 @@ fn set_volume(level: f32, state: State<AppState>) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             audio: AudioController::new(),
         })

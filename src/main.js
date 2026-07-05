@@ -144,19 +144,46 @@ async function next() { if (current < queue.length - 1) { current++; await playC
 async function prev() { if (current > 0) { current--; await playCurrent(); } }
 
 // ─── Library scan ───
-async function scanFolder() {
+async function scanPath(path, { merge = false } = {}) {
+  if (!path) return;
+  const tracks = await invoke("scan", { paths: [path] });
+  const found = Array.isArray(tracks) ? tracks : [];
+  if (merge) {
+    const seen = new Set(library.map(t => t.path));
+    library = library.concat(found.filter(t => !seen.has(t.path)));
+  } else {
+    library = found;
+  }
+  setActiveNav("library");
+  renderTracks(library);
+}
+
+// Native folder picker (tauri-plugin-dialog, called directly via core.invoke so
+// no bundler/plugin-JS is needed). Falls back to the manual input in a browser.
+async function pickFolder() {
+  if (!IS_NATIVE) { document.querySelector(".manual")?.setAttribute("open", ""); $("#folderInput")?.focus(); return; }
+  const btn = $("#pickBtn");
+  btn.disabled = true;
+  try {
+    const path = await T.core.invoke("plugin:dialog|open", {
+      options: { directory: true, multiple: false, title: "Choose a music folder" },
+    });
+    if (path) await scanPath(path, { merge: true });
+  } catch (e) {
+    console.error("[dialog] open failed:", e);
+    document.querySelector(".manual")?.setAttribute("open", ""); // reveal manual fallback
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function scanFromInput() {
   const path = $("#folderInput").value.trim();
   if (!path) return;
   $("#scanBtn").disabled = true;
   $("#scanBtn").textContent = "…";
-  try {
-    const tracks = await invoke("scan", { paths: [path] });
-    library = Array.isArray(tracks) ? tracks : [];
-    renderTracks(library);
-  } finally {
-    $("#scanBtn").disabled = false;
-    $("#scanBtn").textContent = "Scan";
-  }
+  try { await scanPath(path, { merge: true }); }
+  finally { $("#scanBtn").disabled = false; $("#scanBtn").textContent = "Scan"; }
 }
 
 function setActiveNav(v) {
@@ -176,8 +203,9 @@ function init() {
     $(".main").prepend(banner);
   }
 
-  $("#scanBtn").addEventListener("click", scanFolder);
-  $("#folderInput").addEventListener("keydown", e => { if (e.key === "Enter") scanFolder(); });
+  $("#pickBtn").addEventListener("click", pickFolder);
+  $("#scanBtn").addEventListener("click", scanFromInput);
+  $("#folderInput").addEventListener("keydown", e => { if (e.key === "Enter") scanFromInput(); });
   $("#playBtn").addEventListener("click", togglePlay);
   $("#nextBtn").addEventListener("click", next);
   $("#prevBtn").addEventListener("click", prev);
