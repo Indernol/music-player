@@ -22,6 +22,7 @@ rodio = "0.19"
 # at the top of src/library.rs (documented there).
 lofty = "0.21"
 walkdir = "2"
+base64 = "0.22"
 
 [profile.release]
 opt-level = 3

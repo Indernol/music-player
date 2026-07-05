@@ -57,6 +57,35 @@ function gainFor(t) { if (!normalize) return 1.0; const g = t && Number(t.gain);
 function artColor(s) { let h = 0; for (const c of String(s || "?")) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${h % 360} 42% 40%)`; }
 function artInitial(t) { const s = (t.album || t.title || "?").trim(); return (s[0] || "♪").toUpperCase(); }
 
+// ─── Album art (embedded cover, deduped per album, lazily fetched) ───
+const coverCache = new Map(); // albumKey -> dataURL | "" (none/pending)
+function albumKey(t) { return `${t.artist}|||${t.album}`; }
+function setArtImg(el, url) { el.style.backgroundImage = `url("${url}")`; el.textContent = ""; el.classList.add("has-cover"); }
+function setArtPlaceholder(el, t) { el.classList.remove("has-cover"); el.style.backgroundImage = ""; el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t); el.dataset.album = albumKey(t); }
+function artCell(t) {
+  const k = albumKey(t);
+  const cov = S().showArt ? coverCache.get(k) : "";
+  if (cov) return `<div class="art has-cover" data-album="${esc(k)}" style="background-image:url('${cov}')"></div>`;
+  return `<div class="art" data-album="${esc(k)}" style="background:${artColor(t.artist + t.album)}">${esc(artInitial(t))}</div>`;
+}
+function applyCover(key, url) {
+  if (!url) return;
+  document.querySelectorAll("#trackList .art").forEach(el => { if (el.dataset.album === key) setArtImg(el, url); });
+  const np = $("#npArt"); if (np && np.dataset.album === key) setArtImg(np, url);
+}
+function fetchCover(t) {
+  const k = albumKey(t);
+  if (coverCache.has(k)) { const u = coverCache.get(k); if (u) applyCover(k, u); return; }
+  coverCache.set(k, ""); // reserve
+  invoke("cover", { path: t.path }).then(url => { coverCache.set(k, url || ""); if (url) applyCover(k, url); }).catch(() => {});
+}
+function hydrateCovers() {
+  if (!S().showArt) return;
+  const seen = new Set();
+  for (const t of view) { const k = albumKey(t); if (!seen.has(k)) { seen.add(k); fetchCover(t); } }
+}
+function refreshView() { if (active.type === "source") openSource(active.id); else if (active.type === "playlist") openPlaylist(active.id); else showLibrary(); }
+
 function flash(msg) {
   let el = $("#toast");
   if (!el) { el = document.createElement("div"); el.id = "toast"; el.className = "toast"; document.body.appendChild(el); }
@@ -81,7 +110,7 @@ function renderTracks(list) {
     const isNow = nowPath === t.path;
     return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
       <div class="tk-idx"><span class="idx-num">${i + 1}</span><span class="idx-play">▶</span>${isNow && playing ? `<span class="eq"><i></i><i></i><i></i></span>` : ""}</div>
-      <div class="art" style="background:${artColor(t.artist + t.album)}">${esc(artInitial(t))}</div>
+      ${artCell(t)}
       <div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
       <div class="album">${esc(t.album)}</div>
       <span class="dur">${fmtDur(t.duration_secs)}</span>
@@ -101,6 +130,7 @@ function renderTracks(list) {
     ensureSelected(view[idx]?.path, idx);
     const r = btn.getBoundingClientRect(); openContextMenu(r.left, r.bottom);
   }));
+  hydrateCovers();
 }
 
 function updateCount() {
@@ -251,7 +281,7 @@ function updateNowPlaying(t, path) {
   $("#nowTitle").textContent = t ? t.title : (path || "").split("/").pop();
   $("#nowSub").textContent = t ? `${t.artist} — ${t.album}` : "";
   const art = $("#npArt");
-  if (t) { art.textContent = artInitial(t); art.style.background = artColor(t.artist + t.album); }
+  if (t) { setArtPlaceholder(art, t); if (S().showArt) { const cov = coverCache.get(albumKey(t)); if (cov) setArtImg(art, cov); else fetchCover(t); } }
   const dur = t?.duration_secs || 0;
   $("#totTime").textContent = fmtDur(dur);
   $("#seek").max = dur > 0 ? dur : 1; $("#seek").value = 0; $("#curTime").textContent = "0:00";
@@ -359,19 +389,15 @@ async function rescanAll() {
   flash(total ? `${total} new song${total === 1 ? "" : "s"} found` : "Library up to date");
 }
 async function pickFolder() {
-  if (!IS_NATIVE) { document.querySelector(".manual")?.setAttribute("open", ""); $("#folderInput")?.focus(); return; }
+  if (!IS_NATIVE) { const p = prompt("Folder path:"); if (p && p.trim()) await addSource(p.trim()); return; }
   const btn = $("#pickBtn"); btn.disabled = true;
   try {
     const path = await T.core.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Choose a music folder" } });
     if (path) await addSource(path);
-  } catch (e) { console.error("[dialog]", e); document.querySelector(".manual")?.setAttribute("open", ""); }
+  } catch (e) { console.error("[dialog]", e); const p = prompt("Couldn't open the picker. Folder path:"); if (p && p.trim()) await addSource(p.trim()); }
   finally { btn.disabled = false; }
 }
-async function scanFromInput() {
-  const path = $("#folderInput").value.trim(); if (!path) return;
-  $("#scanBtn").disabled = true; $("#scanBtn").textContent = "…";
-  try { await addSource(path); $("#folderInput").value = ""; } finally { $("#scanBtn").disabled = false; $("#scanBtn").textContent = "Add"; }
-}
+function addManual() { const p = prompt("Folder path:"); if (p && p.trim()) addSource(p.trim()); }
 
 // ─── Settings ───
 function applyAccent() {
@@ -381,6 +407,8 @@ function applyAccent() {
 }
 function applySettings() {
   applyAccent();
+  document.body.classList.toggle("compact", S().compactRows);
+  document.body.classList.toggle("no-anim", !S().animations);
   normalize = S().normalizeDefault; $("#normChk").checked = normalize;
   shuffle = S().shuffleDefault; $("#shuffleBtn").classList.toggle("active", shuffle);
   const v = S().defaultVolume; $("#volume").value = v; invoke("set_volume", { level: v / 100 });
@@ -391,6 +419,9 @@ function openSettings() {
     <div class="set-group"><div class="set-title">Appearance</div>
       <div class="set-row"><label>Accent color</label>
         <div class="swatches">${Object.entries(SETTINGS.ACCENTS).map(([k, v]) => `<button class="swatch ${s.accent === k ? "on" : ""}" data-accent="${k}" style="background:${v[0]};color:${v[0]}" title="${k}"></button>`).join("")}</div></div>
+      <div class="set-row"><label>Show album art</label><input type="checkbox" id="setArt" ${s.showArt ? "checked" : ""}></div>
+      <div class="set-row"><label>Compact rows</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
+      <div class="set-row"><label>Animations</label><input type="checkbox" id="setAnim" ${s.animations ? "checked" : ""}></div>
     </div>
     <div class="set-group"><div class="set-title">Playback</div>
       <div class="set-row"><label>Default volume</label><input type="range" id="setVol" min="0" max="100" value="${s.defaultVolume}"></div>
@@ -404,15 +435,20 @@ function openSettings() {
       <div class="set-row"><label>Show what I'm listening to</label><input type="checkbox" id="setRpc" ${s.rpcEnabled ? "checked" : ""}></div>
       <div class="set-row"><label>Discord Application ID</label><input type="text" id="setRpcId" class="text-in" placeholder="Discord app client id" value="${esc(s.rpcClientId)}"></div>
       <div class="set-hint">Create an app at <b>discord.com/developers</b> → copy its <b>Application ID</b>. Requires the Discord desktop app running.</div>
-    </div>`;
+    </div>
+    <div class="set-actions"><button id="setReset" class="btn-line">↺ Reset to defaults</button></div>`;
   const body = $("#settingsBody");
   body.querySelectorAll("[data-accent]").forEach(b => b.addEventListener("click", () => { SETTINGS.setSetting("accent", b.dataset.accent); applyAccent(); body.querySelectorAll(".swatch").forEach(x => x.classList.toggle("on", x === b)); }));
+  $("#setArt").addEventListener("change", e => { SETTINGS.setSetting("showArt", e.target.checked); refreshView(); });
+  $("#setCompact").addEventListener("change", e => { SETTINGS.setSetting("compactRows", e.target.checked); document.body.classList.toggle("compact", e.target.checked); });
+  $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
   $("#setVol").addEventListener("change", e => { SETTINGS.setSetting("defaultVolume", Number(e.target.value)); $("#volume").value = e.target.value; invoke("set_volume", { level: Number(e.target.value) / 100 }); });
   $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; $("#normChk").checked = normalize; });
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); });
   $("#setNotify").addEventListener("change", e => SETTINGS.setSetting("notifyOnChange", e.target.checked));
   $("#setRpc").addEventListener("change", e => { SETTINGS.setSetting("rpcEnabled", e.target.checked); if (e.target.checked) updateRPC(trackByPath(queue[curIndex]), playing); else clearRPC(); });
   $("#setRpcId").addEventListener("change", e => { SETTINGS.setSetting("rpcClientId", e.target.value.trim()); if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing); });
+  $("#setReset").addEventListener("click", () => { SETTINGS.resetSettings(); applySettings(); refreshView(); openSettings(); flash("Settings reset to defaults"); });
   $("#settingsModal").hidden = false;
 }
 
@@ -430,9 +466,8 @@ async function init() {
   }
 
   $("#pickBtn").addEventListener("click", pickFolder);
+  $("#manualBtn").addEventListener("click", addManual);
   $("#rescanBtn").addEventListener("click", rescanAll);
-  $("#scanBtn").addEventListener("click", scanFromInput);
-  $("#folderInput").addEventListener("keydown", e => { if (e.key === "Enter") scanFromInput(); });
   $("#navLibrary").addEventListener("click", showLibrary);
 
   $("#playBtn").addEventListener("click", togglePlay);

@@ -7,9 +7,21 @@ use walkdir::WalkDir;
 // lofty imports (VERSION-SENSITIVE — see Cargo.toml note). The prelude brings the
 // `Accessor` (title/artist/album) and `AudioFile`/`TaggedFileExt` (properties/tags)
 // traits into scope. If cargo build complains about these, align lofty's version.
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use lofty::prelude::*;
 use lofty::read_from_path;
 use lofty::tag::ItemKey;
+
+/// Embedded cover art for a single track, as a `data:` URL (or None if the file
+/// has no embedded picture). Called lazily by the frontend, deduped per album.
+#[tauri::command]
+pub fn cover(path: String) -> Option<String> {
+    let tagged = read_from_path(&path).ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    let pic = tag.pictures().first()?;
+    let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
+    Some(format!("data:{};base64,{}", mime, STANDARD.encode(pic.data())))
+}
 
 #[derive(Serialize, Clone)]
 pub struct Track {

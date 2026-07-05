@@ -216,3 +216,19 @@ input:focus { border-color: var(--accent); }
 }
 .list-head .lh-idx { text-align: center; }
 .list-head .lh-dur { text-align: left; }
+
+/* ─── Album art covers + density + settings additions ─── */
+.art.has-cover, .np-art.has-cover { background-size: cover !important; background-position: center; color: transparent; }
+.btn-line { width: 100%; background: transparent; border: 1px solid var(--bd); color: var(--tx-2); padding: 8px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; }
+.btn-line:hover { border-color: var(--bd-2); color: var(--tx-1); }
+.set-actions { padding-top: 14px; }
+.set-actions .btn-line { color: var(--tx-2); }
+
+/* Compact density */
+body.compact .track { padding: 3px 12px; }
+body.compact .art { width: 32px; height: 32px; font-size: 13px; }
+body.compact .list-head { padding-bottom: 5px; }
+
+/* Reduce motion */
+body.no-anim .eq i { animation: none; height: 65%; }
+body.no-anim * { transition: none !important; }

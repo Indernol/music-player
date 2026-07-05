@@ -69,6 +69,7 @@ fn main() {
         .manage(rpc::RpcState::default())
         .invoke_handler(tauri::generate_handler![
             scan, play, preload, pause, resume, stop, set_volume, seek, status,
+            library::cover,
             store::store_load, store::store_save,
             rpc::rpc_update, rpc::rpc_clear
         ])

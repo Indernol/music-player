@@ -2246,6 +2246,7 @@ dependencies = [
 name = "music-player"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "discord-rich-presence",
  "lofty",
  "rodio",

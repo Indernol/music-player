@@ -15,6 +15,9 @@ export const ACCENTS = {
 
 const DEFAULTS = {
   accent: "violet",
+  showArt: true,
+  compactRows: false,
+  animations: true,
   defaultVolume: 80,
   normalizeDefault: true,
   shuffleDefault: false,
@@ -24,6 +27,12 @@ const DEFAULTS = {
 };
 
 let _s = { ...DEFAULTS };
+
+export function resetSettings() {
+  _s = { ...DEFAULTS };
+  storeSave("settings", JSON.stringify(_s));
+  return _s;
+}
 
 export async function loadSettings() {
   const raw = await storeLoad("settings");
