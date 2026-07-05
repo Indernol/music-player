@@ -12,12 +12,15 @@
       <div class="brand">🎵 <span>Music Player</span></div>
 
       <nav class="nav">
-        <button class="nav-item active" data-view="library">📚 Library</button>
-        <button class="nav-item" data-view="playlists">🎧 Playlists</button>
+        <button class="nav-item active" data-view="library"><span class="ni-ico">📚</span> Library</button>
+        <button class="nav-item" data-view="playlists"><span class="ni-ico">🎧</span> Playlists</button>
       </nav>
 
       <div class="folder-add">
-        <label>Music folders</label>
+        <div class="fa-head">
+          <label>Music folders</label>
+          <button id="rescanBtn" class="icon-btn" title="Rescan folders">⟳</button>
+        </div>
         <button id="pickBtn" class="btn btn-block">📂 Add folder…</button>
         <details class="manual">
           <summary>or enter a path manually</summary>
@@ -28,24 +31,23 @@
         </details>
       </div>
 
+      <div class="section-label">Your playlists</div>
       <div class="playlists-list" id="playlistsList"></div>
+
+      <button id="settingsBtn" class="settings-btn">⚙ Settings</button>
     </aside>
 
     <main class="main">
       <header class="topbar">
-        <input id="search" type="search" placeholder="Search title / artist / album…" autocomplete="off">
+        <div class="search-wrap">
+          <span class="search-ico">🔍</span>
+          <input id="search" type="search" placeholder="Search title, artist, album…" autocomplete="off">
+        </div>
         <span id="count" class="count"></span>
       </header>
 
-      <div id="selBar" class="sel-bar" hidden>
-        <span id="selCount" class="sel-count">0 selected</span>
-        <select id="selPlaylist" class="mp-select"></select>
-        <button id="selAdd" class="btn btn-sm">Add to playlist</button>
-        <button id="selClear" class="btn-ghost">Clear</button>
-      </div>
-
       <section id="trackList" class="tracklist">
-        <div class="empty">Add a music folder to start — your local files, played by a native engine.</div>
+        <div class="empty"><div class="empty-ico">🎵</div>Add a music folder to start — your local files, played by a native engine.</div>
       </section>
     </main>
   </div>
@@ -53,8 +55,11 @@
   <footer class="player">
     <div class="player-main">
       <div class="now">
-        <div class="now-title" id="nowTitle">Nothing playing</div>
-        <div class="now-sub" id="nowSub"></div>
+        <div class="np-art" id="npArt">♪</div>
+        <div class="np-txt">
+          <div class="now-title" id="nowTitle">Nothing playing</div>
+          <div class="now-sub" id="nowSub"></div>
+        </div>
       </div>
       <div class="controls">
         <button id="shuffleBtn" class="ctrl" title="Shuffle">🔀</button>
@@ -63,7 +68,7 @@
         <button id="nextBtn" class="ctrl" title="Next">⏭</button>
       </div>
       <div class="volume">
-        <label class="norm" title="Normalize loudness across tracks (uses ReplayGain tags)">
+        <label class="norm" title="Normalize loudness across tracks (ReplayGain tags)">
           <input type="checkbox" id="normChk" checked> NORM
         </label>
         <span>🔊</span>
@@ -76,6 +81,20 @@
       <span id="totTime" class="time">0:00</span>
     </div>
   </footer>
+
+  <!-- Right-click context menu (Spotify-style) -->
+  <div id="ctxMenu" class="ctx-menu" hidden></div>
+
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button id="settingsClose" class="icon-btn" title="Close">✕</button>
+      </div>
+      <div id="settingsBody" class="modal-body"></div>
+    </div>
+  </div>
 
   <script type="module" src="main.js"></script>
 </body>

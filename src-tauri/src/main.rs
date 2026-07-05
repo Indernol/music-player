@@ -3,7 +3,8 @@
 
 mod audio;
 mod library;
-mod playlists;
+mod rpc;
+mod store;
 
 use audio::AudioController;
 use library::Track;
@@ -61,12 +62,15 @@ fn status(state: State<AppState>) -> audio::PlaybackStatus {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState {
             audio: AudioController::new(),
         })
+        .manage(rpc::RpcState::default())
         .invoke_handler(tauri::generate_handler![
             scan, play, preload, pause, resume, stop, set_volume, seek, status,
-            playlists::load_playlists, playlists::save_playlists
+            store::store_load, store::store_save,
+            rpc::rpc_update, rpc::rpc_clear
         ])
         .run(tauri::generate_context!())
         .expect("error while running Music Player");
