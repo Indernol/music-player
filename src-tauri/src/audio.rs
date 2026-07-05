@@ -1,37 +1,44 @@
 //! Native audio engine.
 //!
-//! `rodio`'s `OutputStream` is `!Send`, so it can't live in Tauri's shared state.
-//! The correct pattern (and what we do here) is a dedicated audio thread that owns
-//! the stream + sink, driven by an mpsc command channel. `AudioController` only
-//! holds the `Sender` (wrapped in a `Mutex` so the whole struct is `Send + Sync`
-//! and can be `.manage()`d by Tauri).
+//! `rodio`'s `OutputStream` is `!Send`, so the stream lives in a dedicated thread
+//! that also creates the sinks (creating a sink needs the stream handle, which is
+//! `!Send`). The current `Sink` is `Send + Sync`, so we share it back through an
+//! `Arc<Mutex<Option<Sink>>>`: the thread swaps in a fresh sink on Play/Stop, while
+//! the controller reads/pauses/seeks it directly (no round-trip needed for those).
 
 use rodio::{Decoder, OutputStream, Sink};
+use serde::Serialize;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::mpsc::{channel, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
-pub enum AudioCmd {
-    Play(String), // absolute file path
-    Pause,
-    Resume,
+// Only Play/Stop go through the channel — they need the (!Send) stream handle.
+enum AudioCmd {
+    Play(String),
     Stop,
-    Volume(f32), // 0.0 ..= 1.0 (rodio allows >1.0 for gain)
+}
+
+#[derive(Serialize)]
+pub struct PlaybackStatus {
+    pub position: f64, // seconds into the current track
+    pub finished: bool, // sink has nothing left to play
 }
 
 pub struct AudioController {
     tx: Mutex<Sender<AudioCmd>>,
+    sink: Arc<Mutex<Option<Sink>>>,
 }
 
 impl AudioController {
     pub fn new() -> Self {
         let (tx, rx) = channel::<AudioCmd>();
+        let sink: Arc<Mutex<Option<Sink>>> = Arc::new(Mutex::new(None));
+        let sink_t = sink.clone();
 
         thread::spawn(move || {
-            // The stream handle must stay alive for playback; created inside the
-            // thread because it is not `Send`.
             let (_stream, handle) = match OutputStream::try_default() {
                 Ok(v) => v,
                 Err(e) => {
@@ -39,67 +46,84 @@ impl AudioController {
                     return;
                 }
             };
-            let mut sink = Sink::try_new(&handle).expect("failed to create audio sink");
+            // Start with an empty, ready sink.
+            if let Ok(s) = Sink::try_new(&handle) {
+                *sink_t.lock().unwrap() = Some(s);
+            }
 
             while let Ok(cmd) = rx.recv() {
                 match cmd {
-                    AudioCmd::Play(path) => {
-                        // Fresh sink per track: dropping the old one stops playback cleanly.
-                        sink = match Sink::try_new(&handle) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                eprintln!("[audio] sink error: {e}");
-                                continue;
+                    AudioCmd::Play(path) => match Sink::try_new(&handle) {
+                        Ok(new_sink) => {
+                            let loaded = File::open(&path)
+                                .map(BufReader::new)
+                                .map_err(|e| e.to_string())
+                                .and_then(|r| Decoder::new(r).map_err(|e| e.to_string()));
+                            match loaded {
+                                Ok(source) => {
+                                    new_sink.append(source);
+                                    new_sink.play();
+                                    *sink_t.lock().unwrap() = Some(new_sink);
+                                }
+                                Err(e) => eprintln!("[audio] cannot play {path}: {e}"),
                             }
-                        };
-                        let opened = File::open(&path)
-                            .map(BufReader::new)
-                            .map_err(|e| e.to_string())
-                            .and_then(|r| Decoder::new(r).map_err(|e| e.to_string()));
-                        match opened {
-                            Ok(source) => {
-                                sink.append(source);
-                                sink.play();
-                            }
-                            Err(e) => eprintln!("[audio] cannot play {path}: {e}"),
                         }
-                    }
-                    AudioCmd::Pause => sink.pause(),
-                    AudioCmd::Resume => sink.play(),
+                        Err(e) => eprintln!("[audio] sink error: {e}"),
+                    },
                     AudioCmd::Stop => {
-                        // Replace with an empty sink → stops immediately.
                         if let Ok(s) = Sink::try_new(&handle) {
-                            sink = s;
+                            *sink_t.lock().unwrap() = Some(s);
                         }
                     }
-                    AudioCmd::Volume(v) => sink.set_volume(v.clamp(0.0, 2.0)),
                 }
             }
         });
 
-        AudioController { tx: Mutex::new(tx) }
-    }
-
-    fn send(&self, cmd: AudioCmd) {
-        if let Ok(tx) = self.tx.lock() {
-            let _ = tx.send(cmd);
+        AudioController {
+            tx: Mutex::new(tx),
+            sink,
         }
     }
 
+    fn with_sink<R>(&self, f: impl FnOnce(&Sink) -> R) -> Option<R> {
+        self.sink.lock().unwrap().as_ref().map(f)
+    }
+
     pub fn play(&self, path: String) {
-        self.send(AudioCmd::Play(path));
-    }
-    pub fn pause(&self) {
-        self.send(AudioCmd::Pause);
-    }
-    pub fn resume(&self) {
-        self.send(AudioCmd::Resume);
+        if let Ok(tx) = self.tx.lock() {
+            let _ = tx.send(AudioCmd::Play(path));
+        }
     }
     pub fn stop(&self) {
-        self.send(AudioCmd::Stop);
+        if let Ok(tx) = self.tx.lock() {
+            let _ = tx.send(AudioCmd::Stop);
+        }
+    }
+    pub fn pause(&self) {
+        self.with_sink(|s| s.pause());
+    }
+    pub fn resume(&self) {
+        self.with_sink(|s| s.play());
     }
     pub fn set_volume(&self, level: f32) {
-        self.send(AudioCmd::Volume(level));
+        self.with_sink(|s| s.set_volume(level.clamp(0.0, 2.0)));
+    }
+    pub fn seek(&self, secs: f64) {
+        self.with_sink(|s| {
+            let _ = s.try_seek(Duration::from_secs_f64(secs.max(0.0)));
+        });
+    }
+    pub fn status(&self) -> PlaybackStatus {
+        match self.sink.lock().unwrap().as_ref() {
+            Some(s) => PlaybackStatus {
+                position: s.get_pos().as_secs_f64(),
+                finished: s.empty(),
+            },
+            None => PlaybackStatus {
+                position: 0.0,
+                finished: true,
+            },
+        }
     }
 }
 

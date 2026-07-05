@@ -42,6 +42,16 @@ fn set_volume(level: f32, state: State<AppState>) {
     state.audio.set_volume(level);
 }
 
+#[tauri::command]
+fn seek(secs: f64, state: State<AppState>) {
+    state.audio.seek(secs);
+}
+
+#[tauri::command]
+fn status(state: State<AppState>) -> audio::PlaybackStatus {
+    state.audio.status()
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -49,7 +59,7 @@ fn main() {
             audio: AudioController::new(),
         })
         .invoke_handler(tauri::generate_handler![
-            scan, play, pause, resume, stop, set_volume
+            scan, play, pause, resume, stop, set_volume, seek, status
         ])
         .run(tauri::generate_context!())
         .expect("error while running Music Player");

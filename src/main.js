@@ -16,28 +16,42 @@ const MOCK_TRACKS = [
 
 async function invoke(cmd, args) {
   if (IS_NATIVE) return T.core.invoke(cmd, args);
-  // Browser mock — no audio, just UI feedback.
   if (cmd === "scan") return MOCK_TRACKS;
-  console.info(`[mock] ${cmd}`, args || "");
+  if (cmd === "status") return { position: 0, finished: false };
   return null;
 }
 
 // ─── State ───
 let library = [];
-let view = [];        // filtered library currently shown
-let queue = [];       // paths in play order
-let current = -1;     // index into queue
+let view = [];               // filtered library currently shown
+let queue = [];              // paths in play order
+let current = -1;            // index into queue
 let playing = false;
+let shuffle = false;
+let history = [];            // played indices, for prev during shuffle
+let trackStartedAt = 0;      // ms timestamp when the current track started
+let lastPos = 0;             // last polled position (s)
+let seeking = false;         // user is dragging the seek bar
+const selected = new Set();  // selected track paths (multi-select)
 
 const $ = (s) => document.querySelector(s);
 
-// ─── Rendering ───
-function fmtDur(s) {
-  if (!s) return "—";
-  const m = Math.floor(s / 60), sec = String(s % 60).padStart(2, "0");
-  return `${m}:${sec}`;
+// ─── helpers ───
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function escAttr(s) { return esc(s); }
+function fmtDur(s) { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), x = String(s % 60).padStart(2, "0"); return `${m}:${x}`; }
+function curTrack() { const p = queue[current]; return library.find(t => t.path === p) || view.find(t => t.path === p) || null; }
+
+function flash(msg) {
+  let el = $("#toast");
+  if (!el) { el = document.createElement("div"); el.id = "toast"; el.className = "toast"; document.body.appendChild(el); }
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 1800);
 }
 
+// ─── Track list ───
 function renderTracks(list) {
   view = list;
   const host = $("#trackList");
@@ -48,28 +62,76 @@ function renderTracks(list) {
   }
   host.innerHTML = list.map((t, i) => {
     const isNow = queue[current] === t.path;
-    return `<div class="track ${isNow ? "playing" : ""}" data-path="${escAttr(t.path)}" data-idx="${i}">
+    const sel = selected.has(t.path);
+    return `<div class="track ${isNow ? "playing" : ""} ${sel ? "selected" : ""}" data-path="${escAttr(t.path)}" data-idx="${i}">
+      <input type="checkbox" class="sel-cb" ${sel ? "checked" : ""} aria-label="Select">
       <span class="idx">${isNow && playing ? "♪" : i + 1}</span>
       <div class="meta">
         <div class="t">${esc(t.title)}</div>
         <div class="s">${esc(t.artist)} — ${esc(t.album)}</div>
       </div>
       <span class="dur">${fmtDur(t.duration_secs)}</span>
-      <button class="add" title="Add to playlist" data-add="${escAttr(t.path)}">＋</button>
     </div>`;
   }).join("");
 
   host.querySelectorAll(".track").forEach(el => {
     el.addEventListener("click", (e) => {
-      if (e.target.dataset.add !== undefined) return;
+      if (e.target.classList.contains("sel-cb")) return; // checkbox handles itself
       playFrom(Number(el.dataset.idx));
     });
   });
-  host.querySelectorAll("[data-add]").forEach(btn => {
-    btn.addEventListener("click", (e) => { e.stopPropagation(); addToPlaylistPrompt(btn.dataset.add); });
+  host.querySelectorAll(".sel-cb").forEach(cb => {
+    cb.addEventListener("click", (e) => e.stopPropagation());
+    cb.addEventListener("change", (e) => {
+      const row = e.target.closest(".track");
+      const path = row.dataset.path;
+      if (e.target.checked) selected.add(path); else selected.delete(path);
+      row.classList.toggle("selected", e.target.checked);
+      updateSelBar();
+    });
   });
 }
 
+// ─── Multi-select bar ───
+function updateSelBar() {
+  const bar = $("#selBar");
+  const n = selected.size;
+  if (!n) { bar.hidden = true; return; }
+  bar.hidden = false;
+  $("#selCount").textContent = `${n} selected`;
+  const sel = $("#selPlaylist");
+  const keep = sel.value;
+  const pls = PL.getPlaylists();
+  sel.innerHTML = `<option value="">Choose playlist…</option>`
+    + pls.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")
+    + `<option value="__new">➕ New playlist…</option>`;
+  if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
+
+function wireSelBar() {
+  $("#selPlaylist").addEventListener("change", (e) => {
+    if (e.target.value === "__new") {
+      const name = prompt("New playlist name:");
+      e.target.value = "";
+      if (name) { const pl = PL.createPlaylist(name); renderPlaylists(); updateSelBar(); $("#selPlaylist").value = pl.id; }
+    }
+  });
+  $("#selAdd").addEventListener("click", () => {
+    const id = $("#selPlaylist").value;
+    if (!id || id === "__new") { flash("Pick a playlist first"); return; }
+    let added = 0;
+    for (const path of selected) { PL.addToPlaylist(id, path); added++; }
+    const plName = PL.getPlaylists().find(p => p.id === id)?.name || "playlist";
+    selected.clear();
+    renderPlaylists();
+    renderTracks(view);
+    updateSelBar();
+    flash(`Added ${added} track${added === 1 ? "" : "s"} to “${plName}”`);
+  });
+  $("#selClear").addEventListener("click", () => { selected.clear(); renderTracks(view); updateSelBar(); });
+}
+
+// ─── Playlists sidebar ───
 function renderPlaylists() {
   const host = $("#playlistsList");
   const pls = PL.getPlaylists();
@@ -91,7 +153,7 @@ function renderPlaylists() {
   host.querySelectorAll("[data-del]").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (confirm("Delete this playlist?")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); }
+      if (confirm("Delete this playlist?")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); updateSelBar(); }
     });
   });
 }
@@ -105,31 +167,30 @@ function openPlaylist(id) {
   renderTracks(tracks);
 }
 
-function addToPlaylistPrompt(path) {
-  const pls = PL.getPlaylists();
-  if (!pls.length) { alert("Create a playlist first (sidebar → New playlist)."); return; }
-  const names = pls.map((p, i) => `${i + 1}. ${p.name}`).join("\n");
-  const pick = prompt(`Add to which playlist?\n${names}`);
-  const idx = Number(pick) - 1;
-  if (pls[idx]) { PL.addToPlaylist(pls[idx].id, path); renderPlaylists(); }
-}
-
 // ─── Playback ───
 async function playFrom(viewIdx) {
   queue = view.map(t => t.path);
-  current = viewIdx;
-  await playCurrent();
+  history = [];
+  await playIndex(viewIdx);
 }
 
-async function playCurrent() {
+async function playIndex(i) {
+  if (i < 0 || i >= queue.length) return;
+  current = i;
   const path = queue[current];
-  if (!path) return;
-  const t = library.find(x => x.path === path) || view.find(x => x.path === path);
+  const t = curTrack();
   await invoke("play", { path });
   playing = true;
+  trackStartedAt = Date.now();
+  lastPos = 0;
   $("#playBtn").textContent = "⏸";
   $("#nowTitle").textContent = t ? t.title : path.split("/").pop();
   $("#nowSub").textContent = t ? `${t.artist} — ${t.album}` : "";
+  const dur = t?.duration_secs || 0;
+  $("#totTime").textContent = fmtDur(dur);
+  $("#seek").max = dur > 0 ? dur : 1;
+  $("#seek").value = 0;
+  $("#curTime").textContent = "0:00";
   renderTracks(view);
 }
 
@@ -140,8 +201,48 @@ async function togglePlay() {
   renderTracks(view);
 }
 
-async function next() { if (current < queue.length - 1) { current++; await playCurrent(); } }
-async function prev() { if (current > 0) { current--; await playCurrent(); } }
+function nextIndex() {
+  if (!queue.length) return -1;
+  if (shuffle) {
+    if (queue.length === 1) return current;
+    let r; do { r = Math.floor(Math.random() * queue.length); } while (r === current);
+    return r;
+  }
+  return current + 1 <= queue.length - 1 ? current + 1 : -1;
+}
+
+async function next() {
+  const ni = nextIndex();
+  if (ni < 0) { playing = false; $("#playBtn").textContent = "▶"; return; } // end of linear queue
+  history.push(current);
+  await playIndex(ni);
+}
+
+async function prev() {
+  if (lastPos > 3) { await invoke("seek", { secs: 0 }); lastPos = 0; return; } // restart if >3s in
+  if (history.length) { await playIndex(history.pop()); }
+  else if (current > 0) { await playIndex(current - 1); }
+  else { await invoke("seek", { secs: 0 }); }
+}
+
+// ─── Progress polling (position + auto-advance) ───
+function startPolling() {
+  setInterval(async () => {
+    if (current < 0) return;
+    const st = await invoke("status");
+    if (!st) return;
+    lastPos = st.position || 0;
+    if (!seeking) {
+      $("#seek").value = lastPos;
+      $("#curTime").textContent = fmtDur(lastPos);
+    }
+    // Auto-advance when the track finished (guard against the false "empty" right
+    // after starting: require ≥1.5s of playback before trusting `finished`).
+    if (playing && st.finished && (Date.now() - trackStartedAt) > 1500) {
+      next();
+    }
+  }, 500);
+}
 
 // ─── Library scan ───
 async function scanPath(path, { merge = false } = {}) {
@@ -158,8 +259,7 @@ async function scanPath(path, { merge = false } = {}) {
   renderTracks(library);
 }
 
-// Native folder picker (tauri-plugin-dialog, called directly via core.invoke so
-// no bundler/plugin-JS is needed). Falls back to the manual input in a browser.
+// Native folder picker (tauri-plugin-dialog via core.invoke — no bundler needed).
 async function pickFolder() {
   if (!IS_NATIVE) { document.querySelector(".manual")?.setAttribute("open", ""); $("#folderInput")?.focus(); return; }
   const btn = $("#pickBtn");
@@ -171,7 +271,7 @@ async function pickFolder() {
     if (path) await scanPath(path, { merge: true });
   } catch (e) {
     console.error("[dialog] open failed:", e);
-    document.querySelector(".manual")?.setAttribute("open", ""); // reveal manual fallback
+    document.querySelector(".manual")?.setAttribute("open", "");
   } finally {
     btn.disabled = false;
   }
@@ -190,26 +290,32 @@ function setActiveNav(v) {
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.view === v));
 }
 
-// ─── helpers ───
-function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function escAttr(s) { return esc(s); }
-
 // ─── Wire up ───
 function init() {
   if (!IS_NATIVE) {
     const banner = document.createElement("div");
     banner.className = "mock-banner";
-    banner.textContent = "Browser preview (mock data, no audio). Run `npm run dev` for the native app.";
+    banner.textContent = "Browser preview (mock data, no audio). Run the app for real playback.";
     $(".main").prepend(banner);
   }
 
   $("#pickBtn").addEventListener("click", pickFolder);
   $("#scanBtn").addEventListener("click", scanFromInput);
   $("#folderInput").addEventListener("keydown", e => { if (e.key === "Enter") scanFromInput(); });
+
   $("#playBtn").addEventListener("click", togglePlay);
   $("#nextBtn").addEventListener("click", next);
   $("#prevBtn").addEventListener("click", prev);
+  $("#shuffleBtn").addEventListener("click", () => {
+    shuffle = !shuffle;
+    $("#shuffleBtn").classList.toggle("active", shuffle);
+    flash(shuffle ? "Shuffle on" : "Shuffle off");
+  });
   $("#volume").addEventListener("input", e => invoke("set_volume", { level: Number(e.target.value) / 100 }));
+
+  // Seek bar: preview while dragging, commit on release.
+  $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });
+  $("#seek").addEventListener("change", async () => { await invoke("seek", { secs: Number($("#seek").value) }); seeking = false; });
 
   $("#search").addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();
@@ -222,7 +328,9 @@ function init() {
     if (b.dataset.view === "library") renderTracks(library);
   }));
 
+  wireSelBar();
   renderPlaylists();
+  startPolling();
   if (!IS_NATIVE) { library = MOCK_TRACKS; renderTracks(library); }
 }
 
