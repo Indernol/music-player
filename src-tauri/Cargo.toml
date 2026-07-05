@@ -1,0 +1,25 @@
+[package]
+name = "music-player"
+version = "0.1.0"
+edition = "2021"
+description = "Native local-first music player core"
+default-run = "music-player"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Native audio: decode (mp3/flac/wav/vorbis/…) + output to the system device.
+rodio = "0.19"
+# Tag reading (title/artist/album/duration). NOTE: lofty's module paths are
+# version-sensitive — if cargo build complains, align this version + the imports
+# at the top of src/library.rs (documented there).
+lofty = "0.21"
+walkdir = "2"
+
+[profile.release]
+opt-level = 3
+lto = true

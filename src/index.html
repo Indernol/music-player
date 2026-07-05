@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Music Player</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">🎵 <span>Music Player</span></div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="library">📚 Library</button>
+        <button class="nav-item" data-view="playlists">🎧 Playlists</button>
+      </nav>
+
+      <div class="folder-add">
+        <label>Add music folder</label>
+        <div class="row">
+          <input id="folderInput" type="text" placeholder="/path/to/music" spellcheck="false">
+          <button id="scanBtn" class="btn">Scan</button>
+        </div>
+        <p class="hint">Native folder picker = roadmap #1 (tauri-plugin-dialog).</p>
+      </div>
+
+      <div class="playlists-list" id="playlistsList"></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <input id="search" type="search" placeholder="Search title / artist / album…" autocomplete="off">
+        <span id="count" class="count"></span>
+      </header>
+
+      <section id="trackList" class="tracklist">
+        <div class="empty">Add a music folder to start — your local files, played by a native engine.</div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="player">
+    <div class="now">
+      <div class="now-title" id="nowTitle">Nothing playing</div>
+      <div class="now-sub" id="nowSub"></div>
+    </div>
+    <div class="controls">
+      <button id="prevBtn" class="ctrl" title="Previous">⏮</button>
+      <button id="playBtn" class="ctrl play" title="Play/Pause">▶</button>
+      <button id="nextBtn" class="ctrl" title="Next">⏭</button>
+    </div>
+    <div class="volume">
+      <span>🔊</span>
+      <input id="volume" type="range" min="0" max="100" value="80">
+    </div>
+  </footer>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
