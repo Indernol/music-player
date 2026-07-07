@@ -187,7 +187,10 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
    align-items). In inline text contexts (menus, labels) it needs a nudge. */
 .bic { display: inline-flex; align-items: center; flex-shrink: 0; }
 .bic svg { width: 14px; height: 14px; display: block; }
-.ctx-item .bic, .set-row .bic, label .bic { vertical-align: -0.24em; margin-right: 9px; opacity: .82; }
+/* Inline nudge ONLY for icons sitting in plain text (menu items, checkbox
+   labels) — never for icons inside flex buttons, which the button centers. */
+.ctx-item > .bic, label > .bic { vertical-align: -0.24em; margin-right: 9px; opacity: .82; }
+.ctx-item > .bic { margin-right: 8px; }
 /* Small icon-only buttons: center the SVG, kill the old font-size sizing. */
 .pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more { display: inline-flex; align-items: center; justify-content: center; }
 .pl-del svg, .pl-eye svg, .src-btn svg, .fl-x svg, .dl-x svg { width: 13px; height: 13px; display: block; }
