@@ -43,6 +43,17 @@ export function removeFromPlaylist(id, path) {
   if (pl) { pl.paths = pl.paths.filter(p => p !== path); _persist(); }
 }
 
+// Swap a path in every playlist (e.g. online "yt:<id>" → downloaded local file).
+export function replacePath(oldPath, newPath) {
+  for (const pl of _cache) {
+    const i = pl.paths.indexOf(oldPath);
+    if (i < 0) continue;
+    if (pl.paths.includes(newPath)) pl.paths.splice(i, 1);
+    else pl.paths[i] = newPath;
+  }
+  _persist();
+}
+
 export function reorderPlaylist(id, fromIdx, toIdx) {
   const pl = _cache.find(p => p.id === id);
   if (!pl) return;

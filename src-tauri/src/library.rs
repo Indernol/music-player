@@ -2,6 +2,7 @@
 //! Returns plain `Track` structs — no coupling to audio or UI.
 
 use serde::Serialize;
+use std::collections::HashSet;
 use walkdir::WalkDir;
 
 // lofty imports (VERSION-SENSITIVE — see Cargo.toml note). The prelude brings the
@@ -14,8 +15,9 @@ use lofty::tag::ItemKey;
 
 /// Embedded cover art for a single track, as a `data:` URL (or None if the file
 /// has no embedded picture). Called lazily by the frontend, deduped per album.
+/// async: reads a file — must never block the main (UI) thread.
 #[tauri::command]
-pub fn cover(path: String) -> Option<String> {
+pub async fn cover(path: String) -> Option<String> {
     let tagged = read_from_path(&path).ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
     let pic = tag.pictures().first()?;
@@ -64,6 +66,44 @@ pub fn scan_library(roots: &[String]) -> Vec<Track> {
     tracks.sort_by(|a, b| (a.artist.to_lowercase(), a.album.to_lowercase(), a.title.to_lowercase())
         .cmp(&(b.artist.to_lowercase(), b.album.to_lowercase(), b.title.to_lowercase())));
     tracks
+}
+
+/// Differential scan for refreshes: walk the folders, but only read tags for
+/// files NOT in `known` — the frontend keeps its cached metadata for the rest.
+/// `present` lists every audio file found so the caller can prune deletions.
+#[derive(Serialize)]
+pub struct ScanDiff {
+    pub new_tracks: Vec<Track>,
+    pub present: Vec<String>,
+}
+
+pub fn scan_diff(roots: &[String], known: &HashSet<String>) -> ScanDiff {
+    let mut new_tracks = Vec::new();
+    let mut present = Vec::new();
+    for root in roots {
+        for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if !AUDIO_EXTS.contains(&ext.as_str()) {
+                continue;
+            }
+            let p = path.to_string_lossy().to_string();
+            if !known.contains(&p) {
+                new_tracks.push(read_track(path));
+            }
+            present.push(p);
+        }
+    }
+    new_tracks.sort_by(|a, b| (a.artist.to_lowercase(), a.album.to_lowercase(), a.title.to_lowercase())
+        .cmp(&(b.artist.to_lowercase(), b.album.to_lowercase(), b.title.to_lowercase())));
+    ScanDiff { new_tracks, present }
 }
 
 fn read_track(path: &std::path::Path) -> Track {

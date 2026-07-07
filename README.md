@@ -7,21 +7,35 @@ Independent project — lives next to `moonbot-src/` but shares nothing with it.
 
 - Plays your **local audio files** (mp3, flac, wav, ogg/opus, m4a, aac) through a
   real native audio engine (Rust `rodio` → system audio device), not a WebView `<audio>`.
-- Manages **playlists** (create / edit / reorder / import / export).
+- Manages **playlists** (create / edit / reorder / import / export), mixing local
+  files and online tracks freely.
+- **YouTube integration via yt-dlp** (same approach as the owner's
+  `play_yt_audio.sh` desktop script — personal use):
+  - **Search**: type in the search bar and press Enter to search YouTube; results
+    show thumbnail + channel and can be played or added to playlists.
+  - **Playlist import**: paste a playlist URL (sidebar → *Import from URL…*),
+    tick the tracks you want, import into a new or existing playlist.
+  - **Instant streaming**: tracks stream over HTTP range requests straight into
+    the rodio engine (no full download first); resolved stream URLs are cached
+    and the next queue entry is pre-resolved + pre-queued for gapless playback.
+  - **Local downloads**: right-click → *⬇ Download locally* (or tick *Save
+    locally* when importing a playlist) saves tracks as mp3 via yt-dlp into the
+    Settings → Downloads folder (default `~/Music/MusicPlayer`), auto-adds that
+    folder as a source and swaps playlist entries to the local files.
+- **Desktop media integration (MPRIS)**: the player registers as
+  `org.mpris.MediaPlayer2.musicplayer` on D-Bus (souvlaki/zbus), so KDE/GNOME
+  media widgets, `playerctl` and media keys see the current track (title,
+  artist, artwork, position) and can control play/pause/next/seek.
 - Optionally **syncs YouTube Music library metadata** (playlists, likes) read-only via
   Google OAuth2 — as organizational reference only. See `docs/oauth-sync.md`.
 
-## What it deliberately does NOT do
-
-This project **does not download or extract audio/video streams from YouTube**
-(no yt-dlp, no lavalink `youtube-source`). That path violates YouTube's Terms of
-Service and isn't "compliant" no matter how it's framed. The compliance boundary
-is documented in [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) — read it before adding
-any "download from YouTube" feature.
-
-Playback of YouTube tracks, if ever wanted, is only possible through the **official
-embedded YouTube player** (shows the video + ads) — that would be a separate, opt-in
-provider, never the local audio engine.
+> ⚠️ **Note (2026-07)**: an earlier revision of this README declared a hard
+> "no yt-dlp / no stream extraction" compliance boundary. That decision was
+> reversed by the project owner, who explicitly requested yt-dlp-based search,
+> import and streaming modeled on their own download script. Be aware that
+> stream extraction sits outside YouTube's Terms of Service; this stays a
+> personal-use tool. Requires `yt-dlp` on the machine (PATH, `~/Desktop/bin`,
+> `~/.local/bin`, or linuxbrew).
 
 ## Architecture
 
@@ -35,8 +49,14 @@ music-player/
 ├── src-tauri/              Native core (Rust)
 │   ├── src/
 │   │   ├── main.rs         Tauri app + command handlers
-│   │   ├── audio.rs        Audio engine: dedicated thread + mpsc + rodio Sink
+│   │   ├── audio.rs        Audio engine: dedicated thread + mpsc + rodio Sink (epoch-tagged)
+│   │   ├── stream.rs       HTTP range-request Read+Seek source (instant streaming)
+│   │   ├── youtube.rs      yt-dlp bridge: search, playlists, URL resolve+cache, downloads
+│   │   ├── mpris.rs        MPRIS D-Bus media controls (souvlaki) → desktop widgets
 │   │   └── library.rs      Filesystem scan + tag reading (lofty)
+│   ├── examples/
+│   │   ├── stream_test.rs  Headless check: decode a remote URL through HttpStream
+│   │   └── local_test.rs   Headless check: local decode + seek (rodio 0.21 path)
 │   ├── Cargo.toml
 │   ├── build.rs
 │   └── tauri.conf.json
@@ -91,8 +111,12 @@ distrobox enter mp-dev -- \
 For hot-reload development instead of a one-off binary:
 `distrobox enter mp-dev -- bash -lc 'source ~/.cargo/env; cd ~/Desktop/"for claude"/music-player && npm run dev'`.
 
-> ✅ **Verified**: builds clean inside a Fedora 41 distrobox (rodio 0.19 / lofty 0.21 /
-> tauri 2.11), `cargo build` → exit 0, all runtime libraries resolve.
+> ✅ **Verified** (2026-07): builds clean inside a Fedora 41 distrobox (rodio 0.21 /
+> lofty 0.21 / tauri 2.11), `cargo build` → exit 0. Streaming pipeline verified
+> headlessly: a real YouTube m4a decoded over HTTP ranges (`cargo run --example
+> stream_test -- <url>`) and local mp3 decode + seek (`--example local_test`).
+> rodio was bumped 0.19 → 0.21: the isomp4 demuxer needs `with_byte_len()` to
+> probe YouTube's moov-after-mdat files, which 0.19 couldn't provide.
 
 ## Roadmap (opt-in, in order)
 

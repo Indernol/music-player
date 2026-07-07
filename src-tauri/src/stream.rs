@@ -1,0 +1,252 @@
+//! Buffered streaming HTTP source (`Read + Seek` over a remote URL).
+//!
+//! A dedicated fetcher thread downloads ahead of the reader through range
+//! requests into an in-memory window. The audio pipeline therefore never does
+//! blocking network I/O on the decode path (which caused audible dropouts),
+//! and brief network hiccups are absorbed by the read-ahead buffer plus
+//! automatic reconnects with backoff.
+
+use std::collections::VecDeque;
+use std::io::{self, Read, Seek, SeekFrom};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+const CAP: usize = 8 * 1024 * 1024; // read-ahead window
+const BACK: u64 = 256 * 1024; // kept behind the reader for small back-seeks
+const CHUNK: usize = 64 * 1024; // network read size
+const STALL: Duration = Duration::from_secs(25); // reader gives up after this
+const RETRIES: u32 = 4;
+
+struct Shared {
+    start: u64, // absolute offset of buf[0]
+    buf: VecDeque<u8>,
+    target: u64, // reader position the fetcher must serve
+    err: Option<String>,
+    dead: bool, // reader dropped — fetcher exits
+}
+
+pub struct HttpStream {
+    len: u64,
+    pos: u64,
+    shared: Arc<(Mutex<Shared>, Condvar)>,
+}
+
+fn agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(15))
+        .build()
+}
+
+fn connect(url: &str, pos: u64) -> Result<(Box<dyn Read + Send>, Option<u64>), String> {
+    let resp = agent()
+        .get(url)
+        .set("Range", &format!("bytes={pos}-"))
+        .call()
+        .map_err(|e| e.to_string())?;
+    let total = resp
+        .header("Content-Range")
+        .and_then(|cr| cr.rsplit('/').next())
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .or_else(|| {
+            resp.header("Content-Length")
+                .and_then(|l| l.parse::<u64>().ok())
+                .map(|l| l.saturating_add(pos))
+        });
+    Ok((Box::new(resp.into_reader()), total))
+}
+
+/// Downloads into the shared window, following the reader's position.
+fn fetcher(url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, initial: Box<dyn Read + Send>) {
+    let (lock, cv) = &*shared;
+    let mut conn: Option<(Box<dyn Read + Send>, u64)> = Some((initial, 0)); // reader, absolute pos
+    let mut tmp = vec![0u8; CHUNK];
+
+    loop {
+        // Decide the next fetch offset under the lock (or wait).
+        let from = {
+            let mut g = lock.lock().unwrap();
+            loop {
+                if g.dead {
+                    return;
+                }
+                // Reposition the window when the reader jumped outside it.
+                let end = g.start + g.buf.len() as u64;
+                if g.target < g.start || g.target > end {
+                    g.start = g.target;
+                    g.buf.clear();
+                }
+                // Trim consumed bytes (keep BACK behind the reader).
+                let keep_from = g.target.saturating_sub(BACK);
+                if keep_from > g.start {
+                    let drop = (keep_from - g.start) as usize;
+                    g.buf.drain(..drop);
+                    g.start = keep_from;
+                }
+                let end = g.start + g.buf.len() as u64;
+                if end >= len || g.buf.len() >= CAP {
+                    // Fully buffered (to EOF or capacity) — sleep until poked.
+                    cv.notify_all();
+                    g = cv.wait(g).unwrap();
+                    continue;
+                }
+                break end;
+            }
+        };
+
+        // Ensure a connection positioned at `from` (with retries), then read.
+        let mut read_n: Option<usize> = None;
+        for attempt in 0..=RETRIES {
+            if conn.as_ref().map(|(_, p)| *p) != Some(from) {
+                conn = None;
+            }
+            if conn.is_none() {
+                match connect(&url, from) {
+                    Ok((r, _)) => conn = Some((r, from)),
+                    Err(e) => {
+                        if attempt == RETRIES {
+                            let mut g = lock.lock().unwrap();
+                            g.err = Some(e);
+                            cv.notify_all();
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(300 * (attempt as u64 + 1)));
+                        continue;
+                    }
+                }
+            }
+            let want = tmp.len().min((len - from) as usize);
+            match conn.as_mut().unwrap().0.read(&mut tmp[..want]) {
+                Ok(0) | Err(_) => {
+                    conn = None; // early EOF or error — reconnect
+                    if attempt == RETRIES {
+                        let mut g = lock.lock().unwrap();
+                        g.err = Some("stream connection lost".into());
+                        cv.notify_all();
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(300 * (attempt as u64 + 1)));
+                }
+                Ok(n) => {
+                    conn.as_mut().unwrap().1 = from + n as u64;
+                    read_n = Some(n);
+                    break;
+                }
+            }
+        }
+
+        if let Some(n) = read_n {
+            let mut g = lock.lock().unwrap();
+            // Only append if the window didn't move while we were reading.
+            if g.start + g.buf.len() as u64 == from {
+                g.buf.extend(&tmp[..n]);
+            }
+            cv.notify_all();
+        }
+    }
+}
+
+impl HttpStream {
+    /// Total size in bytes, from Content-Range/Content-Length. The decoder needs
+    /// it (DecoderBuilder::with_byte_len) to probe moov-after-mdat mp4 files.
+    pub fn byte_len(&self) -> u64 {
+        self.len
+    }
+
+    pub fn open(url: String) -> Result<Self, String> {
+        let (reader, total) = connect(&url, 0)?;
+        let len = total.ok_or("server did not report a stream length")?;
+        let shared = Arc::new((
+            Mutex::new(Shared {
+                start: 0,
+                buf: VecDeque::with_capacity(CAP),
+                target: 0,
+                err: None,
+                dead: false,
+            }),
+            Condvar::new(),
+        ));
+        let sh = shared.clone();
+        thread::spawn(move || fetcher(url, len, sh, reader));
+        Ok(HttpStream { len, pos: 0, shared })
+    }
+}
+
+impl Drop for HttpStream {
+    fn drop(&mut self) {
+        let (lock, cv) = &*self.shared;
+        if let Ok(mut g) = lock.lock() {
+            g.dead = true;
+        }
+        cv.notify_all();
+    }
+}
+
+impl Read for HttpStream {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if self.pos >= self.len {
+            return Ok(0);
+        }
+        let (lock, cv) = &*self.shared;
+        let mut g = lock.lock().unwrap();
+        g.target = self.pos;
+        cv.notify_all();
+        let deadline = Instant::now() + STALL;
+        loop {
+            let end = g.start + g.buf.len() as u64;
+            if self.pos >= g.start && self.pos < end {
+                let off = (self.pos - g.start) as usize;
+                let n = out.len().min(g.buf.len() - off);
+                let (a, b) = g.buf.as_slices();
+                let mut copied = 0;
+                if off < a.len() {
+                    let c = (a.len() - off).min(n);
+                    out[..c].copy_from_slice(&a[off..off + c]);
+                    copied = c;
+                }
+                if copied < n {
+                    let boff = off.saturating_sub(a.len());
+                    out[copied..n].copy_from_slice(&b[boff..boff + (n - copied)]);
+                }
+                self.pos += n as u64;
+                g.target = self.pos;
+                cv.notify_all();
+                return Ok(n);
+            }
+            if let Some(e) = &g.err {
+                return Err(io::Error::new(io::ErrorKind::Other, e.clone()));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "stream stalled"));
+            }
+            let (ng, _) = cv.wait_timeout(g, remaining).unwrap();
+            g = ng;
+        }
+    }
+}
+
+impl Seek for HttpStream {
+    fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+        let target = match from {
+            SeekFrom::Start(p) => p as i128,
+            SeekFrom::End(off) => self.len as i128 + off as i128,
+            SeekFrom::Current(off) => self.pos as i128 + off as i128,
+        };
+        if target < 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "seek before start",
+            ));
+        }
+        self.pos = (target as u64).min(self.len);
+        // Poke the fetcher so it starts repositioning before the next read.
+        let (lock, cv) = &*self.shared;
+        if let Ok(mut g) = lock.lock() {
+            g.target = self.pos;
+        }
+        cv.notify_all();
+        Ok(self.pos)
+    }
+}

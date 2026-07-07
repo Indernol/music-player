@@ -21,9 +21,19 @@ const DEFAULTS = {
   defaultVolume: 80,
   normalizeDefault: true,
   shuffleDefault: false,
+  repeatDefault: "off", // off | all | one — the repeat button persists here
   notifyOnChange: true,
   rpcEnabled: false,
   rpcClientId: "",
+  preloadNext: true,     // gapless: pre-queue the next track
+  downloadDir: "",       // empty = ~/Music/MusicPlayer (resolved by the backend)
+  preferLocal: true,     // play the local file when an online track is downloaded
+  autoSaveImports: false, // pre-tick "Save locally" in the import dialog
+  searchLimit: 20,       // YouTube search result count
+  ytdlpPath: "",         // explicit yt-dlp binary; empty = auto-detect
+  cookiesBrowser: "",    // --cookies-from-browser value; empty = off
+  setupDone: false,      // first-run wizard completed
+  updateMode: "ask",     // ask (propose) | auto (build silently) | off
 };
 
 let _s = { ...DEFAULTS };
