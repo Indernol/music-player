@@ -238,6 +238,67 @@ pub async fn yt_search(
     Ok(entries.iter().filter_map(track_from_json).collect())
 }
 
+#[derive(Serialize)]
+pub struct PlaylistHit {
+    pub url: String,
+    pub title: String,
+    pub author: String,
+}
+
+fn url_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Search YouTube for PLAYLISTS by name/author (the results page with the
+/// playlist filter applied, flat-extracted).
+#[tauri::command]
+pub async fn yt_search_playlists(
+    cfg: State<'_, YtCfg>,
+    query: String,
+    limit: Option<u32>,
+) -> Result<Vec<PlaylistHit>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let n = limit.unwrap_or(15).clamp(1, 30);
+    let page = format!(
+        "https://www.youtube.com/results?search_query={}&sp=EgIQAw%3D%3D",
+        url_encode(q)
+    );
+    let range = format!("1:{n}");
+    let out = run_ytdlp(
+        &cfg,
+        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &page],
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| {
+            let url = v["url"].as_str()?.to_string();
+            if !url.contains("list=") {
+                return None;
+            }
+            Some(PlaylistHit {
+                title: v["title"].as_str().unwrap_or("Untitled playlist").to_string(),
+                author: v["uploader"]
+                    .as_str()
+                    .or_else(|| v["channel"].as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                url,
+            })
+        })
+        .collect())
+}
+
 #[tauri::command]
 pub async fn yt_playlist(cfg: State<'_, YtCfg>, url: String) -> Result<PlaylistImport, String> {
     let url = url.trim().to_string();

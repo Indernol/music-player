@@ -355,6 +355,7 @@ function renderSources() {
   host.querySelectorAll("[data-src]").forEach(el => el.addEventListener("click", (e) => { if (e.target.dataset.refresh !== undefined || e.target.dataset.remove !== undefined) return; openSource(el.dataset.src); }));
   host.querySelectorAll("[data-refresh]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); rescanFolder(b.dataset.refresh); }));
   host.querySelectorAll("[data-remove]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); removeSource(b.dataset.remove); }));
+  $("#sideFilter")?.dispatchEvent(new Event("input")); // keep the filter applied
 }
 
 function openSource(folder) {
@@ -414,6 +415,7 @@ function renderPlaylists() {
   host.querySelector("#plNew").addEventListener("click", async () => { const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
   host.querySelectorAll("[data-pl]").forEach(el => el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined) return; openPlaylist(el.dataset.pl); }));
   host.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", async (e) => { e.stopPropagation(); if (await askConfirm("Delete this playlist?", "", "Delete")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); } }));
+  $("#sideFilter")?.dispatchEvent(new Event("input")); // keep the filter applied
 }
 function openPlaylist(id) {
   const pl = PL.getPlaylists().find(p => p.id === id);
@@ -500,10 +502,33 @@ async function searchOnline(q) {
 let impTracks = [];
 function openImport() {
   impTracks = [];
+  $("#impQuery").value = ""; $("#impHits").innerHTML = "";
   $("#impUrl").value = ""; $("#impStatus").textContent = ""; $("#impList").innerHTML = "";
   $("#impDl").checked = S().autoSaveImports;
   $("#impFoot").hidden = true; $("#importModal").hidden = false;
-  $("#impUrl").focus();
+  $("#impQuery").focus();
+}
+// Search YouTube for playlists by name/author; picking a hit fetches its tracks.
+async function impSearchGo() {
+  const q = $("#impQuery").value.trim();
+  if (!q) return;
+  if (!IS_NATIVE) { flash("Playlist search needs the native app"); return; }
+  const host = $("#impHits");
+  host.innerHTML = `<div class="nx-note">Searching playlists…</div>`;
+  try {
+    const hits = await invoke("yt_search_playlists", { query: q, limit: 15 });
+    if (!hits?.length) { host.innerHTML = `<div class="nx-note">No playlists found for “${esc(q)}”.</div>`; return; }
+    host.innerHTML = hits.map((h, i) =>
+      `<div class="imp-hit" data-hit="${i}" title="${esc(h.url)}">
+        <span class="ih-t">${esc(h.title)}</span>
+        <span class="ih-a">${esc(h.author || "")}</span>
+      </div>`).join("");
+    host.querySelectorAll("[data-hit]").forEach(el => el.addEventListener("click", () => {
+      host.querySelectorAll(".imp-hit").forEach(x => x.classList.toggle("on", x === el));
+      $("#impUrl").value = hits[Number(el.dataset.hit)].url;
+      impFetch();
+    }));
+  } catch (e) { host.innerHTML = `<div class="nx-note">Search failed: ${esc(String(e))}</div>`; }
 }
 async function impFetch() {
   const url = $("#impUrl").value.trim();
@@ -1196,7 +1221,7 @@ function openSettings() {
       <div class="set-row"><label>Sources section</label><input type="checkbox" id="setUiSources" ${s.uiSources ? "checked" : ""}></div>
       <div class="set-row"><label>“Add folder” buttons</label><input type="checkbox" id="setUiSrcBtns" ${s.uiSrcButtons ? "checked" : ""}></div>
       <div class="set-row"><label>Playlists section</label><input type="checkbox" id="setUiPlaylists" ${s.uiPlaylists ? "checked" : ""}></div>
-      <div class="set-row"><label>“Import from URL” button</label><input type="checkbox" id="setUiImport" ${s.uiImportBtn ? "checked" : ""}></div>
+      <div class="set-row"><label>“YouTube playlists” button</label><input type="checkbox" id="setUiImport" ${s.uiImportBtn ? "checked" : ""}></div>
       <div class="set-row"><label>Sort selector</label><input type="checkbox" id="setUiSort" ${s.uiSortSel ? "checked" : ""}></div>
       <div class="set-row"><label>Dock the “Now playing / Up next” panel</label><input type="checkbox" id="setUiDock" ${s.npDocked ? "checked" : ""}></div>
       <div class="set-hint">Tip: the sidebar section titles (Sources / Playlists) collapse on click, and the 📌 in the “Now playing” panel docks it as a side column.</div>
@@ -1584,6 +1609,15 @@ async function init() {
   $("#importModal").addEventListener("click", e => { if (e.target.id === "importModal") $("#importModal").hidden = true; });
   $("#impFetch").addEventListener("click", impFetch);
   $("#impUrl").addEventListener("keydown", e => { if (e.key === "Enter") impFetch(); });
+  $("#impSearch").addEventListener("click", impSearchGo);
+  $("#impQuery").addEventListener("keydown", e => { if (e.key === "Enter") impSearchGo(); });
+
+  $("#sideFilter").addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll("#sourcesList .src-row, #playlistsList .pl-row[data-pl]").forEach(el => {
+      el.hidden = !!q && !el.textContent.toLowerCase().includes(q);
+    });
+  });
   $("#impAll").addEventListener("click", () => { document.querySelectorAll("#impList [data-imp]").forEach(c => c.checked = true); updateImpCount(); });
   $("#impNone").addEventListener("click", () => { document.querySelectorAll("#impList [data-imp]").forEach(c => c.checked = false); updateImpCount(); });
   $("#impList").addEventListener("change", updateImpCount);

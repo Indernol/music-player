@@ -274,7 +274,9 @@ body.has-bg .ctx-menu, body.has-bg .modal { background: rgb(18, 18, 24); }
   background: var(--bg-3); display: grid; place-items: center;
   font-size: 46px; font-weight: 800; color: rgba(255, 255, 255, .9); overflow: hidden;
 }
-.ov-art.has-cover { background-size: cover !important; background-position: center; color: transparent; }
+/* Big artwork: contain (not crop) on black — YouTube thumbnails are letterboxed
+   16:9, cover made them look off-center; contain shows the full art, centered. */
+.ov-art.has-cover { background-size: contain !important; background-repeat: no-repeat; background-position: center !important; background-color: #000 !important; color: transparent; }
 .ov-title { font-size: 17px; font-weight: 800; line-height: 1.25; }
 .ov-sub { font-size: 13px; color: var(--tx-2); }
 .ov-meta { font-size: 11px; color: var(--tx-3); }
@@ -299,6 +301,17 @@ body.np-docked .np-drawer { box-shadow: none; border-color: var(--bd); }
 .now { cursor: pointer; border-radius: 8px; padding: 2px 6px; margin: -2px -6px; transition: background .12s; }
 .now:hover { background: var(--bg-2); }
 .sort-sel { flex: 0 0 auto; }
+.top-gear { font-size: 16px; width: 34px; height: 34px; flex-shrink: 0; }
+.side-filter { width: 100%; padding: 7px 10px; font-size: 12px; }
+
+/* ─── Playlist search hits (YouTube playlists modal) ─── */
+.imp-hits { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
+.imp-hit { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+.imp-hit:hover { background: var(--bg-3); }
+.imp-hit.on { background: var(--bg-3); outline: 1px solid var(--accent); }
+.ih-t { font-size: 13px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ih-a { margin-left: auto; font-size: 11px; color: var(--tx-3); flex-shrink: 0; }
+.imp-or { text-align: center; font-size: 11px; color: var(--tx-3); padding: 10px 0 2px; }
 
 /* ─── Sidebar sections + Sources (added) ─── */
 .side-section { display: flex; flex-direction: column; gap: 8px; }

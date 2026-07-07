@@ -13,6 +13,8 @@
 
       <button id="navLibrary" class="nav-item active"><span class="ni-ico">💿</span> Library</button>
 
+      <input id="sideFilter" type="search" placeholder="Filter sources & playlists…" autocomplete="off" class="side-filter">
+
       <div class="side-section" id="secSources">
         <div class="ss-head">
           <span class="ss-title ss-toggle" data-coll="collSources" title="Click to collapse/expand"><span class="ss-caret">▾</span> Sources</span>
@@ -28,13 +30,12 @@
       <div class="side-section grow" id="secPlaylists">
         <div class="ss-head"><span class="ss-title ss-toggle" data-coll="collPlaylists" title="Click to collapse/expand"><span class="ss-caret">▾</span> Playlists</span></div>
         <div class="ss-body grow">
-          <button id="importBtn" class="btn-line">🔗 Import from URL…</button>
+          <button id="importBtn" class="btn-line">🌐 YouTube playlists…</button>
           <div class="playlists-list" id="playlistsList"></div>
         </div>
       </div>
 
       <button id="updateBtn" class="update-btn" hidden>⬆ Update available</button>
-      <button id="settingsBtn" class="settings-btn">🛠️ Settings</button>
     </aside>
 
     <main class="main">
@@ -44,6 +45,7 @@
           <input id="search" type="search" placeholder="Search library — press Enter to search YouTube" autocomplete="off">
         </div>
         <span id="count" class="count"></span>
+        <button id="settingsBtn" class="icon-btn top-gear" title="Settings">🛠️</button>
         <select id="sortSel" class="sel sm-sel sort-sel" title="Sort order">
           <option value="default">Sort: default</option>
           <option value="title">Title A→Z</option>
@@ -217,13 +219,19 @@
   <div id="importModal" class="modal-backdrop" hidden>
     <div class="modal">
       <div class="modal-head">
-        <h2>Import a playlist</h2>
+        <h2>YouTube playlists</h2>
         <button id="importClose" class="icon-btn" title="Close">✕</button>
       </div>
       <div class="modal-body">
         <div class="imp-row">
+          <input id="impQuery" type="text" placeholder="Search playlists by name or author…" autocomplete="off">
+          <button id="impSearch" class="btn">Search</button>
+        </div>
+        <div id="impHits" class="imp-hits"></div>
+        <div class="imp-or">— or import directly from a URL —</div>
+        <div class="imp-row">
           <input id="impUrl" type="text" placeholder="Playlist URL (YouTube, YouTube Music…)" autocomplete="off">
-          <button id="impFetch" class="btn">Fetch</button>
+          <button id="impFetch" class="btn-line sm">Fetch</button>
         </div>
         <div id="impStatus" class="set-hint"></div>
         <div id="impList" class="imp-list"></div>
