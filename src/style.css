@@ -221,14 +221,17 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .ctx-label { padding: 6px 12px 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--tx-3); font-weight: 800; }
 
 /* ─── Settings modal ─── */
-.modal-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.6); backdrop-filter: blur(3px); display: grid; place-items: center; }
-.modal { width: min(520px, 92vw); max-height: 86vh; overflow-y: auto; background: var(--bg-2); border: 1px solid var(--bd-2); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
-.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--bd); position: sticky; top: 0; background: var(--bg-2); }
-.modal-head h2 { font-size: 18px; }
-.modal-body { padding: 8px 20px 20px; }
-.set-group { padding: 14px 0; border-bottom: 1px solid var(--bd); }
-.set-group:last-child { border-bottom: none; }
-.set-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); font-weight: 800; margin-bottom: 10px; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.6); display: grid; place-items: center; }
+.modal { width: min(560px, 92vw); max-height: 86vh; overflow-y: auto; background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+/* Sticky head: OPAQUE (inherits the modal color) + above content, so scrolled
+   rows never bleed through or overlap the title. */
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--bd); position: sticky; top: 0; z-index: 5; background: inherit; }
+.modal-head h2 { font-size: 17px; }
+.modal-body { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+/* Settings groups as cards */
+.set-group { padding: 13px 16px 10px; border: 1px solid var(--bd); border-radius: 12px; background: rgba(255, 255, 255, .025); }
+body.bg-light.has-bg .set-group { background: rgba(0, 0, 0, .03); }
+.set-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); font-weight: 800; margin-bottom: 8px; }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 0; }
 .set-row label { font-size: 13px; color: var(--tx-1); }
 .set-row input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
@@ -291,7 +294,8 @@ body.bg-light.has-bg .main { background: rgba(255, 255, 255, calc(var(--panel-al
 body.bg-light.has-bg .dl-drawer,
 body.bg-light.has-bg .np-drawer { background: rgba(252, 252, 254, .97); }
 body.bg-light.has-bg .ctx-menu,
-body.bg-light.has-bg .modal { background: #f2f3f7; }
+body.bg-light.has-bg .modal { background: #eef0f5; }
+body.bg-light.has-bg .modal-head { background: inherit; }
 body.bg-light.has-bg .track:hover,
 body.bg-light.has-bg .pl-row:hover,
 body.bg-light.has-bg .src-row:hover,
