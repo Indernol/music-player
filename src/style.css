@@ -416,7 +416,10 @@ body.np-docked .np-drawer { box-shadow: none; border-color: var(--bd); }
 .modal.dlg { width: min(400px, 92vw); }
 .now { cursor: pointer; border-radius: 8px; padding: 2px 6px; margin: -2px -6px; transition: background .12s; }
 .now:hover { background: var(--bg-2); }
-.sort-sel { flex: 0 0 auto; }
+/* Wide enough for the longest sort label ("Shortest first") — no clipping. */
+select.sel.sm-sel.sort-sel { flex: 0 0 auto; width: 144px; }
+/* Search-results filter dropdown ("All results" / "Artist matches"). */
+select#ytFilter.sm-sel { width: 138px; }
 .top-gear { font-size: 16px; width: 34px; height: 34px; flex-shrink: 0; }
 .side-filter { width: 100%; padding: 7px 10px; font-size: 12px; }
 
@@ -575,7 +578,7 @@ select.sel.sm-sel { flex: 0 0 auto; width: 84px; padding: 7px 28px 7px 10px; }
 .setup-row .grow { flex: 1; min-width: 0; }
 .setup-chk { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--tx-1); padding: 7px 0; cursor: pointer; user-select: none; }
 .setup-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 0 6px; }
-select.sel.sm-sel.wide { width: 130px; }
+select.sel.sm-sel.wide { width: 158px; }
 
 /* ─── Downloads: edge badge + opt-in side drawer ─── */
 .dl-toggle {
