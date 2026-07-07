@@ -127,6 +127,9 @@ input[type="range"]::-webkit-slider-thumb {
   transition: transform .1s;
 }
 input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); background: var(--accent-2); }
+/* no native blue focus ring — the accent thumb is the focus indicator */
+input[type="range"]:focus, input[type="range"]:focus-visible { outline: none; }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--vio-glow), 0 1px 4px rgba(0, 0, 0, .45); }
 .btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 9px 12px; font-weight: 700; cursor: pointer; font-size: 13px; transition: filter .12s; }
 .btn:hover { filter: brightness(1.1); }
 .btn-block { width: 100%; }
