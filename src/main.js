@@ -758,7 +758,7 @@ function saveDlBlock() { storeSave("dlblock", JSON.stringify(dlBlock)); }
 
 function dlRow(d) {
   return `
-    <div class="dl-row ${d.status}" title="${esc(d.err || d.title)}">
+    <div class="dl-row ${d.status}" data-path="${esc(d.path)}" title="${esc(d.err || d.title)}">
       <span class="dl-ico">${d.permanent ? IC.slash : DL_ICON[d.status]}</span>
       <span class="dl-name">${esc(d.title)}</span>
       <span class="dl-prog"><i style="width:${d.status === "done" ? 100 : (d.pct || 0)}%"></i></span>
@@ -805,6 +805,7 @@ function dlRender() {
   ];
   $("#dlList").innerHTML = parts.join("");
   $("#dlList").querySelectorAll("[data-dlx]").forEach(b => b.addEventListener("click", () => dlCancel(b.dataset.dlx)));
+  $("#dlList").querySelectorAll(".dl-row[data-path]").forEach(el => el.addEventListener("contextmenu", e => { e.preventDefault(); openDlCtx(e.clientX, e.clientY, el.dataset.path); }));
 }
 function dlProgress(id, pct) {
   const d = dlQueue.find(x => x.status === "active" && x.id === id);
@@ -828,6 +829,45 @@ function dlStop() {
     dlRender();
   } else { dlQueue.length = 0; dlRender(); }
 }
+// Right-click actions on a download row.
+function openDlCtx(x, y, path) {
+  const d = dlQueue.find(v => v.path === path);
+  if (!d) return;
+  const menu = $("#ctxMenu");
+  const parts = [];
+  if ((d.status === "error" && !d.permanent) || d.status === "canceled") parts.push(`<div class="ctx-item" data-a="retry">↻ Retry this track</div>`);
+  if (d.status === "queued" || d.status === "active") parts.push(`<div class="ctx-item" data-a="cancel">✕ Cancel</div>`);
+  parts.push(`<div class="ctx-item" data-a="drop">Remove from this list</div>`);
+  parts.push(`<div class="ctx-sep"></div>`);
+  parts.push(`<div class="ctx-item ctx-danger" data-a="unpl">Remove from playlists</div>`);
+  menu.innerHTML = parts.join("");
+  placeCtx(menu, x, y);
+  menu.querySelectorAll("[data-a]").forEach(it => it.addEventListener("click", async () => {
+    const a = it.dataset.a;
+    closeCtx();
+    if (a === "retry") { d.status = "queued"; d.pct = 0; d.err = ""; d.tries = 0; dlRender(); if (!dlRunning) dlPump(); }
+    else if (a === "cancel") dlCancel(path);
+    else if (a === "drop") {
+      if (d.status === "active") dlCancel(path);
+      const at = dlQueue.indexOf(d);
+      if (at >= 0) dlQueue.splice(at, 1);
+      dlRender();
+    }
+    else if (a === "unpl") {
+      if (!await askConfirm("Remove this track from all playlists?", d.title, "Remove")) return;
+      if (d.status === "queued") d.status = "canceled";
+      else if (d.status === "active") dlCancel(path);
+      const local = libraryLocalFor(d.id);
+      for (const pl of PL.getPlaylists()) {
+        PL.removeFromPlaylist(pl.id, path);
+        if (local) PL.removeFromPlaylist(pl.id, local);
+      }
+      saveOnline(); renderPlaylists(); refreshView(); dlRender();
+      flash(`Removed “${d.title}” from playlists`);
+    }
+  }));
+}
+
 function dlRetry() {
   for (const d of dlQueue) {
     if (d.permanent) continue; // final refusals (copyright/private/geo…) stay skipped
@@ -1929,9 +1969,28 @@ async function init() {
   $("#search").addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();
     selected.clear();
-    if (!q) { showLibrary(); return; }
-    setViewHead({ icon: IC.search, title: "Search", subtitle: `“${e.target.value.trim()}” — press Enter to search YouTube` });
-    renderTracks(library.filter(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q) || t.album.toLowerCase().includes(q)));
+    if (!q) { refreshView(); return; }
+    // Search WITHIN the current view (playlist / folder / library), all words
+    // must match somewhere in title+artist+album.
+    let scope = "library", list = library;
+    if (active.type === "playlist") {
+      const pl = PL.getPlaylists().find(p => p.id === active.id);
+      if (pl) {
+        const by = new Map(library.map(t => [t.path, t]));
+        list = pl.paths.map(p => by.get(p) || onlineIndex.get(p)).filter(Boolean);
+        scope = `“${pl.name}”`;
+      }
+    } else if (active.type === "source") {
+      list = library.filter(t => inFolder(t, active.id));
+      scope = baseName(active.id);
+    }
+    const words = q.split(/\s+/).filter(Boolean);
+    const hits = list.filter(t => {
+      const hay = `${t.title} ${t.artist} ${t.album}`.toLowerCase();
+      return words.every(w => hay.includes(w));
+    });
+    setViewHead({ icon: IC.search, title: "Search", subtitle: `“${e.target.value.trim()}” in ${scope} · ${hits.length} match${hits.length === 1 ? "" : "es"} — Enter searches YouTube` });
+    renderTracks(hits);
   });
   $("#search").addEventListener("keydown", e => { if (e.key === "Enter") searchOnline(e.target.value.trim()); });
 

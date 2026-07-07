@@ -565,3 +565,9 @@ body.win-blur .dl-toggle.busy::before { animation-play-state: paused; }
 .imp-foot-row:last-child .btn { margin-left: auto; min-width: 130px; }
 .imp-foot select { flex: 1; min-width: 0; background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 8px; padding: 8px 10px; font-size: 13px; outline: none; }
 .btn-line.sm { width: auto; padding: 7px 12px; flex-shrink: 0; }
+
+/* Placeholders follow the theme (they stayed browser-gray on light wallpapers) */
+input::placeholder { color: var(--tx-3); opacity: 1; }
+
+/* Destructive context-menu entries */
+.ctx-item.ctx-danger:hover { background: #c0392b; color: #fff; }
