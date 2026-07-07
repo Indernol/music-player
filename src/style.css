@@ -165,11 +165,13 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); backgro
 /* no native blue focus ring — the accent thumb is the focus indicator */
 input[type="range"]:focus, input[type="range"]:focus-visible { outline: none; }
 input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--vio-glow), 0 1px 4px rgba(0, 0, 0, .45); }
-.btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 9px 12px; font-weight: 700; cursor: pointer; font-size: 13px; transition: filter .12s; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: var(--accent); color: #fff; border: none; border-radius: 9px; padding: 9px 14px; font-weight: 700; cursor: pointer; font-size: 13px; line-height: 1; transition: filter .12s, transform .1s; }
 .btn:hover { filter: brightness(1.1); }
+.btn:active { transform: scale(.97); }
 .btn-block { width: 100%; }
-.icon-btn { background: transparent; border: none; color: var(--tx-3); cursor: pointer; font-size: 15px; width: 28px; height: 28px; border-radius: 6px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--tx-3); cursor: pointer; width: 30px; height: 30px; border-radius: 8px; transition: background .12s, color .12s; }
 .icon-btn:hover { background: var(--bg-3); color: var(--tx-1); }
+.icon-btn svg { width: 16px; height: 16px; display: block; }
 
 /* ─── Main ─── */
 .main { background: linear-gradient(180deg, rgba(139,92,246,0.08), var(--bg-1) 220px); border-radius: var(--r); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
@@ -181,11 +183,14 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .count { color: var(--tx-3); font-size: 12px; font-weight: 600; white-space: nowrap; }
 
 /* Inline SVG icon inside a button / menu-item label */
-.bic { display: inline-flex; align-items: center; vertical-align: -3px; }
-.bic svg { width: 14px; height: 14px; }
-.btn-line .bic, .btn .bic { margin-right: 5px; }
-.ctx-item .bic { margin-right: 8px; opacity: .82; }
-.ac-actions .bic { margin-right: 4px; }
+/* Inline icon: a flex child inside flex buttons (centered by the button's
+   align-items). In inline text contexts (menus, labels) it needs a nudge. */
+.bic { display: inline-flex; align-items: center; flex-shrink: 0; }
+.bic svg { width: 14px; height: 14px; display: block; }
+.ctx-item .bic, .set-row .bic, label .bic { vertical-align: -0.24em; margin-right: 9px; opacity: .82; }
+/* Small icon-only buttons: center the SVG, kill the old font-size sizing. */
+.pl-del, .pl-eye, .src-btn, .fl-x, .dl-x, .more { display: inline-flex; align-items: center; justify-content: center; }
+.pl-del svg, .pl-eye svg, .src-btn svg, .fl-x svg, .dl-x svg { width: 13px; height: 13px; display: block; }
 /* A filter glyph in front of the sort dropdown */
 .sort-ico { display: inline-flex; align-items: center; color: var(--tx-3); }
 
@@ -532,8 +537,10 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 
 /* ─── Album art covers + density + settings additions ─── */
 .art.has-cover, .np-art.has-cover { background-size: cover !important; background-position: center; color: transparent; }
-.btn-line { width: 100%; background: transparent; border: 1px solid var(--bd); color: var(--tx-2); padding: 8px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; }
-.btn-line:hover { border-color: var(--bd-2); color: var(--tx-1); }
+.btn-line { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: 100%; background: transparent; border: 1px solid var(--bd); color: var(--tx-2); padding: 8px 12px; border-radius: 9px; cursor: pointer; font-size: 12px; font-weight: 700; line-height: 1; transition: border-color .12s, color .12s, background .12s, transform .1s; }
+.btn-line:hover { border-color: var(--bd-2); color: var(--tx-1); background: rgba(255,255,255,.04); }
+.btn-line:active { transform: scale(.97); }
+body.bg-light.has-bg .btn-line:hover { background: rgba(0,0,0,.04); }
 .set-actions { padding-top: 14px; }
 .set-actions .btn-line { color: var(--tx-2); }
 
