@@ -1925,8 +1925,12 @@ function openSettings() {
           <option value="auto" ${s.updateMode === "auto" ? "selected" : ""}>Build automatically</option>
           <option value="off" ${s.updateMode === "off" ? "selected" : ""}>Don't check</option>
         </select></div>
-      <div class="set-row"><label>Version <b id="setCurVer">…</b></label><button id="setUpdCheck" class="btn-line sm">Check now</button></div>
-      <div class="set-hint">The app is built from the local source tree (mirrored on the private GitHub repo). “Update” rebuilds it; you then restart the app.</div>
+      <div class="set-row"><label>Version <b id="setCurVer">…</b></label>
+        <span class="dir-pick">
+          <button id="setUpdCheck" class="btn-line sm">Check now</button>
+          <button id="updateBtn" class="btn-line sm" hidden>Update</button>
+        </span></div>
+      <div class="set-hint">The app is built from the local source tree (mirrored on the private GitHub repo). “Update” rebuilds it, then click again to restart.</div>
     </div>
     <div class="set-actions"><button id="setReset" class="btn-line">↺ Reset to defaults</button></div>`;
   const body = $("#settingsBody");
@@ -2013,6 +2017,12 @@ function openSettings() {
   renderFollowList();
   $("#setUpdMode").addEventListener("change", e => SETTINGS.setSetting("updateMode", e.target.value));
   $("#setUpdCheck").addEventListener("click", () => checkUpdate(true));
+  $("#updateBtn").addEventListener("click", () => {
+    if (updateReady) { invoke("restart_app").catch(e => { console.error("[restart]", e); flash("Restart failed — relaunch manually"); }); return; }
+    if (!updateBusy && availableVersion) runUpdate();
+  });
+  renderUpdateBtn();  // reflect state already known from the startup check
+  checkUpdate();      // refresh in the background while the panel is open
   currentVersion().then(v => { const el = $("#setCurVer"); if (el) el.textContent = v ? `v${v}` : "?"; });
   $("#setReset").addEventListener("click", () => { SETTINGS.resetSettings(); applySettings(); refreshView(); openSettings(); flash("Settings reset to defaults"); });
   $("#settingsModal").hidden = false;
@@ -2088,42 +2098,45 @@ let updateBusy = false, updateReady = false, availableVersion = "";
 async function currentVersion() {
   try { return await T.app.getVersion(); } catch { return ""; }
 }
+// The Update button lives in Settings → Updates, so it only exists in the DOM
+// while the panel is open. Reflect the current state onto it when present.
+function renderUpdateBtn() {
+  const btn = $("#updateBtn");
+  if (!btn) return;
+  btn.disabled = updateBusy;
+  if (updateBusy) { btn.hidden = false; btn.textContent = "Building update…"; }
+  else if (updateReady) { btn.hidden = false; btn.textContent = `v${availableVersion} ready — restart`; }
+  else if (availableVersion) { btn.hidden = false; btn.textContent = `Update to v${availableVersion}`; }
+  else { btn.hidden = true; }
+}
 async function checkUpdate(manual = false) {
   if (!IS_NATIVE) return;
   if (!manual && S().updateMode === "off") return;
   const [cur, src] = [await currentVersion(), await invoke("source_version").catch(() => "")];
-  const btn = $("#updateBtn");
   if (src && cur && src !== cur) {
     availableVersion = src;
     if (S().updateMode === "auto" && !manual) { runUpdate(); return; }
-    btn.hidden = false;
-    btn.textContent = `Update to v${src}`;
     if (manual) flash(`Update available: v${cur} → v${src}`);
   } else {
     availableVersion = "";
-    btn.hidden = true;
     if (manual) flash(src ? `Up to date (v${cur})` : "Source tree not found — cannot check");
   }
+  renderUpdateBtn();
 }
 async function runUpdate() {
   if (updateBusy || !IS_NATIVE) return;
-  updateBusy = true;
-  const btn = $("#updateBtn");
-  btn.hidden = false; btn.disabled = true; btn.textContent = "Building update…";
+  updateBusy = true; renderUpdateBtn();
   try {
     await invoke("self_update");
-    updateReady = true;
-    btn.textContent = `v${availableVersion} ready — click to restart`;
+    updateReady = true; updateBusy = false; renderUpdateBtn();
     flash(`Update v${availableVersion} built — click the button to restart`);
-    notifyTrack({ title: "Music Player update ready", artist: `Click the update button to restart into v${availableVersion}`, album: "" });
+    notifyTrack({ title: "Music Player update ready", artist: `Click the update button in Settings to restart into v${availableVersion}`, album: "" });
   } catch (e) {
-    btn.textContent = "Update failed — retry";
-    btn.disabled = false; updateBusy = false;
+    updateBusy = false;
+    const btn = $("#updateBtn"); if (btn) { btn.disabled = false; btn.textContent = "Update failed — retry"; }
     console.error("[update]", e);
     flash("Update failed — see console/log");
-    return;
   }
-  btn.disabled = false; updateBusy = false;
 }
 
 // ─── Cookies consent: explicit accept with a countdown + detected accounts ───
@@ -2422,11 +2435,6 @@ async function init() {
   startPolling();
   startProgressLoop();
   showLibrary();
-
-  $("#updateBtn").addEventListener("click", () => {
-    if (updateReady) { invoke("restart_app").catch(e => { console.error("[restart]", e); flash("Restart failed — relaunch manually"); }); return; }
-    if (!updateBusy && availableVersion) runUpdate();
-  });
 
   wireSetup();
   if (IS_NATIVE && !S().setupDone) openSetup();
