@@ -293,14 +293,28 @@ pub async fn yt_search(
     cfg: State<'_, YtCfg>,
     query: String,
     limit: Option<u32>,
+    offset: Option<u32>,
 ) -> Result<Vec<OnlineTrack>, String> {
     let q = query.trim();
     if q.is_empty() {
         return Ok(Vec::new());
     }
     let n = limit.unwrap_or(20).clamp(1, 100);
-    let entries = flat_extract(&cfg, &format!("ytsearch{n}:{q}"))?;
-    Ok(entries.iter().filter_map(track_from_json).collect())
+    let off = offset.unwrap_or(0).min(900);
+    // Pagination: ask the search "playlist" only for the requested slice —
+    // yt-dlp walks results lazily, so page 1 stays as cheap as before.
+    let total = off + n;
+    let target = format!("ytsearch{total}:{q}");
+    let range = format!("{}:{}", off + 1, total);
+    let out = run_ytdlp(
+        &cfg,
+        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| track_from_json(&v))
+        .collect())
 }
 
 /// First few track titles of a playlist — cheap preview for search hits.

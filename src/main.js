@@ -556,16 +556,37 @@ async function unfollowPlaylist(id) {
 // ─── YouTube search (Enter in the search bar) ───
 let onlineResults = [];
 let onlineQuery = "";
+let ytPage = 0, ytHasMore = false, ytFilter = "all";
+function ytFiltered() {
+  const q = onlineQuery.toLowerCase();
+  if (ytFilter === "title") return onlineResults.filter(t => t.title.toLowerCase().includes(q));
+  if (ytFilter === "artist") return onlineResults.filter(t => t.artist.toLowerCase().includes(q));
+  return onlineResults;
+}
 function renderOnlineResults() {
   active = { type: "online", id: onlineQuery };
   markActive();
+  const shown = ytFiltered();
   // Tracks already saved locally sink to their own section at the bottom.
   const fresh = [], owned = [];
-  for (const t of onlineResults) (libraryLocalFor(ytId(t.path)) ? owned : fresh).push(t);
+  for (const t of shown) (libraryLocalFor(ytId(t.path)) ? owned : fresh).push(t);
   setViewHead({
     icon: IC.globe, title: "YouTube",
-    subtitle: `${onlineResults.length} result${onlineResults.length === 1 ? "" : "s"} for “${onlineQuery}”${owned.length ? ` · ${owned.length} already in your library` : ""}`,
+    subtitle: `Page ${ytPage + 1} · ${shown.length} result${shown.length === 1 ? "" : "s"} for “${onlineQuery}”` +
+      (ytFilter !== "all" ? ` (filter: ${ytFilter})` : "") +
+      (owned.length ? ` · ${owned.length} already in your library` : ""),
+    actions:
+      `<select id="ytFilter" class="sel sm-sel">
+        <option value="all" ${ytFilter === "all" ? "selected" : ""}>All results</option>
+        <option value="title" ${ytFilter === "title" ? "selected" : ""}>Title contains</option>
+        <option value="artist" ${ytFilter === "artist" ? "selected" : ""}>Artist matches</option>
+      </select>` +
+      `<button id="ytPrev" class="btn-line sm" ${ytPage ? "" : "disabled"}>‹ Prev</button>` +
+      `<button id="ytNext" class="btn-line sm" ${ytHasMore ? "" : "disabled"}>Next ›</button>`,
   });
+  $("#ytFilter")?.addEventListener("change", e => { ytFilter = e.target.value; renderOnlineResults(); });
+  $("#ytPrev")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage - 1));
+  $("#ytNext")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage + 1));
   renderTracks([...sortTracks([...fresh]), ...sortTracks([...owned])], true);
   if (owned.length) {
     const host = $("#trackList");
@@ -574,18 +595,21 @@ function renderOnlineResults() {
     for (let i = fresh.length; i < view.length; i++) host.querySelector(`.track[data-idx="${i}"]`)?.classList.add("owned");
   }
 }
-async function searchOnline(q) {
+async function searchOnline(q, page = 0) {
   if (!q) return;
   if (!IS_NATIVE) { flash("YouTube search needs the native app"); return; }
   onlineQuery = q;
+  ytPage = Math.max(0, page);
   active = { type: "online", id: q };
   markActive();
   selected.clear();
-  setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}”…` });
+  setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}” — page ${ytPage + 1}…` });
   $("#listHead").style.display = "none";
   $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">📡</div>Searching YouTube…</div>`;
   try {
-    const res = await invoke("yt_search", { query: q, limit: Number(S().searchLimit) || 20 });
+    const limit = Number(S().searchLimit) || 20;
+    const res = await invoke("yt_search", { query: q, limit, offset: ytPage * limit });
+    ytHasMore = Array.isArray(res) && res.length >= limit;
     onlineResults = (res || []).map(onlineFromResult);
     onlineResults.forEach(t => onlineIndex.set(t.path, t));
     renderOnlineResults();
