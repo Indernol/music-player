@@ -16,6 +16,9 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+/* Native-app feel: text isn't selectable, except where you actually type. */
+html { user-select: none; -webkit-user-select: none; }
+input, textarea, [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
 html, body { height: 100%; }
 body {
   font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
