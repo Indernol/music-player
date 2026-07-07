@@ -331,6 +331,18 @@ body.np-docked .np-drawer { box-shadow: none; border-color: var(--bd); }
 .ih-t { font-size: 13px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ih-a { margin-left: auto; font-size: 11px; color: var(--tx-3); flex-shrink: 0; }
 .imp-or { text-align: center; font-size: 11px; color: var(--tx-3); padding: 10px 0 2px; }
+
+/* ─── In-list section separator (e.g. "already in your library") ─── */
+.list-sep {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 12px 6px; padding-top: 10px;
+  border-top: 1px solid var(--bd);
+  font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--tx-3);
+}
+.list-sep svg { color: #34d399; }
+.track.owned { opacity: .72; }
+.track.owned:hover, .track.owned.selected, .track.owned.playing { opacity: 1; }
 .imp-hit { flex-wrap: wrap; }
 .ih-prev { width: 100%; font-size: 11px; color: var(--tx-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 2px; }
 

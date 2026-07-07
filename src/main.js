@@ -245,8 +245,8 @@ function sortTracks(list) {
 }
 
 // ─── Track list ───
-function renderTracks(list) {
-  view = sortTracks([...list]);
+function renderTracks(list, presorted = false) {
+  view = presorted ? [...list] : sortTracks([...list]);
   list = view;
   updateCount();
   const host = $("#trackList");
@@ -559,8 +559,20 @@ let onlineQuery = "";
 function renderOnlineResults() {
   active = { type: "online", id: onlineQuery };
   markActive();
-  setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `${onlineResults.length} result${onlineResults.length === 1 ? "" : "s"} for “${onlineQuery}”` });
-  renderTracks(onlineResults);
+  // Tracks already saved locally sink to their own section at the bottom.
+  const fresh = [], owned = [];
+  for (const t of onlineResults) (libraryLocalFor(ytId(t.path)) ? owned : fresh).push(t);
+  setViewHead({
+    icon: IC.globe, title: "YouTube",
+    subtitle: `${onlineResults.length} result${onlineResults.length === 1 ? "" : "s"} for “${onlineQuery}”${owned.length ? ` · ${owned.length} already in your library` : ""}`,
+  });
+  renderTracks([...sortTracks([...fresh]), ...sortTracks([...owned])], true);
+  if (owned.length) {
+    const host = $("#trackList");
+    const firstOwned = host.querySelector(`.track[data-idx="${fresh.length}"]`);
+    if (firstOwned) firstOwned.insertAdjacentHTML("beforebegin", `<div class="list-sep">${IC.check} Already in your library</div>`);
+    for (let i = fresh.length; i < view.length; i++) host.querySelector(`.track[data-idx="${i}"]`)?.classList.add("owned");
+  }
 }
 async function searchOnline(q) {
   if (!q) return;
