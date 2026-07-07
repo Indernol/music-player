@@ -213,7 +213,7 @@ fn main() {
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
             youtube::yt_playlist_preview,
             youtube::yt_download, youtube::yt_cancel,
-            youtube::yt_config, youtube::detect_browsers,
+            youtube::yt_config, youtube::yt_install, youtube::detect_browsers,
             mpris::media_update, mpris::media_playback,
             library::cover, library::read_image, library::delete_file,
             store::store_load, store::store_save,

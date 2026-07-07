@@ -39,9 +39,18 @@ export function setSourceUrl(id, url) {
   if (pl) { pl.sourceUrl = url; _persist(); }
 }
 
-export function addToPlaylist(id, path) {
+// allowDup: push even if the path is already present (creates a duplicate entry).
+export function addToPlaylist(id, path, allowDup = false) {
   const pl = _cache.find(p => p.id === id);
-  if (pl && !pl.paths.includes(path)) { pl.paths.push(path); _persist(); }
+  if (pl && (allowDup || !pl.paths.includes(path))) { pl.paths.push(path); _persist(); }
+}
+
+// How many of `paths` are already in the playlist (for the duplicate prompt).
+export function countExisting(id, paths) {
+  const pl = _cache.find(p => p.id === id);
+  if (!pl) return 0;
+  const set = new Set(pl.paths);
+  return paths.filter(p => set.has(p)).length;
 }
 
 export function removeFromPlaylist(id, path) {

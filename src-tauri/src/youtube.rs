@@ -127,6 +127,53 @@ fn detect_bin() -> Option<(String, String)> {
         .find_map(|p| check_bin(&p).ok().map(|v| (p, v)))
 }
 
+/// Download the self-contained yt-dlp standalone into ~/.local/bin/yt-dlp and
+/// mark it executable. Runs when no yt-dlp is found on the system (e.g. the
+/// external drive that held the binary was unplugged) so the app heals itself.
+/// The `*_linux` PyInstaller builds bundle their own Python — no system deps.
+fn install_bin() -> Result<String, String> {
+    use std::sync::OnceLock;
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    // Another thread may have installed it while we waited on the lock.
+    if let Some((p, _)) = detect_bin() {
+        return Ok(p);
+    }
+    let home = std::env::var("HOME").map_err(|_| "no HOME directory".to_string())?;
+    let asset = match std::env::consts::ARCH {
+        "x86_64" => "yt-dlp_linux",
+        "aarch64" => "yt-dlp_linux_aarch64",
+        "arm" => "yt-dlp_linux_armv7l",
+        other => return Err(format!("no prebuilt yt-dlp for this CPU ({other})")),
+    };
+    let url = format!("https://github.com/yt-dlp/yt-dlp/releases/latest/download/{asset}");
+    let dir = format!("{home}/.local/bin");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
+    let dest = format!("{dir}/yt-dlp");
+    let tmp = format!("{dest}.part"); // download aside, rename in — never a half file
+    dbg_log(&format!("installing yt-dlp from {url}"));
+    let resp = ureq::get(&url).call().map_err(|e| format!("download failed: {e}"))?;
+    {
+        let mut reader = resp.into_reader();
+        let mut f = std::fs::File::create(&tmp).map_err(|e| format!("cannot write {tmp}: {e}"))?;
+        std::io::copy(&mut reader, &mut f).map_err(|e| format!("download interrupted: {e}"))?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("cannot make yt-dlp executable: {e}"))?;
+    }
+    std::fs::rename(&tmp, &dest).map_err(|e| format!("cannot finalize {dest}: {e}"))?;
+    // Prove it actually runs before trusting it.
+    check_bin(&dest).map_err(|e| {
+        let _ = std::fs::remove_file(&dest);
+        format!("downloaded yt-dlp did not run: {e}")
+    })?;
+    dbg_log(&format!("yt-dlp installed at {dest}"));
+    Ok(dest)
+}
+
 fn ensure_bin(cfg: &YtCfg) -> Result<String, String> {
     {
         let guard = cfg.bin.lock().unwrap();
@@ -136,8 +183,11 @@ fn ensure_bin(cfg: &YtCfg) -> Result<String, String> {
             }
         }
     }
-    let (path, _) = detect_bin()
-        .ok_or("yt-dlp not found — set its location in Settings → YouTube, or install it")?;
+    // Prefer whatever is already on the system; otherwise fetch a standalone copy.
+    let path = match detect_bin() {
+        Some((p, _)) => p,
+        None => install_bin()?,
+    };
     *cfg.bin.lock().unwrap() = Some(path.clone());
     Ok(path)
 }
@@ -218,10 +268,28 @@ pub async fn yt_config(cfg: State<'_, YtCfg>, path: String, cookies: String) -> 
         *cfg.bin.lock().unwrap() = Some(p.to_string());
         return Ok(format!("{p} ({v})"));
     }
-    let (found, v) =
-        detect_bin().ok_or("yt-dlp not found automatically — pick the binary manually")?;
+    // No explicit path: use a system yt-dlp if present, else download one so the
+    // app works out of the box even after the drive holding it was unplugged.
+    let (found, v) = match detect_bin() {
+        Some(x) => x,
+        None => {
+            let p = install_bin()?;
+            let v = check_bin(&p).unwrap_or_default();
+            (p, v)
+        }
+    };
     *cfg.bin.lock().unwrap() = Some(found.clone());
     Ok(format!("{found} ({v})"))
+}
+
+/// Force-download the standalone yt-dlp (Settings → “Install yt-dlp”). Returns
+/// "path (version)". Reuses a system copy if one is already present.
+#[tauri::command]
+pub async fn yt_install(cfg: State<'_, YtCfg>) -> Result<String, String> {
+    let path = install_bin()?;
+    let v = check_bin(&path).unwrap_or_default();
+    *cfg.bin.lock().unwrap() = Some(path.clone());
+    Ok(format!("{path} ({v})"))
 }
 
 fn run_ytdlp_raw(bin: &str, args: &[&str], cookies: Option<&str>) -> Result<String, String> {
@@ -362,17 +430,19 @@ pub async fn yt_search_playlists(
     cfg: State<'_, YtCfg>,
     query: String,
     limit: Option<u32>,
+    offset: Option<u32>,
 ) -> Result<Vec<PlaylistHit>, String> {
     let q = query.trim();
     if q.is_empty() {
         return Ok(Vec::new());
     }
     let n = limit.unwrap_or(15).clamp(1, 100);
+    let off = offset.unwrap_or(0).min(900);
     let page = format!(
         "https://www.youtube.com/results?search_query={}&sp=EgIQAw%3D%3D",
         url_encode(q)
     );
-    let range = format!("1:{n}");
+    let range = format!("{}:{}", off + 1, off + n);
     let out = run_ytdlp(
         &cfg,
         &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &page],
@@ -453,17 +523,28 @@ fn find_existing(dir: &str, id: &str) -> Option<String> {
 
 fn resolve_download_dir(dir: &str) -> Result<String, String> {
     let dir = dir.trim();
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let default = format!("{home}/Music/MusicPlayer");
     let resolved = if dir.is_empty() {
-        let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-        format!("{home}/Music/MusicPlayer")
+        default.clone()
     } else if let Some(rest) = dir.strip_prefix("~/") {
-        let home = std::env::var("HOME").map_err(|e| e.to_string())?;
         format!("{home}/{rest}")
     } else {
         dir.to_string()
     };
-    std::fs::create_dir_all(&resolved).map_err(|e| format!("cannot create {resolved}: {e}"))?;
-    Ok(resolved)
+    if std::fs::create_dir_all(&resolved).is_ok() {
+        return Ok(resolved);
+    }
+    // The configured folder can't be created — typically it lived on a drive that
+    // has been unplugged, leaving a root-owned empty mountpoint ("permission
+    // denied"). Fall back to the default location instead of failing every
+    // download; a re-plugged drive works again automatically next time.
+    if resolved != default {
+        dbg_log(&format!("download dir '{resolved}' unavailable; using '{default}'"));
+        std::fs::create_dir_all(&default).map_err(|e| format!("cannot create {default}: {e}"))?;
+        return Ok(default);
+    }
+    Err(format!("cannot create {resolved}"))
 }
 
 /// Download a video's audio as mp3 into `dir` (empty = ~/Music/MusicPlayer),

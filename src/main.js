@@ -180,6 +180,35 @@ function enrichLibrary() {
   return changed;
 }
 
+// Playlists store absolute file paths. When the user moves their music to a new
+// folder (or a drive that held it is unplugged and the files now live elsewhere,
+// e.g. ~/Desktop/music), those stored paths go dead and the tracks silently
+// vanish from the playlist view (openPlaylist drops any path not in the library).
+// Re-point every dead local path to the library file carrying the same
+// "[videoId]" tag; fall back to a same-filename match for non-YouTube files.
+const VID_RE = /\[([A-Za-z0-9_-]{11})\]\.[a-z0-9]+$/i;
+function relinkPlaylists() {
+  const known = new Set(library.map(t => t.path));
+  const byVid = new Map(), byBase = new Map();
+  for (const t of library) {
+    const m = String(t.path).match(VID_RE);
+    if (m && !byVid.has(m[1])) byVid.set(m[1], t.path);
+    const b = String(t.path).split("/").pop();
+    if (b && !byBase.has(b)) byBase.set(b, t.path);
+  }
+  const dead = new Set();
+  for (const pl of PL.getPlaylists())
+    for (const p of pl.paths)
+      if (!isOnline(p) && !known.has(p)) dead.add(p);
+  let fixed = 0;
+  for (const p of dead) {
+    const m = String(p).match(VID_RE);
+    const target = (m && byVid.get(m[1])) || byBase.get(String(p).split("/").pop());
+    if (target && target !== p) { PL.replacePath(p, target); fixed++; }
+  }
+  return fixed;
+}
+
 // ─── In-app dialogs (replaces the ugly native prompt()/confirm() popups) ───
 let _dlgResolve = null, _dlgHasInput = false;
 function dlgClose(val) {
@@ -195,17 +224,19 @@ function askText(title, { placeholder = "", value = "", ok = "OK" } = {}) {
     const inp = $("#dlgInput");
     inp.hidden = false; inp.placeholder = placeholder; inp.value = value;
     $("#dlgOk").textContent = ok;
+    $("#dlgCancel").textContent = "Cancel";
     $("#dlgModal").hidden = false;
     setTimeout(() => inp.focus(), 0);
   });
 }
-function askConfirm(title, msg = "", ok = "OK") {
+function askConfirm(title, msg = "", ok = "OK", cancel = "Cancel") {
   return new Promise(res => {
     _dlgResolve = res; _dlgHasInput = false;
     $("#dlgTitle").textContent = title;
     $("#dlgMsg").textContent = msg; $("#dlgMsg").hidden = !msg;
     $("#dlgInput").hidden = true;
     $("#dlgOk").textContent = ok;
+    $("#dlgCancel").textContent = cancel;
     $("#dlgModal").hidden = false;
     setTimeout(() => $("#dlgOk").focus(), 0);
   });
@@ -214,7 +245,7 @@ function wireDialogs() {
   $("#dlgOk").addEventListener("click", () => dlgClose(_dlgHasInput ? $("#dlgInput").value.trim() : true));
   $("#dlgCancel").addEventListener("click", () => dlgClose(_dlgHasInput ? null : false));
   $("#dlgInput").addEventListener("keydown", e => { if (e.key === "Enter") dlgClose($("#dlgInput").value.trim()); });
-  $("#dlgModal").addEventListener("click", e => { if (e.target.id === "dlgModal") dlgClose(_dlgHasInput ? null : false); });
+  $("#dlgModal").addEventListener("click", e => { if (e.target.id === "dlgModal") dlgClose(null); });
 }
 
 function flash(msg) {
@@ -412,11 +443,24 @@ function openContextMenu(x, y) {
 
   menu.querySelectorAll("[data-add]").forEach(it => it.addEventListener("click", async () => {
     let id = it.dataset.add;
-    if (id === "__new") { closeCtx(); const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (!name) return; id = PL.createPlaylist(name).id; }
-    let n = 0; for (const p of paths) { PL.addToPlaylist(id, p); n++; }
+    const isNew = id === "__new";
+    if (isNew) { closeCtx(); const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (!name) return; id = PL.createPlaylist(name).id; }
+    else closeCtx();
+    // Duplicate handling: if some are already in the target, ask add-again vs skip.
+    let allowDup = false;
+    const dups = isNew ? 0 : PL.countExisting(id, paths);
+    if (dups > 0) {
+      allowDup = await askConfirm(
+        `${dups} of these ${paths.length === 1 ? "is" : "are"} already in the playlist`,
+        "Add them again as duplicates? Choose Skip to add only the new ones.",
+        "Add duplicates", "Skip duplicates");
+      if (allowDup === null) return; // dialog dismissed
+    }
+    let n = 0; for (const p of paths) { const before = PL.countExisting(id, [p]); PL.addToPlaylist(id, p, allowDup); if (allowDup || !before) n++; }
     if (paths.some(isOnline)) saveOnline(); // keep online metadata across restarts
     const nm = PL.getPlaylists().find(p => p.id === id)?.name || "playlist";
-    renderPlaylists(); flash(`Added ${n} track${n === 1 ? "" : "s"} to “${nm}”`); closeCtx();
+    renderPlaylists();
+    flash(n ? `Added ${n} track${n === 1 ? "" : "s"} to “${nm}”` : `Nothing added — already in “${nm}”`);
   }));
 }
 function closeCtx() { const m = $("#ctxMenu"); if (m && !m.hidden) { m.hidden = true; m.innerHTML = ""; } }
@@ -685,6 +729,7 @@ async function searchOnline(q, page = 0) {
 let impTracks = [];
 function openImport() {
   impTracks = [];
+  impHits = []; impSearchQuery = ""; impSearchOffset = 0; impSearchMore = false; impPreviewRun++;
   $("#impQuery").value = ""; $("#impHits").innerHTML = "";
   $("#impUrl").value = ""; $("#impStatus").textContent = ""; $("#impList").innerHTML = "";
   $("#impDl").checked = S().autoSaveImports;
@@ -692,38 +737,65 @@ function openImport() {
   $("#impQuery").focus();
 }
 // Search YouTube for playlists by name/author; picking a hit fetches its tracks.
-async function impSearchGo() {
-  const q = $("#impQuery").value.trim();
+// Results accumulate: "Load more" fetches the next page via the offset param.
+let impHits = [], impSearchQuery = "", impSearchOffset = 0, impSearchMore = false, impPreviewRun = 0;
+async function impSearchGo(more = false) {
+  const q = more ? impSearchQuery : $("#impQuery").value.trim();
   if (!q) return;
   if (!IS_NATIVE) { flash("Playlist search needs the native app"); return; }
   const host = $("#impHits");
-  host.innerHTML = `<div class="nx-note">Searching playlists…</div>`;
+  const limit = Number(S().searchLimit) || 20;
+  if (!more) { impSearchQuery = q; impSearchOffset = 0; impHits = []; impPreviewRun++; host.innerHTML = `<div class="nx-note">Searching playlists…</div>`; }
+  else { const b = $("#impMore"); if (b) { b.disabled = true; b.textContent = "Loading…"; } }
   try {
-    const hits = await invoke("yt_search_playlists", { query: q, limit: Number(S().searchLimit) || 20 });
-    if (!hits?.length) { host.innerHTML = `<div class="nx-note">No playlists found for “${esc(q)}”.</div>`; return; }
-    host.innerHTML = hits.map((h, i) =>
-      `<div class="imp-hit" data-hit="${i}" title="${esc(h.url)}">
-        <span class="ih-t">${esc(h.title)}</span>
-        <span class="ih-a">${esc(h.author || "")}</span>
-      </div>`).join("");
-    host.querySelectorAll("[data-hit]").forEach(el => el.addEventListener("click", () => {
-      host.querySelectorAll(".imp-hit").forEach(x => x.classList.toggle("on", x === el));
-      $("#impUrl").value = hits[Number(el.dataset.hit)].url;
-      impFetch();
-    }));
-    // Background previews: first titles of each playlist, filled in lazily.
-    (async () => {
-      for (let i = 0; i < hits.length; i++) {
-        const el = host.querySelector(`[data-hit="${i}"]`);
-        if (!el || !el.isConnected) break;
-        try {
-          const titles = await invoke("yt_playlist_preview", { url: hits[i].url, count: 3 });
-          if (!el.isConnected) break;
-          if (titles?.length) el.insertAdjacentHTML("beforeend", `<div class="ih-prev">${esc(titles.join("  ·  "))}</div>`);
-        } catch { break; }
+    const hits = await invoke("yt_search_playlists", { query: q, limit, offset: impSearchOffset });
+    impSearchMore = Array.isArray(hits) && hits.length >= limit;
+    impSearchOffset += hits?.length || 0;
+    impHits.push(...(hits || []));
+    if (!impHits.length) { host.innerHTML = `<div class="nx-note">No playlists found for “${esc(q)}”.</div>`; return; }
+    impRenderHits();
+  } catch (e) {
+    if (more) { const b = $("#impMore"); if (b) { b.disabled = false; b.textContent = "Load more"; } flash("Load more failed"); }
+    else host.innerHTML = `<div class="nx-note">Search failed: ${esc(String(e))}</div>`;
+  }
+}
+function impRenderHits() {
+  const host = $("#impHits");
+  const sel = $("#impUrl").value;
+  host.innerHTML = impHits.map((h, i) =>
+    `<div class="imp-hit${h.url === sel ? " on" : ""}" data-hit="${i}" title="${esc(h.url)}">
+      <span class="ih-t">${esc(h.title)}</span>
+      <span class="ih-a">${esc(h.author || "")}</span>
+      ${h._prev ? `<div class="ih-prev">${esc(h._prev)}</div>` : ""}
+    </div>`).join("") +
+    (impSearchMore ? `<button id="impMore" class="btn-line sm imp-more">Load more</button>` : "");
+  host.querySelectorAll("[data-hit]").forEach(el => el.addEventListener("click", () => {
+    host.querySelectorAll(".imp-hit").forEach(x => x.classList.toggle("on", x === el));
+    $("#impUrl").value = impHits[Number(el.dataset.hit)].url;
+    impFetch();
+  }));
+  $("#impMore")?.addEventListener("click", () => impSearchGo(true));
+  impLoadPreviews();
+}
+// Background previews: first titles of each playlist, filled in lazily and cached.
+async function impLoadPreviews() {
+  const run = ++impPreviewRun;
+  const host = $("#impHits");
+  for (let i = 0; i < impHits.length; i++) {
+    if (run !== impPreviewRun) return; // superseded by a newer render
+    if (impHits[i]._prev) continue;
+    const el = host.querySelector(`[data-hit="${i}"]`);
+    if (!el || !el.isConnected) continue;
+    try {
+      const titles = await invoke("yt_playlist_preview", { url: impHits[i].url, count: 3 });
+      if (run !== impPreviewRun) return;
+      if (titles?.length) {
+        impHits[i]._prev = titles.join("  ·  ");
+        const cur = host.querySelector(`[data-hit="${i}"]`);
+        if (cur && !cur.querySelector(".ih-prev")) cur.insertAdjacentHTML("beforeend", `<div class="ih-prev">${esc(impHits[i]._prev)}</div>`);
       }
-    })();
-  } catch (e) { host.innerHTML = `<div class="nx-note">Search failed: ${esc(String(e))}</div>`; }
+    } catch { return; }
+  }
 }
 async function impFetch() {
   const url = $("#impUrl").value.trim();
@@ -1596,8 +1668,9 @@ function openSettings() {
           <input type="text" id="setYtPath" class="text-in" placeholder="auto-detect" value="${esc(s.ytdlpPath)}">
           <button id="setYtPick" class="btn-line sm" title="Pick the binary">🗂️</button>
           <button id="setYtTest" class="btn-line sm" title="Test">Test</button>
+          <button id="setYtInstall" class="btn-line sm" title="Download yt-dlp automatically">⬇ Install</button>
         </span></div>
-      <div class="set-hint" id="setYtStatus">Empty = auto-detect (PATH, Desktop folders, external drives, linuxbrew).</div>
+      <div class="set-hint" id="setYtStatus">Empty = auto-detect (PATH, Desktop folders, external drives, linuxbrew). Missing? Click <b>Install</b> to download it.</div>
       <div class="set-row"><label>Cookies from browser</label>
         <select id="setCookies" class="sel sm-sel wide">${["", "firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"].map(b => `<option value="${b}" ${s.cookiesBrowser === b ? "selected" : ""}>${b || "None"}</option>`).join("")}</select></div>
       <div class="set-hint">⚠ A logged-in YouTube session often gets blocked (“format not available”) — keep <b>None</b> unless needed. Failed calls retry without cookies automatically.</div>
@@ -1693,6 +1766,13 @@ function openSettings() {
   };
   $("#setYtPath").addEventListener("change", e => { SETTINGS.setSetting("ytdlpPath", e.target.value.trim()); ytTest(); });
   $("#setYtTest").addEventListener("click", ytTest);
+  $("#setYtInstall").addEventListener("click", async () => {
+    const btn = $("#setYtInstall"); btn.disabled = true;
+    ytStatus("Downloading yt-dlp… (this can take a moment)");
+    try { const r = await ytInstall(); $("#setYtPath").value = ""; ytStatus(`✔ Installed: ${r}`, true); flash("yt-dlp installed"); }
+    catch (e) { ytStatus(`✘ ${e}`, false); }
+    finally { btn.disabled = false; }
+  });
   $("#setYtPick").addEventListener("click", async () => {
     try {
       const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Pick the yt-dlp binary" } });
@@ -1891,16 +1971,26 @@ async function ytConfigPush() {
   try { return await invoke("yt_config", { path: S().ytdlpPath || "", cookies: S().cookiesBrowser || "" }); }
   catch (e) { console.warn("[yt config]", e); throw e; }
 }
+// Download the standalone yt-dlp (self-contained) into ~/.local/bin. Clears any
+// stale explicit path so auto-detect picks up the fresh copy afterwards.
+async function ytInstall() {
+  if (!IS_NATIVE) throw new Error("native app only");
+  const r = await invoke("yt_install");
+  SETTINGS.setSetting("ytdlpPath", "");
+  return r;
+}
 function setupStep(n) {
   document.querySelectorAll("#setupModal .setup-step").forEach(el => el.hidden = el.dataset.step !== String(n));
   $("#setupTitle").textContent = n === 0 ? "Welcome 🎧" : "Setup";
 }
 async function setupDetect() {
   const st = $("#suYtStatus");
-  st.className = "setup-status"; st.textContent = "Detecting yt-dlp…";
+  // yt_config auto-downloads a standalone copy when nothing is found, so this
+  // may take a few seconds on first run.
+  st.className = "setup-status"; st.textContent = "Setting up yt-dlp (downloading if needed)…";
   try {
     const r = await ytConfigPush();
-    st.classList.add("ok"); st.textContent = `✔ Found: ${r}`;
+    st.classList.add("ok"); st.textContent = `✔ Ready: ${r}`;
   } catch (e) {
     st.classList.add("bad"); st.textContent = `✘ ${e}`;
   }
@@ -1992,6 +2082,8 @@ async function init() {
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock()]);
   await loadLibrary();
   if (enrichLibrary()) saveLibrary();
+  const relinked = relinkPlaylists(); // heal playlist paths after moved/re-added music
+  if (relinked) flash(`Relinked ${relinked} moved track${relinked === 1 ? "" : "s"}`);
 
   if (!IS_NATIVE) {
     const banner = document.createElement("div");
