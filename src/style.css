@@ -336,7 +336,7 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 }
 /* Big artwork: contain (not crop) on black — YouTube thumbnails are letterboxed
    16:9, cover made them look off-center; contain shows the full art, centered. */
-.ov-art.has-cover { background-size: contain !important; background-repeat: no-repeat; background-position: center !important; background-color: #000 !important; color: transparent; }
+.ov-art.has-cover { background-size: contain !important; background-repeat: no-repeat !important; background-position: center !important; background-color: #000 !important; color: transparent; }
 .ov-title { font-size: 17px; font-weight: 800; line-height: 1.25; }
 .ov-sub { font-size: 13px; color: var(--tx-2); }
 .ov-meta { font-size: 11px; color: var(--tx-3); }

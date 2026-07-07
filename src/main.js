@@ -98,7 +98,7 @@ function artInitial(t) { const s = (t.album || t.title || "?").trim(); return (s
 // ─── Album art (embedded cover, deduped per album, lazily fetched) ───
 const coverCache = new Map(); // albumKey -> dataURL | "" (none/pending)
 function albumKey(t) { return `${t.artist}|||${t.album}`; }
-function setArtImg(el, url) { el.style.backgroundImage = `url("${url}")`; el.textContent = ""; el.classList.add("has-cover"); }
+function setArtImg(el, url) { el.style.background = ""; el.style.backgroundImage = `url("${url}")`; el.textContent = ""; el.classList.add("has-cover"); }
 function setArtPlaceholder(el, t) { el.classList.remove("has-cover"); el.style.backgroundImage = ""; el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t); el.dataset.album = albumKey(t); }
 function artCell(t) {
   if (t.thumbnail && S().showArt) return `<div class="art has-cover" style="background-image:url('${esc(t.thumbnail)}')"></div>`;
@@ -978,17 +978,48 @@ function markActive() {
 }
 
 // ─── Playback (gapless) ───
+// Shuffle = a pre-computed permutation of the queue (like real players), so
+// the upcoming order is stable, visible in "Up next", and never repeats a
+// track until the whole queue has played.
+let shufOrder = [];
+function buildShuffle(startIdx) {
+  shufOrder = queue.map((_, i) => i);
+  for (let i = shufOrder.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shufOrder[i], shufOrder[j]] = [shufOrder[j], shufOrder[i]];
+  }
+  if (startIdx >= 0) {
+    const p = shufOrder.indexOf(startIdx);
+    if (p > 0) { shufOrder.splice(p, 1); shufOrder.unshift(startIdx); }
+  }
+}
+function playOrder() {
+  if (!shuffle) return queue.map((_, i) => i);
+  if (shufOrder.length !== queue.length) buildShuffle(curIndex);
+  return shufOrder;
+}
+// Queue indexes that will play after the current track (repeat-aware).
+function upcomingIndexes(max = 25) {
+  const out = [];
+  if (curIndex < 0 || !queue.length || repeatMode === "one") return out;
+  const order = playOrder();
+  const pos = order.indexOf(curIndex);
+  for (let k = 1; k < order.length && out.length < max; k++) {
+    const at = pos + k;
+    if (at < order.length) out.push(order[at]);
+    else if (repeatMode === "all") out.push(order[at - order.length]);
+    else break;
+  }
+  return out;
+}
 // `manual` = user pressed Next: skips repeat-one and still wraps on repeat-all.
 function nextIndex(from, manual = false) {
   if (!queue.length) return -1;
   if (repeatMode === "one" && !manual) return from;
-  if (shuffle) {
-    if (queue.length === 1) return repeatMode !== "off" ? from : -1;
-    let r; do { r = Math.floor(Math.random() * queue.length); } while (r === from);
-    return r;
-  }
-  if (from + 1 <= queue.length - 1) return from + 1;
-  return repeatMode !== "off" ? 0 : -1; // wrap around when repeating
+  const order = playOrder();
+  const pos = order.indexOf(from);
+  if (pos >= 0 && pos + 1 < order.length) return order[pos + 1];
+  return repeatMode !== "off" ? order[0] ?? -1 : -1; // wrap around when repeating
 }
 function updateNowPlaying(t, path) {
   setPlayIcon(true);
@@ -1009,7 +1040,7 @@ function updateNowPlaying(t, path) {
   $("#curTime").textContent = "0:00"; _lastTimeTxt = "0:00";
   notifyTrack(t); updateRPC(t, true); mediaUpdate(t); renderNpPanel();
 }
-async function playFrom(viewIdx) { queue = view.map(t => t.path); history = []; await hardPlay(viewIdx); }
+async function playFrom(viewIdx) { queue = view.map(t => t.path); history = []; if (shuffle) buildShuffle(viewIdx); await hardPlay(viewIdx); }
 // If an online track was downloaded (file named "… [<id>].mp3"), play the local
 // file instead of streaming from YouTube (Settings → "Prefer local file").
 function effectivePath(path) {
@@ -1183,18 +1214,12 @@ function renderNpPanel() {
     art.classList.remove("has-cover"); art.style.backgroundImage = ""; art.style.background = "var(--bg-3)"; art.textContent = "🎶";
     $("#ovTitle").textContent = "Nothing playing"; $("#ovSub").textContent = ""; $("#ovMeta").textContent = "";
   }
-  // Up next
-  const items = [];
+  // Up next — same list for sequential AND shuffle (pre-computed order).
+  const items = upcomingIndexes(25).map(qi => ({ qi }));
   if (curIndex >= 0 && queue.length) {
-    if (repeatMode === "one") items.push({ note: "🔂 Repeat one — this track loops" });
-    else if (shuffle) {
-      if (preIndex >= 0 && preIndex !== curIndex) items.push({ qi: preIndex });
-      items.push({ note: "🔀 Shuffle — order is random" });
-    } else {
-      for (let i = curIndex + 1, n = 0; i < queue.length && n < 25; i++, n++) items.push({ qi: i });
-      if (repeatMode === "all") { for (let i = 0, n = items.length; i < curIndex && n < 25; i++, n++) items.push({ qi: i }); }
-      if (!items.length) items.push({ note: "End of queue" });
-    }
+    if (repeatMode === "one") items.push({ note: "Repeat one — this track loops" });
+    else if (!items.length) items.push({ note: "End of queue" });
+    else if (shuffle) items.push({ note: "Shuffled order" });
   }
   const host = $("#upNextList");
   host.innerHTML = items.length
@@ -1883,7 +1908,7 @@ async function init() {
   $("#playBtn").addEventListener("click", togglePlay);
   $("#nextBtn").addEventListener("click", next);
   $("#prevBtn").addEventListener("click", prev);
-  $("#shuffleBtn").addEventListener("click", () => { shuffle = !shuffle; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); flash(shuffle ? "Shuffle on" : "Shuffle off"); });
+  $("#shuffleBtn").addEventListener("click", () => { shuffle = !shuffle; $("#shuffleBtn").classList.toggle("active", shuffle); if (shuffle) buildShuffle(curIndex); if (curIndex >= 0) schedulePreload(); renderNpPanel(); flash(shuffle ? "Shuffle on" : "Shuffle off"); });
   $("#repeatBtn").addEventListener("click", () => {
     repeatMode = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
     SETTINGS.setSetting("repeatDefault", repeatMode);
