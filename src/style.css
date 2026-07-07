@@ -67,11 +67,9 @@ body {
 .playlists-list { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .pl-row { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--tx-2); font-size: 13px; }
 .pl-row:hover { background: var(--bg-2); color: var(--tx-1); }
-.pl-row .pl-del, .pl-row .pl-dl { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 12px; width: 21px; height: 21px; border-radius: 6px; padding: 0; flex-shrink: 0; }
-.pl-row .pl-dl { opacity: .6; } /* always visible — download is a primary action */
-.pl-row .pl-del { opacity: 0; }
-.pl-row:hover .pl-del, .pl-row:hover .pl-dl { opacity: 1; }
-.pl-row .pl-del:hover, .pl-row .pl-dl:hover { background: var(--bg-4); color: var(--tx-1); }
+.pl-row .pl-del { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 12px; width: 21px; height: 21px; border-radius: 6px; padding: 0; flex-shrink: 0; opacity: 0; }
+.pl-row:hover .pl-del { opacity: 1; }
+.pl-row .pl-del:hover { background: var(--bg-4); color: var(--tx-1); }
 
 .settings-btn { margin-top: auto; background: transparent; border: 1px solid var(--bd); color: var(--tx-2); padding: 9px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 700; }
 .settings-btn:hover { border-color: var(--bd-2); color: var(--tx-1); }

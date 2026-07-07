@@ -355,12 +355,10 @@ function renderPlaylists() {
     pls.map(p => {
       const on = active.type === "playlist" && active.id === p.id;
       return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}">🎼 ${esc(p.name)} <span class="pl-count">${p.paths.length}</span>
-        <button class="pl-dl" data-dlpl="${p.id}" title="Save all tracks locally (mp3)">📥</button>
         <button class="pl-del" data-del="${p.id}" title="Delete">✕</button></div>`;
     }).join("");
   host.querySelector("#plNew").addEventListener("click", () => { const name = prompt("Playlist name:"); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
-  host.querySelectorAll("[data-pl]").forEach(el => el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined || e.target.dataset.dlpl !== undefined) return; openPlaylist(el.dataset.pl); }));
-  host.querySelectorAll("[data-dlpl]").forEach(btn => btn.addEventListener("click", (e) => { e.stopPropagation(); downloadPlaylist(btn.dataset.dlpl); }));
+  host.querySelectorAll("[data-pl]").forEach(el => el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined) return; openPlaylist(el.dataset.pl); }));
   host.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", (e) => { e.stopPropagation(); if (confirm("Delete this playlist?")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); } }));
 }
 function openPlaylist(id) {
