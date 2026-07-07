@@ -63,6 +63,11 @@ fn set_volume(level: f32, state: State<AppState>) {
 }
 
 #[tauri::command]
+fn set_agc(on: bool, state: State<AppState>) {
+    state.audio.set_agc(on);
+}
+
+#[tauri::command]
 fn seek(secs: f64, state: State<AppState>) {
     state.audio.seek(secs);
 }
@@ -202,7 +207,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            scan, scan_diff, play, preload, pause, resume, stop, set_volume, seek, status,
+            scan, scan_diff, play, preload, pause, resume, stop, set_volume, set_agc, seek, status,
             source_version, self_update, restart_app,
             play_stream, preload_stream, prefetch_stream,
             youtube::yt_search, youtube::yt_playlist, youtube::yt_download, youtube::yt_cancel,

@@ -370,12 +370,47 @@ function openPlaylist(id) {
   const byPath = new Map(library.map(t => [t.path, t]));
   selected.clear();
   const nOnline = pl.paths.filter(isOnline).length;
+  const fw = followFor(id);
   setViewHead({
-    icon: "🎼", title: pl.name, subtitle: `${pl.paths.length} songs${nOnline ? ` · ${nOnline} online` : ""}`,
-    actions: nOnline ? `<button id="plDlBtn" class="btn-line sm">📥 Save locally (${nOnline} mp3)</button>` : "",
+    icon: "🎼", title: pl.name, subtitle: `${pl.paths.length} songs${nOnline ? ` · ${nOnline} online` : ""}${fw ? " · 🔁 followed" : ""}`,
+    actions:
+      `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${fw ? "🔁 Following ✓" : "🔁 Follow"}</button>` +
+      (nOnline ? `<button id="plDlBtn" class="btn-line sm">📥 Save locally (${nOnline} mp3)</button>` : ""),
   });
   $("#plDlBtn")?.addEventListener("click", () => downloadPlaylist(id));
+  $("#plFollowBtn")?.addEventListener("click", () => (followFor(id) ? unfollowPlaylist(id) : followPlaylistFlow(id)));
   renderTracks(pl.paths.map(p => byPath.get(p) || onlineIndex.get(p)).filter(Boolean));
+}
+
+// Follow an ALREADY-imported playlist: reuse its remembered source URL, or ask
+// for one. Everything currently upstream or already in the playlist counts as
+// known — only future additions will arrive.
+async function followPlaylistFlow(id) {
+  const pl = PL.getPlaylists().find(p => p.id === id);
+  if (!pl) return;
+  let url = pl.sourceUrl || prompt("YouTube playlist URL to follow:");
+  if (!url || !url.trim()) return;
+  url = url.trim();
+  flash("Linking playlist…");
+  try {
+    const res = await invoke("yt_playlist", { url });
+    const upstream = (res.tracks || []).map(t => t.id);
+    const local = pl.paths
+      .map(p => (isOnline(p) ? ytId(p) : (String(p).match(/\[([A-Za-z0-9_-]{11})\]/) || [])[1]))
+      .filter(Boolean);
+    addFollow({ url, title: res.title || pl.name, playlistId: id, autoDownload: S().autoSaveImports, knownIds: [...upstream, ...local] });
+    PL.setSourceUrl(id, url);
+    renderPlaylists(); openPlaylist(id);
+    flash(`🔁 Following “${res.title || pl.name}” — new tracks will be added automatically`);
+  } catch (e) { flash(`Cannot follow: ${e}`); }
+}
+function unfollowPlaylist(id) {
+  const fw = followFor(id);
+  if (!fw) return;
+  if (!confirm(`Unfollow “${fw.title}”?\nAlready-added tracks are kept.`)) return;
+  follows = follows.filter(f => f.id !== fw.id);
+  saveFollows(); renderPlaylists(); openPlaylist(id);
+  flash("Unfollowed");
 }
 
 // ─── YouTube search (Enter in the search bar) ───
@@ -464,6 +499,7 @@ async function impGo() {
   if (!chosen.length && !following) { flash("No tracks selected"); return; }
   let dest = $("#impDest").value;
   if (dest === "__new") dest = PL.createPlaylist($("#impDest").dataset.title).id;
+  PL.setSourceUrl(dest, $("#impDest").dataset.url); // enables follow-after-import
   for (const t of chosen) { onlineIndex.set(t.path, t); PL.addToPlaylist(dest, t.path); }
   await saveOnline();
   if (following) {
@@ -974,7 +1010,8 @@ function applySettings() {
   applyAccent();
   document.body.classList.toggle("compact", S().compactRows);
   document.body.classList.toggle("no-anim", !S().animations);
-  normalize = S().normalizeDefault; $("#normChk").checked = normalize;
+  normalize = S().normalizeDefault;
+  invoke("set_agc", { on: normalize }).catch(() => {});
   shuffle = S().shuffleDefault; $("#shuffleBtn").classList.toggle("active", shuffle);
   repeatMode = ["off", "all", "one"].includes(S().repeatDefault) ? S().repeatDefault : "off";
   updateRepeatBtn();
@@ -992,7 +1029,8 @@ function openSettings() {
     </div>
     <div class="set-group"><div class="set-title">Playback</div>
       <div class="set-row"><label>Default volume</label><input type="range" id="setVol" min="0" max="100" value="${s.defaultVolume}"></div>
-      <div class="set-row"><label>Normalize loudness by default</label><input type="checkbox" id="setNorm" ${s.normalizeDefault ? "checked" : ""}></div>
+      <div class="set-row"><label>Keep all tracks at the same volume</label><input type="checkbox" id="setNorm" ${s.normalizeDefault ? "checked" : ""}></div>
+      <div class="set-hint">Automatic gain control evens out quiet/loud tracks (works for streams and YouTube mp3s without tags). Applies from the next track.</div>
       <div class="set-row"><label>Shuffle by default</label><input type="checkbox" id="setShuf" ${s.shuffleDefault ? "checked" : ""}></div>
       <div class="set-row"><label>Preload next track (gapless)</label><input type="checkbox" id="setPreload" ${s.preloadNext ? "checked" : ""}></div>
     </div>
@@ -1060,7 +1098,7 @@ function openSettings() {
   $("#setCompact").addEventListener("change", e => { SETTINGS.setSetting("compactRows", e.target.checked); document.body.classList.toggle("compact", e.target.checked); });
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
   $("#setVol").addEventListener("change", e => { SETTINGS.setSetting("defaultVolume", Number(e.target.value)); $("#volume").value = e.target.value; invoke("set_volume", { level: Number(e.target.value) / 100 }); });
-  $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; $("#normChk").checked = normalize; });
+  $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); });
   $("#setNotify").addEventListener("change", e => SETTINGS.setSetting("notifyOnChange", e.target.checked));
   $("#setPreload").addEventListener("change", e => { SETTINGS.setSetting("preloadNext", e.target.checked); if (curIndex >= 0) schedulePreload(); });
@@ -1338,7 +1376,6 @@ async function init() {
     if (curIndex >= 0) schedulePreload();
     flash(repeatMode === "off" ? "Repeat off" : repeatMode === "all" ? "Repeat all" : "Repeat one");
   });
-  $("#normChk").addEventListener("change", e => { normalize = e.target.checked; flash(normalize ? "Normalize on (next tracks)" : "Normalize off"); });
   $("#volume").addEventListener("input", e => invoke("set_volume", { level: Number(e.target.value) / 100 }));
 
   $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });

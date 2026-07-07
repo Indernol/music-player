@@ -15,13 +15,19 @@ use rodio::{Decoder, OutputStreamBuilder, Sink, Source};
 use serde::Serialize;
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 const FADE: Duration = Duration::from_millis(20);
+// Automatic gain control: evens out perceived loudness across tracks (YouTube
+// rips have no ReplayGain tags, so tag-based normalization can't help them).
+const AGC_TARGET: f32 = 0.85;
+const AGC_ATTACK: f32 = 4.0;
+const AGC_RELEASE: f32 = 0.005;
+const AGC_MAX_GAIN: f32 = 4.0;
 
 enum AudioCmd {
     Play(String, f32, u64),    // path, linear gain, epoch — hard start (fresh sink)
@@ -47,9 +53,22 @@ pub struct AudioController {
     tx: Mutex<Sender<AudioCmd>>,
     sink: Arc<Mutex<(u64, Option<Sink>)>>,
     next_epoch: AtomicU64,
+    agc: Arc<AtomicBool>,
 }
 
-fn append_track(sink: &Sink, path: &str, gain: f32) {
+fn append_source<S>(sink: &Sink, src: S, gain: f32, agc: bool)
+where
+    S: Source + Send + 'static,
+{
+    let base = src.fade_in(FADE).amplify(gain);
+    if agc {
+        sink.append(base.automatic_gain_control(AGC_TARGET, AGC_ATTACK, AGC_RELEASE, AGC_MAX_GAIN));
+    } else {
+        sink.append(base);
+    }
+}
+
+fn append_track(sink: &Sink, path: &str, gain: f32, agc: bool) {
     // rodio 0.21 defaults to is_seekable=false; opt back in so Sink::try_seek works.
     match File::open(path).map_err(|e| e.to_string()).and_then(|f| {
         let len = f.metadata().map(|m| m.len()).ok();
@@ -61,12 +80,12 @@ fn append_track(sink: &Sink, path: &str, gain: f32) {
         }
         b.build().map_err(|e| e.to_string())
     }) {
-        Ok(dec) => sink.append(dec.fade_in(FADE).amplify(gain)),
+        Ok(dec) => append_source(sink, dec, gain, agc),
         Err(e) => eprintln!("[audio] cannot load {path}: {e}"),
     }
 }
 
-fn append_url(sink: &Sink, url: &str, gain: f32) {
+fn append_url(sink: &Sink, url: &str, gain: f32, agc: bool) {
     // byte_len is mandatory here: symphonia's isomp4 demuxer refuses to probe
     // YouTube's moov-after-mdat m4a files without knowing the total size.
     match HttpStream::open(url.to_string()).and_then(|s| {
@@ -78,7 +97,7 @@ fn append_url(sink: &Sink, url: &str, gain: f32) {
             .build()
             .map_err(|e| e.to_string())
     }) {
-        Ok(dec) => sink.append(dec.fade_in(FADE).amplify(gain)),
+        Ok(dec) => append_source(sink, dec, gain, agc),
         Err(e) => eprintln!("[audio] cannot stream: {e}"),
     }
 }
@@ -88,6 +107,8 @@ impl AudioController {
         let (tx, rx) = channel::<AudioCmd>();
         let sink: Arc<Mutex<(u64, Option<Sink>)>> = Arc::new(Mutex::new((0, None)));
         let sink_t = sink.clone();
+        let agc = Arc::new(AtomicBool::new(true));
+        let agc_t = agc.clone();
 
         thread::spawn(move || {
             // The OutputStream must stay alive for the whole thread.
@@ -101,27 +122,28 @@ impl AudioController {
             *sink_t.lock().unwrap() = (0, Some(Sink::connect_new(stream.mixer())));
 
             while let Ok(cmd) = rx.recv() {
+                let agc_on = agc_t.load(Ordering::Relaxed);
                 match cmd {
                     AudioCmd::Play(path, gain, epoch) => {
                         let new_sink = Sink::connect_new(stream.mixer());
-                        append_track(&new_sink, &path, gain);
+                        append_track(&new_sink, &path, gain, agc_on);
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
                     }
                     AudioCmd::Preload(path, gain) => {
                         if let (_, Some(s)) = &*sink_t.lock().unwrap() {
-                            append_track(s, &path, gain);
+                            append_track(s, &path, gain, agc_on);
                         }
                     }
                     AudioCmd::PlayUrl(url, gain, epoch) => {
                         let new_sink = Sink::connect_new(stream.mixer());
-                        append_url(&new_sink, &url, gain);
+                        append_url(&new_sink, &url, gain, agc_on);
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
                     }
                     AudioCmd::PreloadUrl(url, gain) => {
                         if let (_, Some(s)) = &*sink_t.lock().unwrap() {
-                            append_url(s, &url, gain);
+                            append_url(s, &url, gain, agc_on);
                         }
                     }
                     AudioCmd::Clear(epoch) => {
@@ -135,7 +157,14 @@ impl AudioController {
             tx: Mutex::new(tx),
             sink,
             next_epoch: AtomicU64::new(0),
+            agc,
         }
+    }
+
+    /// Toggle automatic loudness normalization (applies to the NEXT queued
+    /// sources — the currently playing one keeps its chain).
+    pub fn set_agc(&self, on: bool) {
+        self.agc.store(on, Ordering::Relaxed);
     }
 
     fn send(&self, cmd: AudioCmd) {

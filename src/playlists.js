@@ -33,6 +33,12 @@ export function renamePlaylist(id, name) {
   if (pl) { pl.name = (name || "").trim() || pl.name; _persist(); }
 }
 
+// Remember where an imported playlist came from (enables follow-after-import).
+export function setSourceUrl(id, url) {
+  const pl = _cache.find(p => p.id === id);
+  if (pl) { pl.sourceUrl = url; _persist(); }
+}
+
 export function addToPlaylist(id, path) {
   const pl = _cache.find(p => p.id === id);
   if (pl && !pl.paths.includes(path)) { pl.paths.push(path); _persist(); }
