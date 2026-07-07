@@ -158,6 +158,43 @@ function enrichLibrary() {
   return changed;
 }
 
+// ─── In-app dialogs (replaces the ugly native prompt()/confirm() popups) ───
+let _dlgResolve = null, _dlgHasInput = false;
+function dlgClose(val) {
+  $("#dlgModal").hidden = true;
+  const r = _dlgResolve; _dlgResolve = null;
+  r?.(val);
+}
+function askText(title, { placeholder = "", value = "", ok = "OK" } = {}) {
+  return new Promise(res => {
+    _dlgResolve = res; _dlgHasInput = true;
+    $("#dlgTitle").textContent = title;
+    $("#dlgMsg").hidden = true;
+    const inp = $("#dlgInput");
+    inp.hidden = false; inp.placeholder = placeholder; inp.value = value;
+    $("#dlgOk").textContent = ok;
+    $("#dlgModal").hidden = false;
+    setTimeout(() => inp.focus(), 0);
+  });
+}
+function askConfirm(title, msg = "", ok = "OK") {
+  return new Promise(res => {
+    _dlgResolve = res; _dlgHasInput = false;
+    $("#dlgTitle").textContent = title;
+    $("#dlgMsg").textContent = msg; $("#dlgMsg").hidden = !msg;
+    $("#dlgInput").hidden = true;
+    $("#dlgOk").textContent = ok;
+    $("#dlgModal").hidden = false;
+    setTimeout(() => $("#dlgOk").focus(), 0);
+  });
+}
+function wireDialogs() {
+  $("#dlgOk").addEventListener("click", () => dlgClose(_dlgHasInput ? $("#dlgInput").value.trim() : true));
+  $("#dlgCancel").addEventListener("click", () => dlgClose(_dlgHasInput ? null : false));
+  $("#dlgInput").addEventListener("keydown", e => { if (e.key === "Enter") dlgClose($("#dlgInput").value.trim()); });
+  $("#dlgModal").addEventListener("click", e => { if (e.target.id === "dlgModal") dlgClose(_dlgHasInput ? null : false); });
+}
+
 function flash(msg) {
   let el = $("#toast");
   if (!el) { el = document.createElement("div"); el.id = "toast"; el.className = "toast"; document.body.appendChild(el); }
@@ -289,9 +326,9 @@ function openContextMenu(x, y) {
   menu.style.left = Math.min(x, window.innerWidth - 224) + "px";
   menu.style.top = Math.min(y, window.innerHeight - Math.min(menu.offsetHeight + 8, 340)) + "px";
   menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playFrom(i); closeCtx(); });
-  menu.querySelectorAll("[data-add]").forEach(it => it.addEventListener("click", () => {
+  menu.querySelectorAll("[data-add]").forEach(it => it.addEventListener("click", async () => {
     let id = it.dataset.add;
-    if (id === "__new") { const name = prompt("New playlist name:"); if (!name) { closeCtx(); return; } id = PL.createPlaylist(name).id; }
+    if (id === "__new") { closeCtx(); const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (!name) return; id = PL.createPlaylist(name).id; }
     let n = 0; for (const p of paths) { PL.addToPlaylist(id, p); n++; }
     if (paths.some(isOnline)) saveOnline(); // keep online metadata across restarts
     const nm = PL.getPlaylists().find(p => p.id === id)?.name || "playlist";
@@ -352,8 +389,8 @@ async function rescanFolder(folder) {
   flash(fresh ? `${fresh} new track${fresh === 1 ? "" : "s"} in ${baseName(folder)}` : `No new songs in ${baseName(folder)}`);
 }
 
-function removeSource(folder) {
-  if (!confirm(`Remove this source?\n${folder}\n\nIts tracks leave the library. The files on disk are NOT deleted.`)) return;
+async function removeSource(folder) {
+  if (!await askConfirm("Remove this source?", `${folder}\n\nIts tracks leave the library. The files on disk are NOT deleted.`, "Remove")) return;
   folders = folders.filter(f => f !== folder);
   library = library.filter(t => !inFolder(t, folder));
   saveLibrary();
@@ -374,9 +411,9 @@ function renderPlaylists() {
       return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}">🎼 ${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">🔁</span>` : ""} <span class="pl-count">${p.paths.length}</span>
         <button class="pl-del" data-del="${p.id}" title="Delete">✕</button></div>`;
     }).join("");
-  host.querySelector("#plNew").addEventListener("click", () => { const name = prompt("Playlist name:"); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
+  host.querySelector("#plNew").addEventListener("click", async () => { const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
   host.querySelectorAll("[data-pl]").forEach(el => el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined) return; openPlaylist(el.dataset.pl); }));
-  host.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", (e) => { e.stopPropagation(); if (confirm("Delete this playlist?")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); } }));
+  host.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", async (e) => { e.stopPropagation(); if (await askConfirm("Delete this playlist?", "", "Delete")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); } }));
 }
 function openPlaylist(id) {
   const pl = PL.getPlaylists().find(p => p.id === id);
@@ -404,7 +441,7 @@ function openPlaylist(id) {
 async function followPlaylistFlow(id) {
   const pl = PL.getPlaylists().find(p => p.id === id);
   if (!pl) return;
-  let url = pl.sourceUrl || prompt("YouTube playlist URL to follow:");
+  let url = pl.sourceUrl || await askText("Follow a playlist", { placeholder: "YouTube playlist URL", ok: "Follow" });
   if (!url || !url.trim()) return;
   url = url.trim();
   flash("Linking playlist…");
@@ -420,10 +457,10 @@ async function followPlaylistFlow(id) {
     flash(`🔁 Following “${res.title || pl.name}” — new tracks will be added automatically`);
   } catch (e) { flash(`Cannot follow: ${e}`); }
 }
-function unfollowPlaylist(id) {
+async function unfollowPlaylist(id) {
   const fw = followFor(id);
   if (!fw) return;
-  if (!confirm(`Unfollow “${fw.title}”?\nAlready-added tracks are kept.`)) return;
+  if (!await askConfirm(`Unfollow “${fw.title}”?`, "Already-added tracks are kept.", "Unfollow")) return;
   follows = follows.filter(f => f.id !== fw.id);
   saveFollows(); renderPlaylists(); openPlaylist(id);
   flash("Unfollowed");
@@ -633,12 +670,12 @@ function dlRetry() {
   dlRender();
   if (!dlRunning) dlPump();
 }
-function downloadPlaylist(id) {
+async function downloadPlaylist(id) {
   const pl = PL.getPlaylists().find(p => p.id === id);
   if (!pl) return;
   const online = pl.paths.filter(isOnline);
   if (!online.length) { flash("All tracks of this playlist are already local"); return; }
-  if (!confirm(`Save “${pl.name}” locally?\n${online.length} track${online.length === 1 ? "" : "s"} will be downloaded as mp3 (already-downloaded ones are skipped).`)) return;
+  if (!await askConfirm(`Save “${pl.name}” locally?`, `${online.length} track${online.length === 1 ? "" : "s"} will be downloaded as mp3 (already-downloaded ones are skipped).`, "Download")) return;
   downloadTracks(online);
 }
 // A file for this video id already in the library (ANY source folder — the
@@ -906,12 +943,29 @@ function startPolling() {
   }, 300);
 }
 
+// ─── Interface arrangement: hide/collapse sections, dock the up-next panel ───
+function applyUiPrefs() {
+  const s = S();
+  $("#secSources").hidden = !s.uiSources;
+  $("#pickBtn").hidden = !s.uiSrcButtons;
+  $("#manualBtn").hidden = !s.uiSrcButtons;
+  $("#secPlaylists").hidden = !s.uiPlaylists;
+  $("#importBtn").hidden = !s.uiImportBtn;
+  $("#sortSel").hidden = !s.uiSortSel;
+  $("#secSources").classList.toggle("collapsed", !!s.collSources);
+  $("#secPlaylists").classList.toggle("collapsed", !!s.collPlaylists);
+  document.body.classList.toggle("np-docked", !!s.npDocked);
+  $("#npPin").classList.toggle("active", !!s.npDocked);
+}
+
 // ─── Now Playing panel: big artwork + track info + up-next queue ───
 let npOpen = false;
 function toggleNpPanel(force) {
   npOpen = force !== undefined ? force : !npOpen;
   if (npOpen && dlOpen) { dlOpen = false; dlRender(); }
   $("#npPanel").hidden = !npOpen;
+  document.body.classList.toggle("np-open", npOpen);
+  SETTINGS.setSetting("uiNpOpen", npOpen);
   if (npOpen) renderNpPanel();
 }
 function renderNpPanel() {
@@ -1066,15 +1120,15 @@ async function rescanAll() {
   flash(total ? `${total} new song${total === 1 ? "" : "s"} found` : "Library up to date");
 }
 async function pickFolder() {
-  if (!IS_NATIVE) { const p = prompt("Folder path:"); if (p && p.trim()) await addSource(p.trim()); return; }
+  if (!IS_NATIVE) { const p = await askText("Add a folder", { placeholder: "Folder path" }); if (p) await addSource(p); return; }
   const btn = $("#pickBtn"); btn.disabled = true;
   try {
     const path = await T.core.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Choose a music folder" } });
     if (path) await addSource(path);
-  } catch (e) { console.error("[dialog]", e); const p = prompt("Couldn't open the picker. Folder path:"); if (p && p.trim()) await addSource(p.trim()); }
+  } catch (e) { console.error("[dialog]", e); const p = await askText("Add a folder", { placeholder: "Folder path" }); if (p) await addSource(p); }
   finally { btn.disabled = false; }
 }
-function addManual() { const p = prompt("Folder path:"); if (p && p.trim()) addSource(p.trim()); }
+async function addManual() { const p = await askText("Add a folder", { placeholder: "/path/to/music" }); if (p) addSource(p); }
 
 // ─── Settings ───
 function applyAccent() {
@@ -1106,6 +1160,7 @@ async function applyTheme() {
 }
 function applySettings() {
   applyTheme();
+  applyUiPrefs();
   document.body.classList.toggle("compact", S().compactRows);
   document.body.classList.toggle("no-anim", !S().animations);
   normalize = S().normalizeDefault;
@@ -1136,6 +1191,15 @@ function openSettings() {
       <div class="set-row"><label>Show album art</label><input type="checkbox" id="setArt" ${s.showArt ? "checked" : ""}></div>
       <div class="set-row"><label>Compact rows</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
       <div class="set-row"><label>Animations</label><input type="checkbox" id="setAnim" ${s.animations ? "checked" : ""}></div>
+    </div>
+    <div class="set-group"><div class="set-title">Interface</div>
+      <div class="set-row"><label>Sources section</label><input type="checkbox" id="setUiSources" ${s.uiSources ? "checked" : ""}></div>
+      <div class="set-row"><label>“Add folder” buttons</label><input type="checkbox" id="setUiSrcBtns" ${s.uiSrcButtons ? "checked" : ""}></div>
+      <div class="set-row"><label>Playlists section</label><input type="checkbox" id="setUiPlaylists" ${s.uiPlaylists ? "checked" : ""}></div>
+      <div class="set-row"><label>“Import from URL” button</label><input type="checkbox" id="setUiImport" ${s.uiImportBtn ? "checked" : ""}></div>
+      <div class="set-row"><label>Sort selector</label><input type="checkbox" id="setUiSort" ${s.uiSortSel ? "checked" : ""}></div>
+      <div class="set-row"><label>Dock the “Now playing / Up next” panel</label><input type="checkbox" id="setUiDock" ${s.npDocked ? "checked" : ""}></div>
+      <div class="set-hint">Tip: the sidebar section titles (Sources / Playlists) collapse on click, and the 📌 in the “Now playing” panel docks it as a side column.</div>
     </div>
     <div class="set-group"><div class="set-title">Playback</div>
       <div class="set-row"><label>Default volume</label><input type="range" id="setVol" min="0" max="100" value="${s.defaultVolume}"></div>
@@ -1216,6 +1280,9 @@ function openSettings() {
   $("#setBgBlur").addEventListener("input", e => { SETTINGS.setSetting("bgBlur", Number(e.target.value)); applyTheme(); });
   $("#setBgDim").addEventListener("input", e => { SETTINGS.setSetting("bgDim", Number(e.target.value)); applyTheme(); });
   $("#setPanelA").addEventListener("input", e => { SETTINGS.setSetting("panelAlpha", Number(e.target.value)); applyTheme(); });
+  for (const [id, key] of [["setUiSources", "uiSources"], ["setUiSrcBtns", "uiSrcButtons"], ["setUiPlaylists", "uiPlaylists"], ["setUiImport", "uiImportBtn"], ["setUiSort", "uiSortSel"], ["setUiDock", "npDocked"]]) {
+    $("#" + id).addEventListener("change", e => { SETTINGS.setSetting(key, e.target.checked); applyUiPrefs(); });
+  }
   $("#setArt").addEventListener("change", e => { SETTINGS.setSetting("showArt", e.target.checked); refreshView(); });
   $("#setCompact").addEventListener("change", e => { SETTINGS.setSetting("compactRows", e.target.checked); document.body.classList.toggle("compact", e.target.checked); });
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
@@ -1460,8 +1527,8 @@ function renderFollowList() {
   host.querySelectorAll("[data-fl-on]").forEach(el => el.addEventListener("change", e => { const f = byId(el.dataset.flOn); if (f) { f.enabled = e.target.checked; saveFollows(); renderPlaylists(); } }));
   host.querySelectorAll("[data-fl-target]").forEach(el => el.addEventListener("change", e => { const f = byId(el.dataset.flTarget); if (f && e.target.value) { f.playlistId = e.target.value; saveFollows(); renderPlaylists(); } }));
   host.querySelectorAll("[data-fl-dl]").forEach(el => el.addEventListener("change", e => { const f = byId(el.dataset.flDl); if (f) { f.autoDownload = e.target.checked; saveFollows(); } }));
-  host.querySelectorAll("[data-fl-x]").forEach(el => el.addEventListener("click", () => {
-    if (!confirm("Unfollow this playlist? (already-added tracks are kept)")) return;
+  host.querySelectorAll("[data-fl-x]").forEach(el => el.addEventListener("click", async () => {
+    if (!await askConfirm("Unfollow this playlist?", "Already-added tracks are kept.", "Unfollow")) return;
     follows = follows.filter(f => f.id !== el.dataset.flX);
     saveFollows(); renderFollowList(); renderPlaylists();
   }));
@@ -1533,6 +1600,13 @@ async function init() {
 
   document.querySelector(".now").addEventListener("click", () => toggleNpPanel());
   $("#npClose").addEventListener("click", () => toggleNpPanel(false));
+  $("#npPin").addEventListener("click", () => { SETTINGS.setSetting("npDocked", !S().npDocked); applyUiPrefs(); });
+  document.querySelectorAll(".ss-toggle").forEach(el => el.addEventListener("click", () => {
+    const key = el.dataset.coll;
+    SETTINGS.setSetting(key, !S()[key]);
+    applyUiPrefs();
+  }));
+  wireDialogs();
 
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#settingsClose").addEventListener("click", () => $("#settingsModal").hidden = true);
@@ -1543,7 +1617,13 @@ async function init() {
 
   document.addEventListener("click", e => { if (!e.target.closest("#ctxMenu") && e.target.dataset.more === undefined) closeCtx(); });
   document.addEventListener("scroll", closeCtx, true);
-  document.addEventListener("keydown", e => { if (e.key === "Escape") { closeCtx(); $("#settingsModal").hidden = true; $("#importModal").hidden = true; if (dlOpen) { dlOpen = false; dlRender(); } if (npOpen) toggleNpPanel(false); } });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (_dlgResolve) { dlgClose(_dlgHasInput ? null : false); return; }
+    closeCtx(); $("#settingsModal").hidden = true; $("#importModal").hidden = true;
+    if (dlOpen) { dlOpen = false; dlRender(); }
+    if (npOpen) toggleNpPanel(false);
+  });
 
   renderPlaylists();
   applySettings();
@@ -1561,6 +1641,8 @@ async function init() {
   if (IS_NATIVE && !S().setupDone) openSetup();
   else ytConfigPush().catch(() => {}); // warm up detection with saved prefs
   checkUpdate();
+
+  if (S().uiNpOpen) toggleNpPanel(true); // restore the up-next panel
 
   // Followed playlists: one check shortly after launch (let the app settle),
   // then periodically according to the configured interval.

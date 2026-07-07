@@ -13,20 +13,24 @@
 
       <button id="navLibrary" class="nav-item active"><span class="ni-ico">💿</span> Library</button>
 
-      <div class="side-section">
+      <div class="side-section" id="secSources">
         <div class="ss-head">
-          <span class="ss-title">Sources</span>
+          <span class="ss-title ss-toggle" data-coll="collSources" title="Click to collapse/expand"><span class="ss-caret">▾</span> Sources</span>
           <button id="rescanBtn" class="icon-btn" title="Check all folders for new songs">⟳</button>
         </div>
-        <button id="pickBtn" class="btn btn-block">🗂️ Add folder…</button>
-        <button id="manualBtn" class="btn-line">📝 Enter a path manually</button>
-        <div class="src-list" id="sourcesList"></div>
+        <div class="ss-body">
+          <button id="pickBtn" class="btn btn-block">🗂️ Add folder…</button>
+          <button id="manualBtn" class="btn-line">📝 Enter a path manually</button>
+          <div class="src-list" id="sourcesList"></div>
+        </div>
       </div>
 
-      <div class="side-section grow">
-        <div class="ss-head"><span class="ss-title">Playlists</span></div>
-        <button id="importBtn" class="btn-line">🔗 Import from URL…</button>
-        <div class="playlists-list" id="playlistsList"></div>
+      <div class="side-section grow" id="secPlaylists">
+        <div class="ss-head"><span class="ss-title ss-toggle" data-coll="collPlaylists" title="Click to collapse/expand"><span class="ss-caret">▾</span> Playlists</span></div>
+        <div class="ss-body grow">
+          <button id="importBtn" class="btn-line">🔗 Import from URL…</button>
+          <div class="playlists-list" id="playlistsList"></div>
+        </div>
       </div>
 
       <button id="updateBtn" class="update-btn" hidden>⬆ Update available</button>
@@ -67,7 +71,10 @@
   <aside id="npPanel" class="np-drawer" hidden>
     <div class="np-head">
       <span class="dl-title">Now playing</span>
-      <button id="npClose" class="icon-btn" title="Close">✕</button>
+      <span class="dl-btns">
+        <button id="npPin" class="icon-btn" title="Dock to the side (stays as a column)">📌</button>
+        <button id="npClose" class="icon-btn" title="Close">✕</button>
+      </span>
     </div>
     <div class="ov-art" id="ovArt">🎶</div>
     <div class="ov-title" id="ovTitle">Nothing playing</div>
@@ -135,6 +142,20 @@
         <button id="settingsClose" class="icon-btn" title="Close">✕</button>
       </div>
       <div id="settingsBody" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="dlgModal" class="modal-backdrop" hidden>
+    <div class="modal dlg">
+      <div class="modal-head"><h2 id="dlgTitle">…</h2></div>
+      <div class="modal-body">
+        <p id="dlgMsg" class="dlg-msg" hidden></p>
+        <input type="text" id="dlgInput" class="text-in dlg-in" hidden autocomplete="off">
+        <div class="setup-actions">
+          <button id="dlgCancel" class="btn-line">Cancel</button>
+          <button id="dlgOk" class="btn">OK</button>
+        </div>
+      </div>
     </div>
   </div>
 

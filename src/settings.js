@@ -45,6 +45,16 @@ const DEFAULTS = {
   followInterval: "6h",  // follow checks: launch (startup only) | 1h | 6h | 24h
   sortMode: "default",   // default | title | title-desc | artist | album | dur | dur-desc
   theme: "dark",         // key of THEMES
+  // Interface: hide/arrange elements
+  uiSources: true,       // show the Sources section
+  uiSrcButtons: true,    // show "Add folder…" / "Enter a path manually"
+  uiPlaylists: true,     // show the Playlists section
+  uiImportBtn: true,     // show "Import from URL…"
+  uiSortSel: true,       // show the sort selector
+  collSources: false,    // Sources section collapsed
+  collPlaylists: false,  // Playlists section collapsed
+  npDocked: false,       // Up-next panel docked as a side column
+  uiNpOpen: false,       // Up-next panel open (restored at launch)
   bgImage: "",           // custom background: URL or local file path
   bgBlur: 18,            // px of blur on the background image
   bgDim: 45,             // % darkening of the background image
