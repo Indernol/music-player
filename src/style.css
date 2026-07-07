@@ -233,11 +233,26 @@ body::before {
 }
 body.has-bg::before { display: block; }
 body.has-bg { background: #000; }
+/* Frosted-glass panels: backdrop blur keeps text readable whatever is behind. */
 body.has-bg .sidebar,
 body.has-bg .player,
+body.has-bg .main {
+  background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+/* Drawers float OVER already-translucent panels: extra opacity + stronger blur
+   so the content underneath never bleeds through. */
 body.has-bg .dl-drawer,
-body.has-bg .np-drawer,
-body.has-bg .main { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100)); }
+body.has-bg .np-drawer {
+  background: rgba(8, 8, 12, calc((var(--panel-alpha, 85) + 12) / 100));
+  backdrop-filter: blur(28px) saturate(1.1);
+  -webkit-backdrop-filter: blur(28px) saturate(1.1);
+}
+body.has-bg .modal, body.has-bg .ctx-menu {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
 
 /* ─── Now Playing panel (big art + up next) ─── */
 .np-drawer {

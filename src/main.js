@@ -1027,8 +1027,12 @@ async function notifyTrack(t) {
 }
 async function updateRPC(t, isPlaying) {
   if (!IS_NATIVE || !S().rpcEnabled || !S().rpcClientId) return;
-  try { await invoke("rpc_update", { clientId: S().rpcClientId, title: t?.title || "", artist: t?.artist || "", playing: !!isPlaying }); }
-  catch (e) { console.error("[rpc]", e); }
+  try {
+    await invoke("rpc_update", {
+      clientId: S().rpcClientId, title: t?.title || "", artist: t?.artist || "", playing: !!isPlaying,
+      art: t?.thumbnail || "", durationSecs: t?.duration_secs || 0, positionSecs: wallPos(),
+    });
+  } catch (e) { console.error("[rpc]", e); }
 }
 async function clearRPC() { if (IS_NATIVE) { try { await invoke("rpc_clear"); } catch {} } }
 
@@ -1496,7 +1500,7 @@ async function init() {
   $("#volume").addEventListener("input", e => invoke("set_volume", { level: Number(e.target.value) / 100 }));
 
   $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });
-  $("#seek").addEventListener("change", async () => { const s = Number($("#seek").value); await invoke("seek", { secs: s }); wallSeek(s); seeking = false; mediaPlayback(); });
+  $("#seek").addEventListener("change", async () => { const s = Number($("#seek").value); await invoke("seek", { secs: s }); wallSeek(s); seeking = false; mediaPlayback(); updateRPC(trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex]), playing); });
 
   $("#search").addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();

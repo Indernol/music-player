@@ -63,6 +63,9 @@ pub fn rpc_update(
     title: String,
     artist: String,
     playing: bool,
+    art: Option<String>,
+    duration_secs: Option<f64>,
+    position_secs: Option<f64>,
 ) -> Result<(), String> {
     if client_id.trim().is_empty() {
         return Err("no client id".into());
@@ -87,10 +90,33 @@ pub fn rpc_update(
         let details = if title.is_empty() { "Idle".to_string() } else { title };
         let state_line = if artist.is_empty() { "—".to_string() } else { artist };
         let status = if playing { "Playing" } else { "Paused" };
-        let act = activity::Activity::new()
+        // "Listening to …" with the track's artwork — the http(s) thumbnail URL
+        // is accepted directly as an asset by modern Discord clients / arRPC.
+        let art = art.unwrap_or_default();
+        let mut assets = activity::Assets::new().large_text(status);
+        if art.starts_with("http") {
+            assets = assets.large_image(&art);
+        }
+        let mut act = activity::Activity::new()
+            .activity_type(activity::ActivityType::Listening)
             .details(&details)
             .state(&state_line)
-            .assets(activity::Assets::new().large_text(status));
+            .assets(assets);
+        // Progress bar: start/end timestamps derived from position + duration.
+        let dur = duration_secs.unwrap_or(0.0);
+        let pos = position_secs.unwrap_or(0.0).clamp(0.0, dur.max(0.0));
+        if playing && dur > 0.0 {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            let start = now_ms - (pos * 1000.0) as i64;
+            act = act.timestamps(
+                activity::Timestamps::new()
+                    .start(start)
+                    .end(start + (dur * 1000.0) as i64),
+            );
+        }
         if let Err(e) = client.set_activity(act) {
             // Connection died (Discord/Vesktop restarted): drop it so the next
             // update reconnects from scratch.
