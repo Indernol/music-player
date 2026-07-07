@@ -213,7 +213,7 @@ fn main() {
             youtube::yt_search, youtube::yt_playlist, youtube::yt_download, youtube::yt_cancel,
             youtube::yt_config,
             mpris::media_update, mpris::media_playback,
-            library::cover,
+            library::cover, library::read_image,
             store::store_load, store::store_save,
             rpc::rpc_update, rpc::rpc_clear
         ])

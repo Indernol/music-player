@@ -87,8 +87,8 @@ function artCell(t) {
 }
 function applyCover(key, url) {
   if (!url) return;
-  document.querySelectorAll("#trackList .art").forEach(el => { if (el.dataset.album === key) setArtImg(el, url); });
-  const np = $("#npArt"); if (np && np.dataset.album === key) setArtImg(np, url);
+  document.querySelectorAll("#trackList .art, #upNextList .art").forEach(el => { if (el.dataset.album === key) setArtImg(el, url); });
+  for (const sel of ["#npArt", "#ovArt"]) { const el = $(sel); if (el && el.dataset.album === key) setArtImg(el, url); }
 }
 function fetchCover(t) {
   if (isOnline(t.path)) return; // online art comes from the thumbnail URL
@@ -170,9 +170,25 @@ function setViewHead({ icon = "", title = "", subtitle = "", actions = "" }) {
   $("#viewHead").innerHTML = `<div class="vh-icon">${icon}</div><div class="vh-txt"><div class="vh-title">${esc(title)}</div><div class="vh-sub">${esc(subtitle)}</div></div>${actions ? `<div class="vh-actions">${actions}</div>` : ""}`;
 }
 
+// ─── Sorting ───
+let sortMode = "default";
+function sortTracks(list) {
+  const c = (a, b, k) => String(a[k] || "").localeCompare(String(b[k] || ""), undefined, { sensitivity: "base" });
+  switch (sortMode) {
+    case "title": return list.sort((a, b) => c(a, b, "title"));
+    case "title-desc": return list.sort((a, b) => c(b, a, "title"));
+    case "artist": return list.sort((a, b) => c(a, b, "artist") || c(a, b, "album") || c(a, b, "title"));
+    case "album": return list.sort((a, b) => c(a, b, "album") || c(a, b, "title"));
+    case "dur": return list.sort((a, b) => (a.duration_secs || 0) - (b.duration_secs || 0));
+    case "dur-desc": return list.sort((a, b) => (b.duration_secs || 0) - (a.duration_secs || 0));
+    default: return list; // natural order (playlist / scan order)
+  }
+}
+
 // ─── Track list ───
 function renderTracks(list) {
-  view = list;
+  view = sortTracks([...list]);
+  list = view;
   updateCount();
   const host = $("#trackList");
   $("#listHead").style.display = list.length ? "" : "none";
@@ -783,7 +799,7 @@ function updateNowPlaying(t, path) {
   const dur = t?.duration_secs || 0;
   $("#totTime").textContent = fmtDur(dur);
   $("#seek").max = dur > 0 ? dur : 1; $("#seek").value = 0; $("#curTime").textContent = "0:00";
-  notifyTrack(t); updateRPC(t, true); mediaUpdate(t);
+  notifyTrack(t); updateRPC(t, true); mediaUpdate(t); renderNpPanel();
 }
 async function playFrom(viewIdx) { queue = view.map(t => t.path); history = []; await hardPlay(viewIdx); }
 // If an online track was downloaded (file named "… [<id>].mp3"), play the local
@@ -887,6 +903,61 @@ function startPolling() {
       else { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); }
     }
   }, 300);
+}
+
+// ─── Now Playing panel: big artwork + track info + up-next queue ───
+let npOpen = false;
+function toggleNpPanel(force) {
+  npOpen = force !== undefined ? force : !npOpen;
+  if (npOpen && dlOpen) { dlOpen = false; dlRender(); }
+  $("#npPanel").hidden = !npOpen;
+  if (npOpen) renderNpPanel();
+}
+function renderNpPanel() {
+  if (!npOpen) return;
+  const path = curIndex >= 0 ? queue[curIndex] : null;
+  const eff = path ? effectivePath(path) : null;
+  const t = path ? (trackByPath(eff) || trackByPath(path)) : null;
+  const art = $("#ovArt");
+  if (t) {
+    setArtPlaceholder(art, t);
+    if (S().showArt) {
+      if (t.thumbnail) setArtImg(art, t.thumbnail);
+      else { const cov = coverCache.get(albumKey(t)); if (cov) setArtImg(art, cov); else fetchCover(t); }
+    }
+    $("#ovTitle").textContent = t.title;
+    $("#ovSub").textContent = t.artist;
+    $("#ovMeta").textContent = `${t.album}${t.duration_secs ? ` · ${fmtDur(t.duration_secs)}` : ""} · ${isOnline(eff) ? "streaming" : "local file"}`;
+  } else {
+    art.classList.remove("has-cover"); art.style.backgroundImage = ""; art.style.background = "var(--bg-3)"; art.textContent = "🎶";
+    $("#ovTitle").textContent = "Nothing playing"; $("#ovSub").textContent = ""; $("#ovMeta").textContent = "";
+  }
+  // Up next
+  const items = [];
+  if (curIndex >= 0 && queue.length) {
+    if (repeatMode === "one") items.push({ note: "🔂 Repeat one — this track loops" });
+    else if (shuffle) {
+      if (preIndex >= 0 && preIndex !== curIndex) items.push({ qi: preIndex });
+      items.push({ note: "🔀 Shuffle — order is random" });
+    } else {
+      for (let i = curIndex + 1, n = 0; i < queue.length && n < 25; i++, n++) items.push({ qi: i });
+      if (repeatMode === "all") { for (let i = 0, n = items.length; i < curIndex && n < 25; i++, n++) items.push({ qi: i }); }
+      if (!items.length) items.push({ note: "End of queue" });
+    }
+  }
+  const host = $("#upNextList");
+  host.innerHTML = items.length
+    ? items.map(it => {
+        if (it.note) return `<div class="nx-note">${it.note}</div>`;
+        const p = queue[it.qi];
+        const tr = trackByPath(effectivePath(p)) || trackByPath(p);
+        if (!tr) return "";
+        return `<div class="nx-row" data-qi="${it.qi}" title="${esc(tr.title)}">${artCell(tr)}
+          <span class="nx-meta"><span class="t">${esc(tr.title)}</span><span class="s">${esc(tr.artist)}</span></span>
+          <span class="nx-dur">${fmtDur(tr.duration_secs)}</span></div>`;
+      }).join("")
+    : `<div class="nx-note">Queue is empty — play something.</div>`;
+  host.querySelectorAll("[data-qi]").forEach(el => el.addEventListener("click", () => { history.push(curIndex); hardPlay(Number(el.dataset.qi)); }));
 }
 
 // ─── Desktop media integration (MPRIS) ───
@@ -1006,8 +1077,30 @@ function applyAccent() {
   document.documentElement.style.setProperty("--accent", a);
   document.documentElement.style.setProperty("--accent-2", b);
 }
-function applySettings() {
+let _bgCachePath = "", _bgCacheData = "";
+async function applyTheme() {
+  const s = S();
+  const root = document.documentElement.style;
+  const theme = SETTINGS.THEMES[s.theme] || SETTINGS.THEMES.dark;
+  for (const [k, v] of Object.entries(theme)) root.setProperty(k, v);
   applyAccent();
+  root.setProperty("--app-bg-blur", `${s.bgBlur ?? 18}px`);
+  root.setProperty("--app-bg-dim", String(s.bgDim ?? 45));
+  root.setProperty("--panel-alpha", String(s.panelAlpha ?? 85));
+  let src = (s.bgImage || "").trim();
+  if (src && !/^(https?:|data:)/.test(src)) {
+    // Local file path → data URL via the backend (cached per path).
+    if (_bgCachePath !== src) {
+      try { _bgCacheData = await invoke("read_image", { path: src }); _bgCachePath = src; }
+      catch (e) { console.error("[bg]", e); _bgCacheData = ""; _bgCachePath = src; flash("Background image could not be loaded"); }
+    }
+    src = _bgCacheData;
+  }
+  root.setProperty("--app-bg-image", src ? `url("${src}")` : "none");
+  document.body.classList.toggle("has-bg", !!src);
+}
+function applySettings() {
+  applyTheme();
   document.body.classList.toggle("compact", S().compactRows);
   document.body.classList.toggle("no-anim", !S().animations);
   normalize = S().normalizeDefault;
@@ -1021,8 +1114,20 @@ function openSettings() {
   const s = S();
   $("#settingsBody").innerHTML = `
     <div class="set-group"><div class="set-title">Appearance</div>
+      <div class="set-row"><label>Theme</label>
+        <select id="setTheme" class="sel sm-sel wide">${Object.keys(SETTINGS.THEMES).map(k => `<option value="${k}" ${s.theme === k ? "selected" : ""}>${k[0].toUpperCase() + k.slice(1)}</option>`).join("")}</select></div>
       <div class="set-row"><label>Accent color</label>
         <div class="swatches">${Object.entries(SETTINGS.ACCENTS).map(([k, v]) => `<button class="swatch ${s.accent === k ? "on" : ""}" data-accent="${k}" style="background:${v[0]};color:${v[0]}" title="${k}"></button>`).join("")}</div></div>
+      <div class="set-row"><label>Background image</label>
+        <span class="dir-pick">
+          <input type="text" id="setBgImg" class="text-in" placeholder="none — URL or file" value="${esc(s.bgImage)}">
+          <button id="setBgPick" class="btn-line sm" title="Pick an image">🖼️</button>
+          <button id="setBgClear" class="btn-line sm" title="Remove background">✕</button>
+        </span></div>
+      <div class="set-row"><label>Background blur</label><input type="range" id="setBgBlur" min="0" max="40" value="${s.bgBlur}"></div>
+      <div class="set-row"><label>Background darkness</label><input type="range" id="setBgDim" min="0" max="90" value="${s.bgDim}"></div>
+      <div class="set-row"><label>Panel opacity</label><input type="range" id="setPanelA" min="35" max="100" value="${s.panelAlpha}"></div>
+      <div class="set-hint">Blur / darkness / opacity apply live when a background image is set — mix them with any theme + accent.</div>
       <div class="set-row"><label>Show album art</label><input type="checkbox" id="setArt" ${s.showArt ? "checked" : ""}></div>
       <div class="set-row"><label>Compact rows</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
       <div class="set-row"><label>Animations</label><input type="checkbox" id="setAnim" ${s.animations ? "checked" : ""}></div>
@@ -1094,6 +1199,18 @@ function openSettings() {
     <div class="set-actions"><button id="setReset" class="btn-line">↺ Reset to defaults</button></div>`;
   const body = $("#settingsBody");
   body.querySelectorAll("[data-accent]").forEach(b => b.addEventListener("click", () => { SETTINGS.setSetting("accent", b.dataset.accent); applyAccent(); body.querySelectorAll(".swatch").forEach(x => x.classList.toggle("on", x === b)); }));
+  $("#setTheme").addEventListener("change", e => { SETTINGS.setSetting("theme", e.target.value); applyTheme(); });
+  $("#setBgImg").addEventListener("change", e => { SETTINGS.setSetting("bgImage", e.target.value.trim()); applyTheme(); });
+  $("#setBgPick").addEventListener("click", async () => {
+    try {
+      const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a background image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"] }] } });
+      if (p) { SETTINGS.setSetting("bgImage", p); $("#setBgImg").value = p; applyTheme(); }
+    } catch (e) { console.error("[bg pick]", e); }
+  });
+  $("#setBgClear").addEventListener("click", () => { SETTINGS.setSetting("bgImage", ""); $("#setBgImg").value = ""; applyTheme(); });
+  $("#setBgBlur").addEventListener("input", e => { SETTINGS.setSetting("bgBlur", Number(e.target.value)); applyTheme(); });
+  $("#setBgDim").addEventListener("input", e => { SETTINGS.setSetting("bgDim", Number(e.target.value)); applyTheme(); });
+  $("#setPanelA").addEventListener("input", e => { SETTINGS.setSetting("panelAlpha", Number(e.target.value)); applyTheme(); });
   $("#setArt").addEventListener("change", e => { SETTINGS.setSetting("showArt", e.target.checked); refreshView(); });
   $("#setCompact").addEventListener("change", e => { SETTINGS.setSetting("compactRows", e.target.checked); document.body.classList.toggle("compact", e.target.checked); });
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
@@ -1402,8 +1519,15 @@ async function init() {
   $("#impGo").addEventListener("click", impGo);
   $("#dlAction").addEventListener("click", dlStop);
   $("#dlRetry").addEventListener("click", dlRetry);
-  $("#dlToggle").addEventListener("click", () => { dlOpen = !dlOpen; dlRender(); });
+  $("#dlToggle").addEventListener("click", () => { dlOpen = !dlOpen; if (dlOpen && npOpen) toggleNpPanel(false); dlRender(); });
   $("#dlClose").addEventListener("click", () => { dlOpen = false; dlRender(); });
+
+  sortMode = S().sortMode || "default";
+  $("#sortSel").value = sortMode;
+  $("#sortSel").addEventListener("change", e => { sortMode = e.target.value; SETTINGS.setSetting("sortMode", sortMode); refreshView(); });
+
+  document.querySelector(".now").addEventListener("click", () => toggleNpPanel());
+  $("#npClose").addEventListener("click", () => toggleNpPanel(false));
 
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#settingsClose").addEventListener("click", () => $("#settingsModal").hidden = true);
@@ -1411,7 +1535,7 @@ async function init() {
 
   document.addEventListener("click", e => { if (!e.target.closest("#ctxMenu") && e.target.dataset.more === undefined) closeCtx(); });
   document.addEventListener("scroll", closeCtx, true);
-  document.addEventListener("keydown", e => { if (e.key === "Escape") { closeCtx(); $("#settingsModal").hidden = true; $("#importModal").hidden = true; if (dlOpen) { dlOpen = false; dlRender(); } } });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { closeCtx(); $("#settingsModal").hidden = true; $("#importModal").hidden = true; if (dlOpen) { dlOpen = false; dlRender(); } if (npOpen) toggleNpPanel(false); } });
 
   renderPlaylists();
   applySettings();

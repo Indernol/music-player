@@ -12,6 +12,50 @@ use tauri::State;
 #[derive(Default)]
 pub struct RpcState(pub Mutex<Option<(String, DiscordIpcClient)>>);
 
+/// The discord-rich-presence crate only looks at $XDG_RUNTIME_DIR/discord-ipc-N
+/// (or /tmp). Flatpak clients (Vesktop, Discord) expose their socket elsewhere,
+/// and a stale symlink from a previously-used client breaks connects with
+/// ENOENT. Repair the canonical path before every (re)connect.
+fn ensure_ipc_link() {
+    let run = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
+    let run = if !run.is_empty() {
+        run
+    } else {
+        // GUI launchers sometimes omit it — find the user runtime dir ourselves.
+        let guess = std::fs::read_dir("/run/user")
+            .ok()
+            .and_then(|mut d| d.next())
+            .and_then(|e| e.ok())
+            .map(|e| e.path().to_string_lossy().into_owned());
+        match guess {
+            Some(g) => {
+                std::env::set_var("XDG_RUNTIME_DIR", &g); // so the crate finds it too
+                g
+            }
+            None => return,
+        }
+    };
+    let base = format!("{run}/discord-ipc-0");
+    // metadata() follows symlinks: Err = missing OR dangling link.
+    if std::fs::metadata(&base).is_ok() {
+        return;
+    }
+    let candidates = [
+        format!("{run}/.flatpak/dev.vencord.Vesktop/xdg-run/discord-ipc-0"),
+        format!("{run}/app/dev.vencord.Vesktop/discord-ipc-0"),
+        format!("{run}/.flatpak/com.discordapp.Discord/xdg-run/discord-ipc-0"),
+        format!("{run}/app/com.discordapp.Discord/discord-ipc-0"),
+        format!("{run}/snap.discord/discord-ipc-0"),
+    ];
+    for c in candidates {
+        if std::fs::metadata(&c).is_ok() {
+            let _ = std::fs::remove_file(&base); // drop any stale symlink
+            let _ = std::os::unix::fs::symlink(&c, &base);
+            return;
+        }
+    }
+}
+
 #[tauri::command]
 pub fn rpc_update(
     state: State<RpcState>,
@@ -33,6 +77,7 @@ pub fn rpc_update(
         if let Some((_, mut old)) = guard.take() {
             let _ = old.close();
         }
+        ensure_ipc_link();
         let mut client = DiscordIpcClient::new(&client_id).map_err(|e| e.to_string())?;
         client.connect().map_err(|e| e.to_string())?;
         *guard = Some((client_id.clone(), client));
@@ -46,7 +91,14 @@ pub fn rpc_update(
             .details(&details)
             .state(&state_line)
             .assets(activity::Assets::new().large_text(status));
-        client.set_activity(act).map_err(|e| e.to_string())?;
+        if let Err(e) = client.set_activity(act) {
+            // Connection died (Discord/Vesktop restarted): drop it so the next
+            // update reconnects from scratch.
+            if let Some((_, mut dead)) = guard.take() {
+                let _ = dead.close();
+            }
+            return Err(e.to_string());
+        }
     }
     Ok(())
 }

@@ -68,6 +68,29 @@ pub fn scan_library(roots: &[String]) -> Vec<Track> {
     tracks
 }
 
+/// Local image file → data URL (custom app backgrounds). Kept off the UI thread.
+#[tauri::command]
+pub async fn read_image(path: String) -> Result<String, String> {
+    let ext = std::path::Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "avif" => "image/avif",
+        _ => "image/jpeg",
+    };
+    let data = std::fs::read(&path).map_err(|e| e.to_string())?;
+    if data.len() > 25 * 1024 * 1024 {
+        return Err("image too large (max 25 MB)".into());
+    }
+    Ok(format!("data:{mime};base64,{}", STANDARD.encode(data)))
+}
+
 /// Differential scan for refreshes: walk the folders, but only read tags for
 /// files NOT in `known` — the frontend keeps its cached metadata for the rest.
 /// `present` lists every audio file found so the caller can prune deletions.

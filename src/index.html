@@ -40,6 +40,15 @@
           <input id="search" type="search" placeholder="Search library — press Enter to search YouTube" autocomplete="off">
         </div>
         <span id="count" class="count"></span>
+        <select id="sortSel" class="sel sm-sel sort-sel" title="Sort order">
+          <option value="default">Sort: default</option>
+          <option value="title">Title A→Z</option>
+          <option value="title-desc">Title Z→A</option>
+          <option value="artist">Artist</option>
+          <option value="album">Album</option>
+          <option value="dur">Shortest first</option>
+          <option value="dur-desc">Longest first</option>
+        </select>
       </header>
 
       <div id="viewHead" class="view-head"></div>
@@ -54,6 +63,19 @@
       </section>
     </main>
   </div>
+
+  <aside id="npPanel" class="np-drawer" hidden>
+    <div class="np-head">
+      <span class="dl-title">Now playing</span>
+      <button id="npClose" class="icon-btn" title="Close">✕</button>
+    </div>
+    <div class="ov-art" id="ovArt">🎶</div>
+    <div class="ov-title" id="ovTitle">Nothing playing</div>
+    <div class="ov-sub" id="ovSub"></div>
+    <div class="ov-meta" id="ovMeta"></div>
+    <div class="np-next-head">Up next</div>
+    <div id="upNextList" class="np-next"></div>
+  </aside>
 
   <button id="dlToggle" class="dl-toggle" hidden title="Downloads">📥 <span id="dlBadge"></span></button>
   <aside id="dlBar" class="dl-drawer" hidden>
