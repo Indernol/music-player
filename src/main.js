@@ -354,7 +354,8 @@ function renderPlaylists() {
     `<div class="pl-row" id="plNew">✚ New playlist</div>` +
     pls.map(p => {
       const on = active.type === "playlist" && active.id === p.id;
-      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}">🎼 ${esc(p.name)} <span class="pl-count">${p.paths.length}</span>
+      const fw = followFor(p.id);
+      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}">🎼 ${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">🔁</span>` : ""} <span class="pl-count">${p.paths.length}</span>
         <button class="pl-del" data-del="${p.id}" title="Delete">✕</button></div>`;
     }).join("");
   host.querySelector("#plNew").addEventListener("click", () => { const name = prompt("Playlist name:"); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
@@ -442,6 +443,8 @@ async function impFetch() {
       `<option value="__new">New playlist — “${esc(res.title)}”</option>` +
       pls.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
     $("#impDest").dataset.title = res.title;
+    $("#impDest").dataset.url = url;
+    $("#impFollow").checked = follows.some(f => f.url === url && f.enabled !== false);
     $("#impFoot").hidden = false;
     updateImpCount();
   } catch (e) { $("#impStatus").textContent = `Import failed: ${e}`; }
@@ -450,23 +453,36 @@ async function impFetch() {
 function updateImpCount() {
   const boxes = [...document.querySelectorAll("#impList [data-imp]")];
   const n = boxes.filter(c => c.checked).length;
+  const followOnly = !n && $("#impFollow").checked;
   $("#impCount").textContent = `${n} of ${boxes.length} selected`;
-  $("#impGo").textContent = n ? `Import ${n} track${n === 1 ? "" : "s"}` : "Import";
-  $("#impGo").disabled = !n;
+  $("#impGo").textContent = followOnly ? "Follow only" : n ? `Import ${n} track${n === 1 ? "" : "s"}` : "Import";
+  $("#impGo").disabled = !n && !followOnly;
 }
 async function impGo() {
   const chosen = [...document.querySelectorAll("#impList [data-imp]")].filter(c => c.checked).map(c => impTracks[Number(c.dataset.imp)]);
-  if (!chosen.length) { flash("No tracks selected"); return; }
+  const following = $("#impFollow").checked;
+  if (!chosen.length && !following) { flash("No tracks selected"); return; }
   let dest = $("#impDest").value;
   if (dest === "__new") dest = PL.createPlaylist($("#impDest").dataset.title).id;
   for (const t of chosen) { onlineIndex.set(t.path, t); PL.addToPlaylist(dest, t.path); }
   await saveOnline();
+  if (following) {
+    // Everything fetched now counts as "known" — only FUTURE additions to the
+    // playlist will be auto-added (respecting the tracks the user unticked).
+    addFollow({
+      url: $("#impDest").dataset.url, title: $("#impDest").dataset.title,
+      playlistId: dest, autoDownload: $("#impDl").checked,
+      knownIds: impTracks.map(t => ytId(t.path)),
+    });
+  }
   renderPlaylists();
   $("#importModal").hidden = true;
   const nm = PL.getPlaylists().find(p => p.id === dest)?.name || "playlist";
-  flash(`Imported ${chosen.length} track${chosen.length === 1 ? "" : "s"} into “${nm}”`);
+  flash(chosen.length
+    ? `Imported ${chosen.length} track${chosen.length === 1 ? "" : "s"} into “${nm}”${following ? " · 🔁 following" : ""}`
+    : `🔁 Following “${nm}” — new tracks will be added automatically`);
   openPlaylist(dest);
-  if ($("#impDl").checked) downloadTracks(chosen.map(t => t.path)); // background batch
+  if ($("#impDl").checked && chosen.length) downloadTracks(chosen.map(t => t.path)); // background batch
 }
 
 // ─── Download manager (queue + action bar, cancelable) ───
@@ -1015,6 +1031,18 @@ function openSettings() {
       <div class="set-row"><label>Discord Application ID</label><input type="text" id="setRpcId" class="text-in" placeholder="Discord app client id" value="${esc(s.rpcClientId)}"></div>
       <div class="set-hint">Create an app at <b>discord.com/developers</b> → copy its <b>Application ID</b>. Requires the Discord desktop app running.</div>
     </div>
+    <div class="set-group"><div class="set-title">Followed playlists</div>
+      <div class="set-row"><label>Check for new tracks</label>
+        <select id="setFollowIv" class="sel sm-sel wide">
+          <option value="launch" ${s.followInterval === "launch" ? "selected" : ""}>On launch only</option>
+          <option value="1h" ${s.followInterval === "1h" ? "selected" : ""}>Every hour</option>
+          <option value="6h" ${s.followInterval === "6h" ? "selected" : ""}>Every 6 hours</option>
+          <option value="24h" ${s.followInterval === "24h" ? "selected" : ""}>Every day</option>
+        </select></div>
+      <div id="setFollowList"></div>
+      <div class="set-row"><label></label><button id="setFollowCheck" class="btn-line sm">🔁 Check all now</button></div>
+      <div class="set-hint">Follow a playlist from <b>🔗 Import from URL…</b> (tick “🔁 Follow”). New upstream tracks land in the linked playlist; with ⬇ they are also downloaded to the library. Checks also run on launch.</div>
+    </div>
     <div class="set-group"><div class="set-title">Updates</div>
       <div class="set-row"><label>When a new version is available</label>
         <select id="setUpdMode" class="sel sm-sel wide">
@@ -1065,11 +1093,79 @@ function openSettings() {
   });
   $("#setRpc").addEventListener("change", e => { SETTINGS.setSetting("rpcEnabled", e.target.checked); if (e.target.checked) updateRPC(trackByPath(queue[curIndex]), playing); else clearRPC(); });
   $("#setRpcId").addEventListener("change", e => { SETTINGS.setSetting("rpcClientId", e.target.value.trim()); if (S().rpcEnabled) updateRPC(trackByPath(queue[curIndex]), playing); });
+  $("#setFollowIv").addEventListener("change", e => SETTINGS.setSetting("followInterval", e.target.value));
+  $("#setFollowCheck").addEventListener("click", () => checkFollows(true));
+  renderFollowList();
   $("#setUpdMode").addEventListener("change", e => SETTINGS.setSetting("updateMode", e.target.value));
   $("#setUpdCheck").addEventListener("click", () => checkUpdate(true));
   currentVersion().then(v => { const el = $("#setCurVer"); if (el) el.textContent = v ? `v${v}` : "?"; });
   $("#setReset").addEventListener("click", () => { SETTINGS.resetSettings(); applySettings(); refreshView(); openSettings(); flash("Settings reset to defaults"); });
   $("#settingsModal").hidden = false;
+}
+
+// ─── Followed playlists: periodically re-fetch an external playlist and
+// auto-add its NEW tracks to a local playlist (and optionally auto-download
+// them to the library). Persisted in store "follows". ───
+let follows = []; // {id, url, title, playlistId, autoDownload, enabled, knownIds[], lastChecked}
+let _followsBusy = false;
+const FOLLOW_IVALS = { launch: 0, "1h": 3600e3, "6h": 6 * 3600e3, "24h": 24 * 3600e3 };
+
+async function loadFollows() {
+  const raw = await storeLoad("follows");
+  if (raw) { try { follows = JSON.parse(raw); } catch {} }
+  if (!Array.isArray(follows)) follows = [];
+}
+function saveFollows() { storeSave("follows", JSON.stringify(follows)); }
+function followFor(playlistId) { return follows.find(f => f.playlistId === playlistId && f.enabled !== false); }
+function addFollow({ url, title, playlistId, autoDownload, knownIds }) {
+  const dup = follows.find(f => f.url === url);
+  if (dup) { // re-following the same URL updates the existing follow
+    Object.assign(dup, { title: title || dup.title, playlistId, autoDownload, enabled: true });
+    dup.knownIds = [...new Set([...(dup.knownIds || []), ...knownIds])];
+  } else {
+    follows.push({ id: crypto.randomUUID(), url, title: title || "Playlist", playlistId, autoDownload: !!autoDownload, enabled: true, knownIds, lastChecked: Date.now() });
+  }
+  saveFollows();
+}
+
+async function checkFollow(f, manual = false) {
+  let res;
+  try { res = await invoke("yt_playlist", { url: f.url }); }
+  catch (e) { console.warn("[follow]", f.title, e); if (manual) flash(`“${f.title}”: check failed — ${e}`); return 0; }
+  f.lastChecked = Date.now();
+  if (res.title) f.title = res.title;
+  const tracks = (res.tracks || []).map(onlineFromResult);
+  const known = new Set(f.knownIds || []);
+  const fresh = tracks.filter(t => !known.has(ytId(t.path)));
+  // Union: a track removed upstream then re-added must not come back as "new".
+  f.knownIds = [...new Set([...(f.knownIds || []), ...tracks.map(t => ytId(t.path))])];
+  if (!fresh.length) { if (manual) flash(`“${f.title}” — no new tracks`); return 0; }
+  fresh.forEach(t => onlineIndex.set(t.path, t));
+  const pl = PL.getPlaylists().find(p => p.id === f.playlistId);
+  if (pl) fresh.forEach(t => PL.addToPlaylist(f.playlistId, t.path));
+  await saveOnline();
+  renderPlaylists(); refreshView();
+  if (f.autoDownload) downloadTracks(fresh.map(t => t.path));
+  flash(`🔁 ${fresh.length} new track${fresh.length === 1 ? "" : "s"} from “${f.title}”${pl ? ` → “${pl.name}”` : ""}${f.autoDownload ? " · downloading" : ""}`);
+  return fresh.length;
+}
+
+async function checkFollows(manual = false, respectDue = false) {
+  if (!IS_NATIVE || _followsBusy) return;
+  _followsBusy = true;
+  try {
+    const ivMs = FOLLOW_IVALS[S().followInterval] ?? FOLLOW_IVALS["6h"];
+    let total = 0, ran = 0;
+    for (const f of [...follows]) {
+      if (f.enabled === false) continue;
+      if (respectDue && (ivMs === 0 || Date.now() - (f.lastChecked || 0) < ivMs)) continue;
+      total += await checkFollow(f, manual);
+      ran++;
+      await sleep(1500); // pacing between yt-dlp calls
+    }
+    saveFollows();
+    if (manual) flash(!ran ? "No followed playlists to check" : total ? `🔁 ${total} new track${total === 1 ? "" : "s"} added` : "Follows are up to date");
+  } finally { _followsBusy = false; }
 }
 
 // ─── Self-update (binary vs. source-tree version; repo mirrored on GitHub) ───
@@ -1183,9 +1279,37 @@ function wireSetup() {
   });
 }
 
+// Follow management rows inside the Settings modal.
+function renderFollowList() {
+  const host = $("#setFollowList");
+  if (!host) return;
+  if (!follows.length) { host.innerHTML = `<div class="set-hint">No followed playlists yet.</div>`; return; }
+  const pls = PL.getPlaylists();
+  host.innerHTML = follows.map(f => `
+    <div class="fl-row" title="${esc(f.url)}">
+      <label class="fl-on" title="Enabled"><input type="checkbox" data-fl-on="${f.id}" ${f.enabled !== false ? "checked" : ""}></label>
+      <span class="fl-name">${esc(f.title)}</span>
+      <select class="sel fl-target" data-fl-target="${f.id}" title="Add new tracks to this playlist">
+        ${pls.map(p => `<option value="${p.id}" ${f.playlistId === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}
+        ${pls.some(p => p.id === f.playlistId) ? "" : `<option value="" selected>(playlist deleted)</option>`}
+      </select>
+      <label class="fl-dl" title="Auto-download new tracks to the library"><input type="checkbox" data-fl-dl="${f.id}" ${f.autoDownload ? "checked" : ""}> ⬇</label>
+      <button class="fl-x" data-fl-x="${f.id}" title="Unfollow">✕</button>
+    </div>`).join("");
+  const byId = (id) => follows.find(f => f.id === id);
+  host.querySelectorAll("[data-fl-on]").forEach(el => el.addEventListener("change", e => { const f = byId(el.dataset.flOn); if (f) { f.enabled = e.target.checked; saveFollows(); renderPlaylists(); } }));
+  host.querySelectorAll("[data-fl-target]").forEach(el => el.addEventListener("change", e => { const f = byId(el.dataset.flTarget); if (f && e.target.value) { f.playlistId = e.target.value; saveFollows(); renderPlaylists(); } }));
+  host.querySelectorAll("[data-fl-dl]").forEach(el => el.addEventListener("change", e => { const f = byId(el.dataset.flDl); if (f) { f.autoDownload = e.target.checked; saveFollows(); } }));
+  host.querySelectorAll("[data-fl-x]").forEach(el => el.addEventListener("click", () => {
+    if (!confirm("Unfollow this playlist? (already-added tracks are kept)")) return;
+    follows = follows.filter(f => f.id !== el.dataset.flX);
+    saveFollows(); renderFollowList(); renderPlaylists();
+  }));
+}
+
 // ─── Wire up ───
 async function init() {
-  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline()]);
+  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows()]);
   await loadLibrary();
   if (enrichLibrary()) saveLibrary();
 
@@ -1237,6 +1361,7 @@ async function init() {
   $("#impAll").addEventListener("click", () => { document.querySelectorAll("#impList [data-imp]").forEach(c => c.checked = true); updateImpCount(); });
   $("#impNone").addEventListener("click", () => { document.querySelectorAll("#impList [data-imp]").forEach(c => c.checked = false); updateImpCount(); });
   $("#impList").addEventListener("change", updateImpCount);
+  $("#impFollow").addEventListener("change", updateImpCount);
   $("#impGo").addEventListener("click", impGo);
   $("#dlAction").addEventListener("click", dlStop);
   $("#dlRetry").addEventListener("click", dlRetry);
@@ -1267,6 +1392,11 @@ async function init() {
   if (IS_NATIVE && !S().setupDone) openSetup();
   else ytConfigPush().catch(() => {}); // warm up detection with saved prefs
   checkUpdate();
+
+  // Followed playlists: one check shortly after launch (let the app settle),
+  // then periodically according to the configured interval.
+  setTimeout(() => checkFollows(), 20000);
+  setInterval(() => checkFollows(false, true), 15 * 60 * 1000);
 }
 
 init().catch(e => console.error("[init] failed:", e));

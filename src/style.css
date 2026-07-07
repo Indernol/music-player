@@ -241,6 +241,16 @@ body.paused .track.playing .eq { display: none; }
 .src-row:hover .src-btn { opacity: 1; }
 .src-btn:hover { background: var(--bg-4); color: var(--tx-1); }
 .pl-count { margin-left: auto; font-size: 11px; color: var(--tx-3); }
+.pl-follow { font-size: 10px; opacity: .8; }
+
+/* ─── Followed playlists (Settings) ─── */
+.fl-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.fl-name { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-row .fl-target { flex: 0 0 130px; padding: 6px 26px 6px 9px; font-size: 12px; }
+.fl-on input, .fl-dl input { width: 15px; height: 15px; }
+.fl-dl { display: flex; align-items: center; gap: 3px; font-size: 12px; color: var(--tx-2); cursor: pointer; }
+.fl-x { border: none; background: transparent; color: var(--tx-3); cursor: pointer; width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0; }
+.fl-x:hover { background: var(--bg-4); color: var(--tx-1); }
 .pl-row.active { background: var(--bg-3); color: var(--tx-1); }
 
 /* ─── View header ─── */

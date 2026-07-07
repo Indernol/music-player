@@ -34,6 +34,7 @@ const DEFAULTS = {
   cookiesBrowser: "",    // --cookies-from-browser value; empty = off
   setupDone: false,      // first-run wizard completed
   updateMode: "ask",     // ask (propose) | auto (build silently) | off
+  followInterval: "6h",  // follow checks: launch (startup only) | 1h | 6h | 24h
 };
 
 let _s = { ...DEFAULTS };
