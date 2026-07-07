@@ -16,6 +16,11 @@ pub struct RpcState(pub Mutex<Option<(String, DiscordIpcClient)>>);
 /// (or /tmp). Flatpak clients (Vesktop, Discord) expose their socket elsewhere,
 /// and a stale symlink from a previously-used client breaks connects with
 /// ENOENT. Repair the canonical path before every (re)connect.
+/// Unix-only: on Windows the crate connects over a named pipe, no symlink needed.
+#[cfg(not(unix))]
+fn ensure_ipc_link() {}
+
+#[cfg(unix)]
 fn ensure_ipc_link() {
     let run = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
     let run = if !run.is_empty() {

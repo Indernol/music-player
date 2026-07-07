@@ -880,6 +880,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dbus-crossroads"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64bff0bd181fba667660276c6b7ebdc50cff37ce593e7adf9e734f89c8f444e8"
+dependencies = [
+ "dbus",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3886,6 +3895,8 @@ dependencies = [
  "block",
  "cocoa",
  "core-graphics 0.22.3",
+ "dbus",
+ "dbus-crossroads",
  "dispatch",
  "objc",
  "pollster",
