@@ -279,6 +279,43 @@ body.has-bg .track.playing { background: rgba(255, 255, 255, .05); }
 body.has-bg .pl-row.active,
 body.has-bg .src-row.active { background: rgba(255, 255, 255, .10); }
 
+/* ─── Light wallpaper scheme: dark text on light panels (auto or forced) ─── */
+body.bg-light.has-bg {
+  --tx-1: #171923; --tx-2: #3d4354; --tx-3: #6b7284;
+  --bd: rgba(0, 0, 0, .10); --bd-2: rgba(0, 0, 0, .18);
+  --bg-2: rgba(0, 0, 0, .05); --bg-3: rgba(0, 0, 0, .08); --bg-4: rgba(0, 0, 0, .14);
+}
+body.bg-light.has-bg .sidebar,
+body.bg-light.has-bg .player,
+body.bg-light.has-bg .main { background: rgba(255, 255, 255, calc(var(--panel-alpha, 85) / 100)); }
+body.bg-light.has-bg .dl-drawer,
+body.bg-light.has-bg .np-drawer { background: rgba(252, 252, 254, .97); }
+body.bg-light.has-bg .ctx-menu,
+body.bg-light.has-bg .modal { background: #f2f3f7; }
+body.bg-light.has-bg .track:hover,
+body.bg-light.has-bg .pl-row:hover,
+body.bg-light.has-bg .src-row:hover,
+body.bg-light.has-bg .nx-row:hover,
+body.bg-light.has-bg .imp-hit:hover,
+body.bg-light.has-bg .nav-item.active { background: rgba(0, 0, 0, .06); }
+body.bg-light.has-bg .track.selected { background: rgba(0, 0, 0, .10); }
+body.bg-light.has-bg .track.playing { background: rgba(0, 0, 0, .05); }
+body.bg-light.has-bg .pl-row.active,
+body.bg-light.has-bg .src-row.active { background: rgba(0, 0, 0, .09); }
+body.bg-light.has-bg input[type="text"],
+body.bg-light.has-bg input[type="search"],
+body.bg-light.has-bg select.sel,
+body.bg-light.has-bg .imp-foot select { background-color: rgba(0, 0, 0, .06); color: var(--tx-1); }
+body.bg-light.has-bg .ctrl.play { background: #171923; color: #fff; }
+body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0, 0, 0, .08); color: #171923; }
+
+/* ─── Cookies consent ─── */
+.ck-title { font-size: 12px; color: var(--tx-2); padding: 8px 0 6px; font-weight: 600; }
+.ck-list { max-height: 200px; overflow-y: auto; }
+.ck-opt { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.ck-opt:hover { background: var(--bg-3); }
+.ck-opt input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; }
+
 /* ─── Now Playing panel (big art + up next) ─── */
 .np-drawer {
   position: fixed; top: 10px; right: 10px; bottom: 118px; z-index: 79;

@@ -1343,6 +1343,37 @@ async function applyTheme() {
   }
   root.setProperty("--app-bg-image", src ? `url("${src}")` : "none");
   document.body.classList.toggle("has-bg", !!src);
+  // Text/panel scheme on top of the wallpaper: auto-detect its brightness
+  // (data-URL images are sampled; http images fall back to dark) or forced.
+  let light = false;
+  if (src) {
+    if (s.bgTextMode === "light") light = false;
+    else if (s.bgTextMode === "dark") light = true; // dark TEXT => light scheme
+    else light = (await probeLuma(src)) > 0.55;
+  }
+  document.body.classList.toggle("bg-light", !!src && light);
+}
+const _lumaCache = new Map();
+function probeLuma(src) {
+  if (_lumaCache.has(src)) return Promise.resolve(_lumaCache.get(src));
+  return new Promise(res => {
+    const done = v => { _lumaCache.set(src, v); res(v); };
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas");
+        c.width = c.height = 12;
+        const g = c.getContext("2d");
+        g.drawImage(img, 0, 0, 12, 12);
+        const d = g.getImageData(0, 0, 12, 12).data;
+        let l = 0;
+        for (let i = 0; i < d.length; i += 4) l += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+        done(l / (d.length / 4) / 255);
+      } catch { done(0.2); } // cross-origin: assume dark
+    };
+    img.onerror = () => done(0.2);
+    img.src = src;
+  });
 }
 function applySettings() {
   applyTheme();
@@ -1380,6 +1411,12 @@ function openSettings() {
         </span></div>
       <div class="set-row"><label>Background blur</label><input type="range" id="setBgBlur" min="0" max="40" value="${s.bgBlur}"></div>
       <div class="set-row"><label>Background darkness</label><input type="range" id="setBgDim" min="0" max="90" value="${s.bgDim}"></div>
+      <div class="set-row"><label>Text on wallpaper</label>
+        <select id="setBgText" class="sel sm-sel wide">
+          <option value="auto" ${s.bgTextMode === "auto" ? "selected" : ""}>Auto (detect)</option>
+          <option value="light" ${s.bgTextMode === "light" ? "selected" : ""}>Light text</option>
+          <option value="dark" ${s.bgTextMode === "dark" ? "selected" : ""}>Dark text</option>
+        </select></div>
       <div class="set-row"><label>Panel opacity</label><input type="range" id="setPanelA" min="35" max="100" value="${s.panelAlpha}"></div>
       <div class="set-hint">Blur / darkness / opacity apply live when a background image is set — mix them with any theme + accent.</div>
       <div class="set-row"><label>Show album art</label><input type="checkbox" id="setArt" ${s.showArt ? "checked" : ""}></div>
@@ -1485,6 +1522,7 @@ function openSettings() {
   $("#setBgBlur").addEventListener("input", e => { SETTINGS.setSetting("bgBlur", Number(e.target.value)); applyTheme(); });
   $("#setBgDim").addEventListener("input", e => { SETTINGS.setSetting("bgDim", Number(e.target.value)); applyTheme(); });
   $("#setPanelA").addEventListener("input", e => { SETTINGS.setSetting("panelAlpha", Number(e.target.value)); applyTheme(); });
+  $("#setBgText").addEventListener("change", e => { SETTINGS.setSetting("bgTextMode", e.target.value); applyTheme(); });
   for (const [id, key] of [["setUiSources", "uiSources"], ["setUiSrcBtns", "uiSrcButtons"], ["setUiPlaylists", "uiPlaylists"], ["setUiImport", "uiImportBtn"], ["setUiSort", "uiSortSel"], ["setUiDock", "npDocked"]]) {
     $("#" + id).addEventListener("change", e => { SETTINGS.setSetting(key, e.target.checked); applyUiPrefs(); });
   }
@@ -1510,7 +1548,14 @@ function openSettings() {
       if (p) { SETTINGS.setSetting("ytdlpPath", p); $("#setYtPath").value = p; ytTest(); }
     } catch (e) { console.error("[yt pick]", e); }
   });
-  $("#setCookies").addEventListener("change", e => { SETTINGS.setSetting("cookiesBrowser", e.target.value); ytConfigPush().catch(() => {}); });
+  $("#setCookies").addEventListener("change", async e => {
+    const prev = S().cookiesBrowser;
+    const v = e.target.value;
+    if (!v) { SETTINGS.setSetting("cookiesBrowser", ""); ytConfigPush().catch(() => {}); return; }
+    const chosen = await askCookieConsent(v);
+    if (chosen) { SETTINGS.setSetting("cookiesBrowser", chosen); ytConfigPush().catch(() => {}); flash(`Cookies: ${chosen}`); }
+    else { e.target.value = prev.split(":")[0] || ""; }
+  });
   $("#setDlBlock").addEventListener("click", () => { dlBlock = {}; saveDlBlock(); $("#setDlBlock").textContent = "Forget 0"; flash("Unavailable-track list cleared"); });
   $("#setRerun").addEventListener("click", () => { $("#settingsModal").hidden = true; openSetup(); });
   $("#setLimit").addEventListener("change", e => SETTINGS.setSetting("searchLimit", Number(e.target.value)));
@@ -1644,6 +1689,49 @@ async function runUpdate() {
   btn.disabled = false; updateBusy = false;
 }
 
+// ─── Cookies consent: explicit accept with a countdown + detected accounts ───
+let _ckResolve = null, _ckTimer = null;
+function closeCookieConsent(val) {
+  clearInterval(_ckTimer); _ckTimer = null;
+  $("#cookieModal").hidden = true;
+  const r = _ckResolve; _ckResolve = null;
+  r?.(val);
+}
+// Returns the chosen "browser" / "browser:Profile" or null if declined.
+async function askCookieConsent(browser) {
+  const host = $("#ckList");
+  host.innerHTML = `<div class="nx-note">Looking for installed browsers…</div>`;
+  $("#cookieModal").hidden = false;
+  const ok = $("#ckOk");
+  ok.disabled = true;
+  let left = 5;
+  ok.textContent = `Accept (${left})`;
+  clearInterval(_ckTimer);
+  _ckTimer = setInterval(() => {
+    left--;
+    if (left <= 0) { clearInterval(_ckTimer); ok.disabled = false; ok.textContent = "Accept"; }
+    else ok.textContent = `Accept (${left})`;
+  }, 1000);
+  let infos = [];
+  try { infos = await invoke("detect_browsers") || []; } catch {}
+  const options = [];
+  for (const b of infos) {
+    if (browser && b.browser !== browser) continue;
+    for (const prof of b.profiles) {
+      options.push({ value: b.profiles.length > 1 || prof !== "Default" ? `${b.browser}:${prof}` : b.browser, label: `${b.browser} — ${prof} (${b.source})` });
+    }
+  }
+  if (!options.length) options.push({ value: browser || "firefox", label: `${browser || "firefox"} — no profile found on disk (may fail)` });
+  host.innerHTML = `<div class="ck-title">Detected accounts/profiles — pick which one yt-dlp will use:</div>` +
+    options.map((o, i) => `<label class="ck-opt"><input type="radio" name="ckopt" value="${esc(o.value)}" ${i === 0 ? "checked" : ""}> ${esc(o.label)}</label>`).join("");
+  return new Promise(res => { _ckResolve = res; });
+}
+function wireCookieConsent() {
+  $("#ckOk").addEventListener("click", () => closeCookieConsent(document.querySelector("input[name=ckopt]:checked")?.value || null));
+  $("#ckCancel").addEventListener("click", () => closeCookieConsent(null));
+  $("#cookieModal").addEventListener("click", e => { if (e.target.id === "cookieModal") closeCookieConsent(null); });
+}
+
 // ─── yt-dlp configuration + first-run setup wizard ───
 // Pushes the saved yt-dlp path + cookies browser to the backend; empty path =
 // auto-detect (PATH, ~/Desktop/*/bin, removable drives, linuxbrew).
@@ -1690,9 +1778,16 @@ function wireSetup() {
       if (p) { SETTINGS.setSetting("ytdlpPath", p); setupDetect(); }
     } catch (e) { console.error("[setup pick]", e); }
   });
-  document.querySelectorAll("#setupModal .su-next").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("#setupModal .su-next").forEach(b => b.addEventListener("click", async () => {
     const cur = Number(b.closest(".setup-step").dataset.step);
-    if (cur === 2) SETTINGS.setSetting("cookiesBrowser", $("#suCookies").value);
+    if (cur === 2) {
+      const v = $("#suCookies").value;
+      if (v) {
+        const chosen = await askCookieConsent(v);
+        if (!chosen) { $("#suCookies").value = ""; SETTINGS.setSetting("cookiesBrowser", ""); setupStep(cur + 1); return; }
+        SETTINGS.setSetting("cookiesBrowser", chosen);
+      } else SETTINGS.setSetting("cookiesBrowser", "");
+    }
     setupStep(cur + 1);
   }));
   $("#suDlPick").addEventListener("click", async () => {
@@ -1828,6 +1923,7 @@ async function init() {
     applyUiPrefs();
   }));
   wireDialogs();
+  wireCookieConsent();
 
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#settingsClose").addEventListener("click", () => $("#settingsModal").hidden = true);

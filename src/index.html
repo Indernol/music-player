@@ -147,6 +147,21 @@
     </div>
   </div>
 
+  <div id="cookieModal" class="modal-backdrop" hidden>
+    <div class="modal dlg">
+      <div class="modal-head"><h2>Use browser cookies?</h2></div>
+      <div class="modal-body">
+        <p class="dlg-msg">yt-dlp will read the YouTube cookies of the account logged in that browser and act as that account.
+⚠ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format not available”), and heavy downloading on your account is more traceable. Only accept if you need age/member-restricted content.</p>
+        <div id="ckList" class="ck-list"></div>
+        <div class="setup-actions">
+          <button id="ckCancel" class="btn-line">Cancel</button>
+          <button id="ckOk" class="btn" disabled>Accept (5)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="dlgModal" class="modal-backdrop" hidden>
     <div class="modal dlg">
       <div class="modal-head"><h2 id="dlgTitle">…</h2></div>

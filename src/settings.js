@@ -50,6 +50,7 @@ const DEFAULTS = {
   customText: "#f4f5f8", // custom theme: text (secondary shades derived)
   radius: 12,            // corner radius (px) of panels/rows
   uiScale: 100,          // UI zoom %
+  bgTextMode: "auto",    // text on wallpaper: auto (detect brightness) | light | dark
   // Interface: hide/arrange elements
   uiSources: true,       // show the Sources section
   uiSrcButtons: true,    // show "Add folder…" / "Enter a path manually"

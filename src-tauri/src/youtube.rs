@@ -142,6 +142,71 @@ fn ensure_bin(cfg: &YtCfg) -> Result<String, String> {
     Ok(path)
 }
 
+#[derive(Serialize)]
+pub struct BrowserInfo {
+    pub browser: String,
+    pub profiles: Vec<String>,
+    pub source: String, // "system" | "flatpak"
+}
+
+/// Which browsers (and profiles) exist on this machine — shown in the cookies
+/// consent dialog so the user knows what they are actually picking.
+#[tauri::command]
+pub async fn detect_browsers() -> Vec<BrowserInfo> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut out: Vec<BrowserInfo> = Vec::new();
+
+    // Firefox: profiles.ini lists named profiles.
+    for (source, base) in [
+        ("system", format!("{home}/.mozilla/firefox")),
+        ("flatpak", format!("{home}/.var/app/org.mozilla.firefox/.mozilla/firefox")),
+    ] {
+        if let Ok(ini) = std::fs::read_to_string(format!("{base}/profiles.ini")) {
+            let profiles: Vec<String> = ini
+                .lines()
+                .filter_map(|l| l.strip_prefix("Name="))
+                .map(str::to_string)
+                .collect();
+            if !profiles.is_empty() {
+                out.push(BrowserInfo { browser: "firefox".into(), profiles, source: source.into() });
+            }
+        }
+    }
+
+    // Chromium family: profile directories ("Default", "Profile N").
+    let chromiums = [
+        ("chrome", vec![format!("{home}/.config/google-chrome"), format!("{home}/.var/app/com.google.Chrome/config/google-chrome")]),
+        ("chromium", vec![format!("{home}/.config/chromium"), format!("{home}/.var/app/org.chromium.Chromium/config/chromium")]),
+        ("brave", vec![format!("{home}/.config/BraveSoftware/Brave-Browser"), format!("{home}/.var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser")]),
+        ("edge", vec![format!("{home}/.config/microsoft-edge")]),
+        ("vivaldi", vec![format!("{home}/.config/vivaldi")]),
+        ("opera", vec![format!("{home}/.config/opera")]),
+    ];
+    for (name, bases) in chromiums {
+        for (i, base) in bases.iter().enumerate() {
+            if !std::path::Path::new(&format!("{base}/Default")).exists() {
+                continue;
+            }
+            let mut profiles = vec!["Default".to_string()];
+            if let Ok(rd) = std::fs::read_dir(base) {
+                for e in rd.filter_map(Result::ok) {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    if n.starts_with("Profile ") {
+                        profiles.push(n);
+                    }
+                }
+            }
+            out.push(BrowserInfo {
+                browser: name.into(),
+                profiles,
+                source: if i == 0 { "system".into() } else { "flatpak".into() },
+            });
+            break; // one entry per browser
+        }
+    }
+    out
+}
+
 /// Set (or auto-detect when `path` is empty) the yt-dlp binary + the cookies
 /// browser. Returns "path (version)" so the UI can show what's active.
 #[tauri::command]
