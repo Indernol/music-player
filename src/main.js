@@ -1809,6 +1809,7 @@ function applySettings() {
   applyUiPrefs();
   document.body.classList.toggle("compact", S().compactRows);
   document.body.classList.toggle("no-anim", !S().animations);
+  document.body.classList.toggle("smooth", S().smoothScroll);
   normalize = S().normalizeDefault;
   invoke("set_agc", { on: normalize }).catch(() => {});
   shuffle = S().shuffleDefault; $("#shuffleBtn").classList.toggle("active", shuffle);
@@ -1848,9 +1849,6 @@ function openSettings() {
         </select></div>
       <div class="set-row"><label>Panel opacity</label><input type="range" id="setPanelA" min="35" max="100" value="${s.panelAlpha}"></div>
       <div class="set-hint">Blur / darkness / opacity apply live when a background image is set — mix them with any theme + accent.</div>
-      <div class="set-row"><label>Show album art</label><input type="checkbox" id="setArt" ${s.showArt ? "checked" : ""}></div>
-      <div class="set-row"><label>Compact rows</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
-      <div class="set-row"><label>Animations</label><input type="checkbox" id="setAnim" ${s.animations ? "checked" : ""}></div>
     </div>
     <div class="set-group"><div class="set-title">Interface</div>
       <div class="set-row"><label>Sources section</label><input type="checkbox" id="setUiSources" ${s.uiSources ? "checked" : ""}></div>
@@ -1859,14 +1857,21 @@ function openSettings() {
       <div class="set-row"><label>“YouTube playlists” button</label><input type="checkbox" id="setUiImport" ${s.uiImportBtn ? "checked" : ""}></div>
       <div class="set-row"><label>Sort selector</label><input type="checkbox" id="setUiSort" ${s.uiSortSel ? "checked" : ""}></div>
       <div class="set-row"><label>Dock the “Now playing / Up next” panel</label><input type="checkbox" id="setUiDock" ${s.npDocked ? "checked" : ""}></div>
-      <div class="set-hint">Tip: the sidebar section titles (Sources / Playlists) collapse on click, and the 📌 in the “Now playing” panel docks it as a side column.</div>
+      <div class="set-hint">Tip: the sidebar section titles (Sources / Playlists) collapse on click, and the dock button in the “Now playing” panel docks it as a side column.</div>
+    </div>
+    <div class="set-group"><div class="set-title">Performance</div>
+      <div class="set-hint">Turn these off on a slower machine or to save battery — the app stays fully functional.</div>
+      <div class="set-row"><label>Smooth scrolling</label><input type="checkbox" id="setSmooth" ${s.smoothScroll ? "checked" : ""}></div>
+      <div class="set-row"><label>Interface animations</label><input type="checkbox" id="setAnim" ${s.animations ? "checked" : ""}></div>
+      <div class="set-row"><label>Album artwork</label><input type="checkbox" id="setArt" ${s.showArt ? "checked" : ""}></div>
+      <div class="set-row"><label>Compact rows (denser lists)</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
+      <div class="set-row"><label>Preload next track (gapless)</label><input type="checkbox" id="setPreload" ${s.preloadNext ? "checked" : ""}></div>
     </div>
     <div class="set-group"><div class="set-title">Playback</div>
       <div class="set-row"><label>Default volume</label><input type="range" id="setVol" min="0" max="100" value="${s.defaultVolume}"></div>
       <div class="set-row"><label>Keep all tracks at the same volume</label><input type="checkbox" id="setNorm" ${s.normalizeDefault ? "checked" : ""}></div>
       <div class="set-hint">Automatic gain control evens out quiet/loud tracks (works for streams and YouTube mp3s without tags). Applies from the next track.</div>
       <div class="set-row"><label>Shuffle by default</label><input type="checkbox" id="setShuf" ${s.shuffleDefault ? "checked" : ""}></div>
-      <div class="set-row"><label>Preload next track (gapless)</label><input type="checkbox" id="setPreload" ${s.preloadNext ? "checked" : ""}></div>
     </div>
     <div class="set-group"><div class="set-title">YouTube</div>
       <div class="set-row"><label>yt-dlp binary</label>
@@ -1963,6 +1968,7 @@ function openSettings() {
   $("#setArt").addEventListener("change", e => { SETTINGS.setSetting("showArt", e.target.checked); refreshView(); });
   $("#setCompact").addEventListener("change", e => { SETTINGS.setSetting("compactRows", e.target.checked); document.body.classList.toggle("compact", e.target.checked); });
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
+  $("#setSmooth").addEventListener("change", e => { SETTINGS.setSetting("smoothScroll", e.target.checked); document.body.classList.toggle("smooth", e.target.checked); });
   $("#setVol").addEventListener("change", e => { SETTINGS.setSetting("defaultVolume", Number(e.target.value)); $("#volume").value = e.target.value; invoke("set_volume", { level: Number(e.target.value) / 100 }); });
   $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); });

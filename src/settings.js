@@ -26,6 +26,7 @@ const DEFAULTS = {
   showArt: true,
   compactRows: false,
   animations: true,
+  smoothScroll: true,    // eased scrolling on lists/panels (Performance group)
   defaultVolume: 80,
   normalizeDefault: true,
   shuffleDefault: false,
