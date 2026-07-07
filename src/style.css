@@ -158,11 +158,13 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); backgro
 }
 .track.playing .t { color: var(--accent-2); font-weight: 700; }
 body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
-.tk-idx { position: relative; display: grid; place-items: center; color: var(--tx-3); font-size: 12px; }
+.tk-idx { position: relative; display: grid; place-items: center; color: var(--tx-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .tk-idx .idx-play { display: none; color: var(--tx-1); font-size: 10px; }
+.track:hover .idx-num { display: none; }
 .track:hover .idx-play { display: block; }
-.track.playing .tk-idx::before { content: "●"; color: var(--accent); font-size: 9px; }
-.track.playing:hover .tk-idx::before { display: none; }
+/* Playing row: the position number stays, tinted accent + a dot marker. */
+.track.playing .idx-num { color: var(--accent-2); font-weight: 700; }
+.track.playing .tk-idx::after { content: "●"; position: absolute; left: -9px; color: var(--accent); font-size: 8px; }
 .album { font-size: 13px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .art { width: 40px; height: 40px; border-radius: 6px; display: grid; place-items: center; font-weight: 800; font-size: 16px; color: rgba(255,255,255,.92); overflow: hidden; }
 .meta { min-width: 0; }

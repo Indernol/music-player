@@ -391,14 +391,14 @@ pub async fn yt_download(
     let bin = ensure_bin(&cfg)?;
     let cookies = cfg.cookies.lock().unwrap().clone();
     let res = if cookies.is_empty() {
-        download_attempt(&app, &dls, &bin, &id, &dir, None)
+        download_clients(&app, &dls, &bin, &id, &dir, None)
     } else {
         // Same cookies fallback as run_ytdlp: a logged-in session can make
         // YouTube withhold every format — retry without cookies.
-        match download_attempt(&app, &dls, &bin, &id, &dir, Some(&cookies)) {
+        match download_clients(&app, &dls, &bin, &id, &dir, Some(&cookies)) {
             Ok(p) => Ok(p),
             Err(e) if e == "canceled" => Err(e),
-            Err(first) => download_attempt(&app, &dls, &bin, &id, &dir, None).map_err(|_| first),
+            Err(first) => download_clients(&app, &dls, &bin, &id, &dir, None).map_err(|_| first),
         }
     };
     if let Err(e) = &res {
@@ -409,7 +409,10 @@ pub async fn yt_download(
     res
 }
 
-fn download_attempt(
+/// Format availability is a per-client roulette (see resolve): when a client
+/// yields "Requested format is not available", the next one often works.
+/// Definitive refusals (Premium/private/deleted…) stop the cycle immediately.
+fn download_clients(
     app: &AppHandle,
     dls: &DlState,
     bin: &str,
@@ -417,7 +420,43 @@ fn download_attempt(
     dir: &str,
     cookies: Option<&str>,
 ) -> Result<String, String> {
+    const CLIENTS: [Option<&str>; 4] = [
+        None,
+        Some("youtube:player_client=tv"),
+        Some("youtube:player_client=android,web"),
+        Some("youtube:player_client=ios"),
+    ];
+    let mut last = String::from("no download attempt ran");
+    for client in CLIENTS {
+        match download_attempt(app, dls, bin, id, dir, cookies, client) {
+            Ok(p) => return Ok(p),
+            Err(e) if e == "canceled" => return Err(e),
+            Err(e) => {
+                let format_issue = e.contains("Requested format is not available")
+                    || e.contains("No video formats");
+                last = e;
+                if !format_issue {
+                    break; // definitive error — other clients won't change it
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
+fn download_attempt(
+    app: &AppHandle,
+    dls: &DlState,
+    bin: &str,
+    id: &str,
+    dir: &str,
+    cookies: Option<&str>,
+    client: Option<&str>,
+) -> Result<String, String> {
     let mut cmd = Command::new(bin);
+    if let Some(c) = client {
+        cmd.arg("--extractor-args").arg(c);
+    }
     // The standalone yt-dlp ships next to ffmpeg (same bin/ folder) — point at
     // it explicitly since the container PATH has no ffmpeg for the mp3 convert.
     if let Some(parent) = std::path::Path::new(bin).parent() {

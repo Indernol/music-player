@@ -234,7 +234,7 @@ function renderTracks(list) {
   host.innerHTML = list.map((t, i) => {
     const isNow = nowPath === t.path;
     return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
-      <div class="tk-idx"><span class="idx-play">▶</span></div>
+      <div class="tk-idx"><span class="idx-num">${i + 1}</span><span class="idx-play">▶</span></div>
       ${artCell(t)}
       <div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
       <div class="album">${esc(t.album)}</div>
