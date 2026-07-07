@@ -331,23 +331,85 @@ function rowClick(e, idx, path) {
 function ensureSelected(path, idx) { if (path && !selected.has(path)) { selected.clear(); selected.add(path); anchorIdx = idx; refreshSelectionUI(); } }
 
 // ─── Context menu ───
+// The on-disk file backing a selected path (the path itself if it's local, or
+// its downloaded twin for an online path), plus the videoId if any.
+function localFileFor(p) { return isOnline(p) ? libraryLocalFor(ytId(p)) : p; }
+function videoIdOf(p) {
+  if (isOnline(p)) return ytId(p);
+  const m = String(p).match(/\[([A-Za-z0-9_-]{11})\]/);
+  return m ? m[1] : null;
+}
+// Delete the on-disk files for these paths. Remaining playlist references are
+// reverted to the online stream (via [videoId]) so nothing dangles and the
+// track stays playable where it was.
+async function deleteLocalFiles(paths) {
+  let removed = 0;
+  for (const p of paths) {
+    const file = localFileFor(p);
+    if (!file) continue;
+    try { await invoke("delete_file", { path: file }); }
+    catch (e) { console.error("[delete]", file, e); flash(`Couldn't delete a file: ${e}`); continue; }
+    removed++;
+    const vid = videoIdOf(p);
+    const t = library.find(x => x.path === file);
+    if (vid) {
+      const online = "yt:" + vid;
+      if (!onlineIndex.has(online)) onlineIndex.set(online, { path: online, title: t?.title || baseName(file), artist: t?.artist || "Unknown Artist", album: "YouTube", duration_secs: t?.duration_secs || 0, gain: 1, thumbnail: t?.thumbnail || "" });
+      PL.replacePath(file, online); // keep it in playlists, now as a stream
+    }
+    library = library.filter(x => x.path !== file);
+  }
+  if (removed) { await saveLibrary(); await saveOnline(); }
+  return removed;
+}
+
 function openContextMenu(x, y) {
   const paths = [...selected]; if (!paths.length) return;
   const menu = $("#ctxMenu");
   const pls = PL.getPlaylists();
   const nOnline = paths.filter(isOnline).length;
+  const inPlaylist = active.type === "playlist";
+  const nLocal = paths.map(localFileFor).filter(Boolean).length;
+  const nsfx = paths.length > 1 ? paths.length + " tracks" : "track";
   menu.innerHTML =
     `<div class="ctx-item" data-play="1">▶ Play</div>` +
     (nOnline ? `<div class="ctx-item" data-dl="1">📥 Download ${nOnline > 1 ? nOnline + " tracks" : "track"} locally</div>` : "") +
+    // ── removal / deletion ──
+    ((inPlaylist || nLocal) ? `<div class="ctx-sep"></div>` : "") +
+    (inPlaylist ? `<div class="ctx-item" data-rm="pl">➖ Remove from this playlist</div>` : "") +
+    (nLocal ? `<div class="ctx-item ctx-danger" data-rm="local">🗑 Delete local file${nLocal > 1 ? "s" : ""}${inPlaylist ? " (keep in playlist)" : ""}</div>` : "") +
+    (inPlaylist && nLocal ? `<div class="ctx-item ctx-danger" data-rm="both">🗑 Remove from playlist + delete local</div>` : "") +
     `<div class="ctx-sep"></div>` +
-    `<div class="ctx-label">Add ${paths.length > 1 ? paths.length + " tracks" : "track"} to</div>` +
+    `<div class="ctx-label">Add ${nsfx} to</div>` +
     pls.map(p => `<div class="ctx-item" data-add="${p.id}"><span class="row-ic">${IC.note}</span> ${esc(p.name)}</div>`).join("") +
     `<div class="ctx-item" data-add="__new">✚ New playlist…</div>`;
-  menu.hidden = false;
+  placeCtx(menu, x, y);
   menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline)); closeCtx(); });
-  menu.style.left = Math.min(x, window.innerWidth - 224) + "px";
-  menu.style.top = Math.min(y, window.innerHeight - Math.min(menu.offsetHeight + 8, 340)) + "px";
   menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playFrom(i); closeCtx(); });
+
+  menu.querySelector('[data-rm="pl"]')?.addEventListener("click", () => {
+    closeCtx();
+    for (const p of paths) PL.removeFromPlaylist(active.id, p);
+    saveOnline(); renderPlaylists(); openPlaylist(active.id);
+    flash(`Removed ${nsfx} from playlist`);
+  });
+  menu.querySelector('[data-rm="local"]')?.addEventListener("click", async () => {
+    closeCtx();
+    if (!await askConfirm(`Delete ${nLocal} local file${nLocal > 1 ? "s" : ""} from disk?`, "The track stays in your playlists (played from YouTube again).", "Delete")) return;
+    const n = await deleteLocalFiles(paths);
+    renderPlaylists(); refreshView(); if (n) flash(`Deleted ${n} local file${n > 1 ? "s" : ""}`);
+  });
+  menu.querySelector('[data-rm="both"]')?.addEventListener("click", async () => {
+    closeCtx();
+    if (!await askConfirm("Remove from playlist and delete the local file?", "This removes the track from this playlist and erases the file from disk.", "Delete")) return;
+    for (const p of paths) PL.removeFromPlaylist(active.id, p);
+    const n = await deleteLocalFiles(paths);
+    // deleteLocalFiles reverted others to stream; also unlink those from THIS playlist.
+    for (const p of paths) { const v = videoIdOf(p); if (v) PL.removeFromPlaylist(active.id, "yt:" + v); }
+    saveOnline(); renderPlaylists(); refreshView();
+    flash(`Removed ${nsfx}${n ? ` and deleted ${n} file${n > 1 ? "s" : ""}` : ""}`);
+  });
+
   menu.querySelectorAll("[data-add]").forEach(it => it.addEventListener("click", async () => {
     let id = it.dataset.add;
     if (id === "__new") { closeCtx(); const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (!name) return; id = PL.createPlaylist(name).id; }

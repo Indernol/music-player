@@ -68,6 +68,27 @@ pub fn scan_library(roots: &[String]) -> Vec<Track> {
     tracks
 }
 
+/// Permanently delete a local audio file from disk. Guarded: the path must
+/// exist, be a regular file, and carry a known audio extension — so a stray
+/// call can never nuke arbitrary files.
+#[tauri::command]
+pub async fn delete_file(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    let meta = std::fs::metadata(p).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("not a regular file".into());
+    }
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if !AUDIO_EXTS.contains(&ext.as_str()) {
+        return Err(format!("refusing to delete a non-audio file (.{ext})"));
+    }
+    std::fs::remove_file(p).map_err(|e| e.to_string())
+}
+
 /// Local image file → data URL (custom app backgrounds). Kept off the UI thread.
 #[tauri::command]
 pub async fn read_image(path: String) -> Result<String, String> {
