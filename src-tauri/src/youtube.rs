@@ -174,6 +174,89 @@ fn install_bin() -> Result<String, String> {
     Ok(dest)
 }
 
+fn find_named(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .find(|e| e.file_type().is_file() && e.file_name() == name)
+        .map(|e| e.path().to_path_buf())
+}
+
+/// Download a static ffmpeg + ffprobe into ~/.local/bin (needed for the mp3
+/// conversion and thumbnail embedding). Extracts the .tar.xz with the system
+/// `tar` so we don't pull an xz decoder into the build. No-op if ffmpeg is
+/// already present there.
+fn install_ffmpeg() -> Result<String, String> {
+    use std::sync::OnceLock;
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let home = std::env::var("HOME").map_err(|_| "no HOME directory".to_string())?;
+    let dir = format!("{home}/.local/bin");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
+    let ff = format!("{dir}/ffmpeg");
+    if check_bin(&ff).is_ok() {
+        return Ok(ff);
+    }
+    let asset = match std::env::consts::ARCH {
+        "x86_64" => "ffmpeg-release-amd64-static.tar.xz",
+        "aarch64" => "ffmpeg-release-arm64-static.tar.xz",
+        other => return Err(format!("no static ffmpeg for this CPU ({other})")),
+    };
+    let url = format!("https://johnvansickle.com/ffmpeg/releases/{asset}");
+    let tmp = std::env::temp_dir().join("mp-ffmpeg.tar.xz");
+    let ex = std::env::temp_dir().join("mp-ffmpeg-extract");
+    dbg_log(&format!("installing ffmpeg from {url}"));
+    let resp = ureq::get(&url).call().map_err(|e| format!("ffmpeg download failed: {e}"))?;
+    {
+        let mut reader = resp.into_reader();
+        let mut f = std::fs::File::create(&tmp).map_err(|e| format!("cannot write {tmp:?}: {e}"))?;
+        std::io::copy(&mut reader, &mut f).map_err(|e| format!("ffmpeg download interrupted: {e}"))?;
+    }
+    let _ = std::fs::remove_dir_all(&ex);
+    std::fs::create_dir_all(&ex).map_err(|e| e.to_string())?;
+    let ok = Command::new("tar")
+        .arg("-xJf")
+        .arg(&tmp)
+        .arg("-C")
+        .arg(&ex)
+        .status()
+        .map_err(|e| format!("cannot run tar to unpack ffmpeg: {e}"))?
+        .success();
+    if !ok {
+        return Err("tar failed to extract ffmpeg".into());
+    }
+    for name in ["ffmpeg", "ffprobe"] {
+        if let Some(found) = find_named(&ex, name) {
+            let dest = format!("{dir}/{name}");
+            std::fs::copy(&found, &dest).map_err(|e| format!("cannot install {name}: {e}"))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_dir_all(&ex);
+    check_bin(&ff).map_err(|e| format!("installed ffmpeg did not run: {e}"))?;
+    dbg_log(&format!("ffmpeg installed at {ff}"));
+    Ok(ff)
+}
+
+/// Ensure an ffmpeg is reachable for mp3 conversion: if none sits next to the
+/// yt-dlp binary and none is on PATH, fetch a static build. Best-effort — on
+/// failure the download itself reports the missing ffmpeg.
+fn ensure_ffmpeg(bin: &str) {
+    let near = std::path::Path::new(bin)
+        .parent()
+        .map(|p| p.join("ffmpeg").exists())
+        .unwrap_or(false);
+    if near || check_bin("ffmpeg").is_ok() {
+        return;
+    }
+    let _ = install_ffmpeg();
+}
+
 fn ensure_bin(cfg: &YtCfg) -> Result<String, String> {
     {
         let guard = cfg.bin.lock().unwrap();
@@ -289,7 +372,14 @@ pub async fn yt_install(cfg: State<'_, YtCfg>) -> Result<String, String> {
     let path = install_bin()?;
     let v = check_bin(&path).unwrap_or_default();
     *cfg.bin.lock().unwrap() = Some(path.clone());
-    Ok(format!("{path} ({v})"))
+    // Downloads also need ffmpeg for the mp3 conversion — grab it too so the
+    // one button gives a fully working setup. A failure here is non-fatal
+    // (search/stream still work), so it's only appended to the status.
+    let ff = match install_ffmpeg() {
+        Ok(_) => " + ffmpeg".to_string(),
+        Err(e) => format!(" (ffmpeg not installed: {e})"),
+    };
+    Ok(format!("{path} ({v}){ff}"))
 }
 
 fn run_ytdlp_raw(bin: &str, args: &[&str], cookies: Option<&str>) -> Result<String, String> {
@@ -569,16 +659,18 @@ pub async fn yt_download(
     }
 
     let bin = ensure_bin(&cfg)?;
+    ensure_ffmpeg(&bin); // best-effort: fetch a static ffmpeg if none is around
     let cookies = cfg.cookies.lock().unwrap().clone();
     let res = if cookies.is_empty() {
         download_clients(&app, &dls, &bin, &id, &dir, None)
     } else {
-        // Same cookies fallback as run_ytdlp: a logged-in session can make
-        // YouTube withhold every format — retry without cookies.
+        // A logged-in session often makes YouTube withhold every format. If the
+        // cookies attempt fails, the no-cookies attempt is the meaningful one —
+        // surface ITS error, not the misleading "format not available" cookies one.
         match download_clients(&app, &dls, &bin, &id, &dir, Some(&cookies)) {
             Ok(p) => Ok(p),
             Err(e) if e == "canceled" => Err(e),
-            Err(first) => download_clients(&app, &dls, &bin, &id, &dir, None).map_err(|_| first),
+            Err(_) => download_clients(&app, &dls, &bin, &id, &dir, None),
         }
     };
     if let Err(e) = &res {
@@ -600,10 +692,13 @@ fn download_clients(
     dir: &str,
     cookies: Option<&str>,
 ) -> Result<String, String> {
+    // `android,web` is the most reliable audio client, so try it right after the
+    // default; the default's stream URL often 403s or is DRM-flagged while
+    // `android,web` succeeds on the very same video.
     const CLIENTS: [Option<&str>; 4] = [
         None,
-        Some("youtube:player_client=tv"),
         Some("youtube:player_client=android,web"),
+        Some("youtube:player_client=tv"),
         Some("youtube:player_client=ios"),
     ];
     let mut last = String::from("no download attempt ran");
@@ -612,16 +707,42 @@ fn download_clients(
             Ok(p) => return Ok(p),
             Err(e) if e == "canceled" => return Err(e),
             Err(e) => {
-                let format_issue = e.contains("Requested format is not available")
-                    || e.contains("No video formats");
+                let definitive = is_definitive_refusal(&e);
                 last = e;
-                if !format_issue {
-                    break; // definitive error — other clients won't change it
+                if definitive {
+                    break; // private/deleted/geo/age/premium — no client changes it
                 }
+                // Otherwise (403, "DRM protected", format roulette, network) the
+                // next client frequently works — keep going.
             }
         }
     }
     Err(last)
+}
+
+/// Errors that no amount of client-switching will fix — stop trying immediately.
+/// Everything else (403 Forbidden, "DRM protected", "format is not available",
+/// transient network) is worth retrying with the next player client.
+fn is_definitive_refusal(e: &str) -> bool {
+    let m = e.to_lowercase();
+    [
+        "private video",
+        "video unavailable",
+        "has been removed",
+        "account associated with this video has been terminated",
+        "members-only",
+        "join this channel",
+        "sign in to confirm your age",
+        "age-restricted",
+        "not available in your country",
+        "blocked it on copyright",
+        "who has blocked it in your country",
+        "premium",
+        "this live event will begin",
+        "premieres in",
+    ]
+    .iter()
+    .any(|s| m.contains(s))
 }
 
 fn download_attempt(
