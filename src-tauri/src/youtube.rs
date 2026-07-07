@@ -558,6 +558,142 @@ pub async fn yt_search_playlists(
         .collect())
 }
 
+#[derive(Serialize)]
+pub struct Channel {
+    pub title: String,
+    pub url: String,
+    pub thumbnail: String,
+}
+
+fn best_thumb(v: &Value) -> String {
+    let mut t = v["thumbnails"]
+        .as_array()
+        .and_then(|a| a.last())
+        .and_then(|t| t["url"].as_str())
+        .unwrap_or("")
+        .to_string();
+    if let Some(rest) = t.strip_prefix("//") {
+        t = format!("https:{rest}");
+    }
+    t
+}
+
+fn is_channel_url(u: &str) -> bool {
+    u.contains("/channel/") || u.contains("/@") || u.contains("/user/") || u.contains("/c/")
+}
+
+/// Top channel/artist matching `query` (results page with the channel filter).
+/// Shown as the header card of a YouTube search.
+#[tauri::command]
+pub async fn yt_channel(cfg: State<'_, YtCfg>, query: String) -> Result<Option<Channel>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(None);
+    }
+    let page = format!(
+        "https://www.youtube.com/results?search_query={}&sp=EgIQAg%3D%3D",
+        url_encode(q)
+    );
+    let out = run_ytdlp(
+        &cfg,
+        &["--flat-playlist", "-j", "--no-warnings", "-I", "1:3", &page],
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .find_map(|v| {
+            let url = v["url"].as_str()?.to_string();
+            if !is_channel_url(&url) {
+                return None;
+            }
+            Some(Channel {
+                title: v["channel"]
+                    .as_str()
+                    .or_else(|| v["title"].as_str())
+                    .or_else(|| v["uploader"].as_str())
+                    .unwrap_or("Channel")
+                    .to_string(),
+                url,
+                thumbnail: best_thumb(&v),
+            })
+        }))
+}
+
+/// A channel's uploaded videos (its "Videos" tab), paginated.
+#[tauri::command]
+pub async fn yt_channel_videos(
+    cfg: State<'_, YtCfg>,
+    url: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<OnlineTrack>, String> {
+    let n = limit.unwrap_or(20).clamp(1, 100);
+    let off = offset.unwrap_or(0).min(5000);
+    let target = format!("{}/videos", url.trim().trim_end_matches('/'));
+    let range = format!("{}:{}", off + 1, off + n);
+    let out = run_ytdlp(
+        &cfg,
+        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| track_from_json(&v))
+        .collect())
+}
+
+/// A channel's public playlists (its "Playlists" tab), paginated.
+#[tauri::command]
+pub async fn yt_channel_playlists(
+    cfg: State<'_, YtCfg>,
+    url: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<PlaylistHit>, String> {
+    let n = limit.unwrap_or(15).clamp(1, 100);
+    let off = offset.unwrap_or(0).min(2000);
+    let target = format!("{}/playlists", url.trim().trim_end_matches('/'));
+    let range = format!("{}:{}", off + 1, off + n);
+    let out = run_ytdlp(
+        &cfg,
+        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| {
+            let url = v["url"].as_str()?.to_string();
+            if !url.contains("list=") {
+                return None;
+            }
+            Some(PlaylistHit {
+                title: v["title"].as_str().unwrap_or("Untitled playlist").to_string(),
+                author: v["uploader"]
+                    .as_str()
+                    .or_else(|| v["channel"].as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                url,
+            })
+        })
+        .collect())
+}
+
+/// Every uploaded video of a channel (capped) — feeds the "Download all" action.
+#[tauri::command]
+pub async fn yt_channel_all(cfg: State<'_, YtCfg>, url: String) -> Result<Vec<OnlineTrack>, String> {
+    let target = format!("{}/videos", url.trim().trim_end_matches('/'));
+    let out = run_ytdlp(
+        &cfg,
+        &["--flat-playlist", "-j", "--no-warnings", "-I", "1:1000", &target],
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| track_from_json(&v))
+        .collect())
+}
+
 #[tauri::command]
 pub async fn yt_playlist(cfg: State<'_, YtCfg>, url: String) -> Result<PlaylistImport, String> {
     let url = url.trim().to_string();

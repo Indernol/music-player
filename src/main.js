@@ -480,6 +480,8 @@ function openPlaylistCtx(x, y, id) {
   menu.innerHTML =
     `<div class="ctx-item" data-a="open">🎼 Open</div>` +
     `<div class="ctx-item" data-a="rename">✏️ Rename…</div>` +
+    `<div class="ctx-item" data-a="cover">🖼 Set cover…</div>` +
+    (pl.image ? `<div class="ctx-item" data-a="uncover">Remove cover</div>` : "") +
     `<div class="ctx-item" data-a="follow">${fw ? "🔁 Unfollow" : "🔁 Follow…"}</div>` +
     `<div class="ctx-item" data-a="save">📥 Save locally</div>` +
     `<div class="ctx-sep"></div>` +
@@ -493,6 +495,13 @@ function openPlaylistCtx(x, y, id) {
       const name = await askText("Rename playlist", { value: pl.name, ok: "Rename" });
       if (name) { PL.renamePlaylist(id, name); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); }
     }
+    else if (a === "cover") {
+      try {
+        const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a cover image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"] }] } });
+        if (p) { PL.setImage(id, p); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Cover set"); }
+      } catch (e) { console.error("[pl cover]", e); }
+    }
+    else if (a === "uncover") { PL.setImage(id, ""); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); flash("Cover removed"); }
     else if (a === "follow") { if (fw) unfollowPlaylist(id); else followPlaylistFlow(id); }
     else if (a === "save") downloadPlaylist(id);
     else if (a === "del") {
@@ -589,6 +598,47 @@ async function removeSource(folder) {
 }
 
 // ─── Playlists sidebar ───
+// Fill a playlist cover element: the custom image if set, else the first track's
+// artwork (online thumbnail or embedded local cover) as an auto mosaic-ish tile.
+async function plCoverInto(el, pl) {
+  if (!el || !pl) return;
+  let url = "";
+  if (pl.image) { try { url = await invoke("read_image", { path: pl.image }); } catch {} }
+  if (!url && S().showArt) {
+    for (const p of pl.paths.slice(0, 15)) {
+      const t = trackByPath(p) || onlineIndex.get(p);
+      if (t?.thumbnail) { url = t.thumbnail; break; }
+      if (t && !isOnline(p)) { try { const c = await invoke("cover", { path: p }); if (c) { url = c; break; } } catch {} }
+    }
+  }
+  if (url) { el.style.backgroundImage = `url("${String(url).replace(/"/g, "%22")}")`; el.classList.add("has-cover"); el.textContent = ""; }
+}
+function playlistTitles(pl, max = 25) {
+  return pl.paths.slice(0, max).map(p => {
+    const t = trackByPath(p) || onlineIndex.get(p);
+    return (t && t.title) ? t.title : baseName(String(p));
+  });
+}
+function closePreview() { $("#plPreview")?.remove(); }
+// Quick peek at a playlist's tracks without opening it (the 👁 button).
+function showPlaylistPreview(id, anchor) {
+  closePreview();
+  const pl = PL.getPlaylists().find(p => p.id === id);
+  if (!pl) return;
+  const titles = playlistTitles(pl);
+  const box = document.createElement("div");
+  box.id = "plPreview"; box.className = "pl-preview";
+  box.innerHTML = `<div class="plp-head">${esc(pl.name)} · ${pl.paths.length} track${pl.paths.length === 1 ? "" : "s"}</div>` +
+    (titles.length
+      ? titles.map((t, i) => `<div class="plp-row"><span class="plp-n">${i + 1}</span> ${esc(t)}</div>`).join("")
+      : `<div class="plp-empty">Empty playlist</div>`) +
+    (pl.paths.length > titles.length ? `<div class="plp-more">… ${pl.paths.length - titles.length} more</div>` : "");
+  document.body.appendChild(box);
+  const r = anchor.getBoundingClientRect();
+  box.style.left = Math.min(r.right + 8, window.innerWidth - box.offsetWidth - 8) + "px";
+  box.style.top = Math.max(8, Math.min(r.top, window.innerHeight - box.offsetHeight - 8)) + "px";
+  setTimeout(() => document.addEventListener("click", closePreview, { once: true }), 0);
+}
 function renderPlaylists() {
   const host = $("#playlistsList");
   const pls = PL.getPlaylists();
@@ -597,14 +647,17 @@ function renderPlaylists() {
     pls.map(p => {
       const on = active.type === "playlist" && active.id === p.id;
       const fw = followFor(p.id);
-      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}"><span class="row-ic">${IC.note}</span> ${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">🔁</span>` : ""} <span class="pl-count">${p.paths.length}</span>
+      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}"><span class="pl-cover" data-cover="${p.id}">${IC.note}</span> <span class="pl-name">${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">🔁</span>` : ""}</span> <span class="pl-count">${p.paths.length}</span>
+        <button class="pl-eye" data-eye="${p.id}" title="Preview tracks">👁</button>
         <button class="pl-del" data-del="${p.id}" title="Delete">✕</button></div>`;
     }).join("");
   host.querySelector("#plNew").addEventListener("click", async () => { const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
   host.querySelectorAll("[data-pl]").forEach(el => {
-    el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined) return; openPlaylist(el.dataset.pl); });
+    el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined || e.target.dataset.eye !== undefined) return; openPlaylist(el.dataset.pl); });
     el.addEventListener("contextmenu", (e) => { e.preventDefault(); openPlaylistCtx(e.clientX, e.clientY, el.dataset.pl); });
   });
+  host.querySelectorAll("[data-eye]").forEach(btn => btn.addEventListener("click", (e) => { e.stopPropagation(); showPlaylistPreview(btn.dataset.eye, btn); }));
+  host.querySelectorAll("[data-cover]").forEach(el => { const pl = pls.find(p => p.id === el.dataset.cover); plCoverInto(el, pl); });
   host.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", async (e) => { e.stopPropagation(); if (await askConfirm("Delete this playlist?", "", "Delete")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); } }));
   $("#sideFilter")?.dispatchEvent(new Event("input")); // keep the filter applied
 }
@@ -625,6 +678,7 @@ function openPlaylist(id) {
   });
   $("#plDlBtn")?.addEventListener("click", () => downloadPlaylist(id));
   $("#plFollowBtn")?.addEventListener("click", () => (followFor(id) ? unfollowPlaylist(id) : followPlaylistFlow(id)));
+  const vhIcon = $("#viewHead .vh-icon"); if (vhIcon) { vhIcon.classList.add("vh-cover"); plCoverInto(vhIcon, pl); }
   renderTracks(pl.paths.map(p => byPath.get(p) || onlineIndex.get(p)).filter(Boolean));
 }
 
@@ -663,6 +717,8 @@ async function unfollowPlaylist(id) {
 let onlineResults = [];
 let onlineQuery = "";
 let ytPage = 0, ytHasMore = false, ytFilter = "all";
+// Artist/channel header card shown on the first page of a search.
+let ytArtist = null, ytArtistMode = "videos", ytArtistPls = [];
 function ytFiltered() {
   const q = onlineQuery.toLowerCase();
   if (ytFilter === "title") return onlineResults.filter(t => t.title.toLowerCase().includes(q));
@@ -672,16 +728,19 @@ function ytFiltered() {
 function renderOnlineResults() {
   active = { type: "online", id: onlineQuery };
   markActive();
-  const shown = ytFiltered();
+  const plMode = !!ytArtist && ytArtistMode === "playlists" && ytPage === 0;
+  const shown = plMode ? [] : ytFiltered();
   // Tracks already saved locally sink to their own section at the bottom.
   const fresh = [], owned = [];
-  for (const t of shown) (libraryLocalFor(ytId(t.path)) ? owned : fresh).push(t);
+  if (!plMode) for (const t of shown) (libraryLocalFor(ytId(t.path)) ? owned : fresh).push(t);
   setViewHead({
     icon: IC.globe, title: "YouTube",
-    subtitle: `Page ${ytPage + 1} · ${shown.length} result${shown.length === 1 ? "" : "s"} for “${onlineQuery}”` +
-      (ytFilter !== "all" ? ` (filter: ${ytFilter})` : "") +
-      (owned.length ? ` · ${owned.length} already in your library` : ""),
-    actions:
+    subtitle: plMode
+      ? `Playlists of ${ytArtist.title} · ${ytArtistPls.length}`
+      : `Page ${ytPage + 1} · ${shown.length} result${shown.length === 1 ? "" : "s"} for “${onlineQuery}”` +
+        (ytFilter !== "all" ? ` (filter: ${ytFilter})` : "") +
+        (owned.length ? ` · ${owned.length} already in your library` : ""),
+    actions: plMode ? "" :
       `<select id="ytFilter" class="sel sm-sel">
         <option value="all" ${ytFilter === "all" ? "selected" : ""}>All results</option>
         <option value="title" ${ytFilter === "title" ? "selected" : ""}>Title contains</option>
@@ -693,19 +752,86 @@ function renderOnlineResults() {
   $("#ytFilter")?.addEventListener("change", e => { ytFilter = e.target.value; renderOnlineResults(); });
   $("#ytPrev")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage - 1));
   $("#ytNext")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage + 1));
-  renderTracks([...sortTracks([...fresh]), ...sortTracks([...owned])], true);
-  if (owned.length) {
-    const host = $("#trackList");
-    const firstOwned = host.querySelector(`.track[data-idx="${fresh.length}"]`);
-    if (firstOwned) firstOwned.insertAdjacentHTML("beforebegin", `<div class="list-sep">${IC.check} Already in your library</div>`);
-    for (let i = fresh.length; i < view.length; i++) host.querySelector(`.track[data-idx="${i}"]`)?.classList.add("owned");
+  if (plMode) {
+    renderArtistPlaylists();
+  } else {
+    renderTracks([...sortTracks([...fresh]), ...sortTracks([...owned])], true);
+    if (owned.length) {
+      const host = $("#trackList");
+      const firstOwned = host.querySelector(`.track[data-idx="${fresh.length}"]`);
+      if (firstOwned) firstOwned.insertAdjacentHTML("beforebegin", `<div class="list-sep">${IC.check} Already in your library</div>`);
+      for (let i = fresh.length; i < view.length; i++) host.querySelector(`.track[data-idx="${i}"]`)?.classList.add("owned");
+    }
   }
+  injectArtistCard();
+}
+// The channel header (avatar, name, mode toggle, "Download all"), pinned above
+// the results on page 1 once yt_channel resolves.
+function injectArtistCard() {
+  if (!ytArtist || ytPage !== 0) return;
+  const a = ytArtist;
+  const card = document.createElement("div");
+  card.className = "artist-card";
+  card.innerHTML =
+    `<div class="ac-avatar"${a.thumbnail ? ` style="background-image:url('${esc(a.thumbnail)}')"` : ""}></div>
+     <div class="ac-meta"><div class="ac-name">${esc(a.title)}</div><div class="ac-sub">YouTube channel</div></div>
+     <div class="ac-actions">
+       <button class="btn-line sm ${ytArtistMode === "videos" ? "ac-on" : ""}" data-ac="videos">▶ Videos</button>
+       <button class="btn-line sm ${ytArtistMode === "playlists" ? "ac-on" : ""}" data-ac="playlists">≡ Playlists</button>
+       <button class="btn-line sm" data-ac="dl">⬇ Download all</button>
+     </div>`;
+  $("#trackList").insertAdjacentElement("afterbegin", card);
+  card.querySelector('[data-ac="videos"]').addEventListener("click", () => { if (ytArtistMode !== "videos") { ytArtistMode = "videos"; renderOnlineResults(); } });
+  card.querySelector('[data-ac="playlists"]').addEventListener("click", loadArtistPlaylists);
+  card.querySelector('[data-ac="dl"]').addEventListener("click", downloadArtistAll);
+}
+function renderArtistPlaylists() {
+  const host = $("#trackList");
+  $("#listHead").style.display = "none";
+  host.innerHTML = ytArtistPls.length
+    ? ytArtistPls.map((p, i) => `<div class="ac-pl" data-acpl="${i}" title="${esc(p.url)}"><span class="ac-pl-t">${esc(p.title)}</span><span class="ac-pl-a">${esc(p.author || "")}</span></div>`).join("")
+    : `<div class="empty"><div class="empty-ico">🎶</div>No public playlists on this channel.</div>`;
+  host.querySelectorAll("[data-acpl]").forEach(el => el.addEventListener("click", () => importChannelPlaylist(ytArtistPls[Number(el.dataset.acpl)].url)));
+}
+async function loadArtistPlaylists() {
+  if (!ytArtist) return;
+  ytArtistMode = "playlists";
+  const host = $("#trackList");
+  host.innerHTML = `<div class="empty"><div class="empty-ico">📡</div>Loading playlists…</div>`;
+  injectArtistCard();
+  try {
+    ytArtistPls = await invoke("yt_channel_playlists", { url: ytArtist.url, limit: 40, offset: 0 });
+    renderOnlineResults();
+  } catch (e) {
+    host.innerHTML = `<div class="empty"><div class="empty-ico">⚠️</div>${esc(String(e))}</div>`;
+    injectArtistCard();
+  }
+}
+// Preview/import one of the channel's playlists via the existing import modal.
+function importChannelPlaylist(url) {
+  openImport();
+  $("#impUrl").value = url;
+  impFetch();
+}
+async function downloadArtistAll() {
+  if (!ytArtist) return;
+  flash("Fetching the full track list…");
+  let all;
+  try { all = await invoke("yt_channel_all", { url: ytArtist.url }); }
+  catch (e) { flash(`Could not list tracks: ${e}`); return; }
+  if (!all?.length) { flash("No videos found on this channel"); return; }
+  if (!await askConfirm(`Download everything from ${ytArtist.title}?`, `${all.length} track${all.length === 1 ? "" : "s"} will be queued as mp3 (already-downloaded ones are skipped).`, `Download ${all.length}`)) return;
+  const tracks = all.map(onlineFromResult);
+  tracks.forEach(t => onlineIndex.set(t.path, t));
+  saveOnline();
+  downloadTracks(tracks.map(t => t.path));
 }
 async function searchOnline(q, page = 0) {
   if (!q) return;
   if (!IS_NATIVE) { flash("YouTube search needs the native app"); return; }
   onlineQuery = q;
   ytPage = Math.max(0, page);
+  if (ytPage === 0) { ytArtist = null; ytArtistMode = "videos"; ytArtistPls = []; }
   active = { type: "online", id: q };
   markActive();
   selected.clear();
@@ -722,6 +848,12 @@ async function searchOnline(q, page = 0) {
   } catch (e) {
     setViewHead({ icon: IC.globe, title: "YouTube", subtitle: "Search failed" });
     $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">⚠️</div>${esc(String(e))}</div>`;
+  }
+  // Resolve the artist card in the background (first page only).
+  if (ytPage === 0) {
+    invoke("yt_channel", { query: q }).then(ch => {
+      if (ch && active.type === "online" && onlineQuery === q) { ytArtist = ch; if (ytArtistMode === "videos") renderOnlineResults(); }
+    }).catch(() => {});
   }
 }
 
@@ -925,6 +1057,11 @@ function dlRender() {
   const retriable = dlQueue.filter(d => d.status === "canceled" || (d.status === "error" && !d.permanent)).length;
   $("#dlRetry").hidden = busy || !retriable;
   if (retriable) $("#dlRetry").textContent = `Retry ${retriable}`;
+  // Blocked/skipped tracks (copyright/private/geo… or wrongly-blocked while
+  // downloads were broken) can be force-retried — unblocks + requeues them.
+  const blocked = dlQueue.filter(d => d.status === "error" && d.permanent).length;
+  $("#dlRetryBlocked").hidden = busy || !blocked;
+  if (blocked) $("#dlRetryBlocked").textContent = `Retry blocked ${blocked}`;
 
   // Windowed render: active + next queued + recent finished — never 1000+ rows.
   const active = dlQueue.filter(d => d.status === "active");
@@ -970,6 +1107,7 @@ function openDlCtx(x, y, path) {
   const menu = $("#ctxMenu");
   const parts = [];
   if ((d.status === "error" && !d.permanent) || d.status === "canceled") parts.push(`<div class="ctx-item" data-a="retry">↻ Retry this track</div>`);
+  else if (d.status === "error" && d.permanent) parts.push(`<div class="ctx-item" data-a="force">↻ Retry anyway (unblock)</div>`);
   if (d.status === "queued" || d.status === "active") parts.push(`<div class="ctx-item" data-a="cancel">✕ Cancel</div>`);
   parts.push(`<div class="ctx-item" data-a="drop">Remove from this list</div>`);
   parts.push(`<div class="ctx-sep"></div>`);
@@ -979,7 +1117,10 @@ function openDlCtx(x, y, path) {
   menu.querySelectorAll("[data-a]").forEach(it => it.addEventListener("click", async () => {
     const a = it.dataset.a;
     closeCtx();
-    if (a === "retry") { d.status = "queued"; d.pct = 0; d.err = ""; d.tries = 0; dlRender(); if (!dlRunning) dlPump(); }
+    if (a === "retry" || a === "force") {
+      if (a === "force") { d.permanent = false; delete dlBlock[d.id]; saveDlBlock(); }
+      d.status = "queued"; d.pct = 0; d.err = ""; d.tries = 0; dlRender(); if (!dlRunning) dlPump();
+    }
     else if (a === "cancel") dlCancel(path);
     else if (a === "drop") {
       if (d.status === "active") dlCancel(path);
@@ -1007,6 +1148,20 @@ function dlRetry() {
     if (d.permanent) continue; // final refusals (copyright/private/geo…) stay skipped
     if (d.status === "error" || d.status === "canceled") { d.status = "queued"; d.pct = 0; d.err = ""; d.tries = 0; }
   }
+  dlRender();
+  if (!dlRunning) dlPump();
+}
+// Force-retry the skipped/blocked tracks: clear them from the never-retry list
+// and requeue. Useful after the download path itself was fixed.
+function dlRetryBlocked() {
+  let n = 0;
+  for (const d of dlQueue) {
+    if (d.status === "error" && d.permanent) {
+      d.permanent = false; delete dlBlock[d.id];
+      d.status = "queued"; d.pct = 0; d.err = ""; d.tries = 0; n++;
+    }
+  }
+  if (n) { saveDlBlock(); flash(`Retrying ${n} blocked track${n === 1 ? "" : "s"}`); }
   dlRender();
   if (!dlRunning) dlPump();
 }
@@ -2169,6 +2324,7 @@ async function init() {
   $("#impGo").addEventListener("click", impGo);
   $("#dlAction").addEventListener("click", dlStop);
   $("#dlRetry").addEventListener("click", dlRetry);
+  $("#dlRetryBlocked").addEventListener("click", dlRetryBlocked);
   $("#dlToggle").addEventListener("click", () => { dlOpen = !dlOpen; if (dlOpen && npOpen) toggleNpPanel(false); dlRender(); });
   $("#dlClose").addEventListener("click", () => { dlOpen = false; dlRender(); });
 

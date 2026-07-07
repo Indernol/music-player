@@ -212,6 +212,8 @@ fn main() {
             play_stream, preload_stream, prefetch_stream,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
             youtube::yt_playlist_preview,
+            youtube::yt_channel, youtube::yt_channel_videos,
+            youtube::yt_channel_playlists, youtube::yt_channel_all,
             youtube::yt_download, youtube::yt_cancel,
             youtube::yt_config, youtube::yt_install, youtube::detect_browsers,
             mpris::media_update, mpris::media_playback,

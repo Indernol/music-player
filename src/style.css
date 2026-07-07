@@ -70,6 +70,31 @@ body {
 .pl-row .pl-del { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 12px; width: 21px; height: 21px; border-radius: 6px; padding: 0; flex-shrink: 0; opacity: 0; }
 .pl-row:hover .pl-del { opacity: 1; }
 .pl-row .pl-del:hover { background: var(--bg-4); color: var(--tx-1); }
+.pl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-cover { width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--tx-3); background: var(--bg-3); background-size: cover; background-position: center; overflow: hidden; }
+.pl-cover svg { width: 15px; height: 15px; }
+.pl-cover.has-cover { color: transparent; }
+.pl-row .pl-eye { border: none; background: transparent; color: var(--tx-3); cursor: pointer; font-size: 13px; width: 21px; height: 21px; border-radius: 6px; padding: 0; flex-shrink: 0; opacity: 0; }
+.pl-row:hover .pl-eye { opacity: .85; }
+.pl-row .pl-eye:hover { background: var(--bg-4); opacity: 1; }
+.vh-icon.vh-cover.has-cover { background-size: cover; background-position: center; color: transparent; font-size: 0; }
+.pl-preview { position: fixed; z-index: 200; max-width: 340px; max-height: 60vh; overflow-y: auto; background: var(--bg-2); border: 1px solid var(--bg-4); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.5); padding: 8px; font-size: 12px; }
+.plp-head { font-weight: 600; color: var(--tx-1); padding: 4px 6px 8px; border-bottom: 1px solid var(--bg-4); margin-bottom: 4px; position: sticky; top: -8px; background: var(--bg-2); }
+.plp-row { display: flex; gap: 8px; padding: 3px 6px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plp-n { color: var(--tx-3); min-width: 20px; text-align: right; flex-shrink: 0; }
+.plp-empty, .plp-more { padding: 6px; color: var(--tx-3); text-align: center; }
+/* Artist/channel header card at the top of a YouTube search */
+.artist-card { display: flex; align-items: center; gap: 14px; padding: 12px 14px; margin: 0 0 10px; border-radius: 12px; background: linear-gradient(135deg, var(--bg-2), var(--bg-3)); border: 1px solid var(--bg-4); }
+.ac-avatar { width: 60px; height: 60px; border-radius: 50%; flex-shrink: 0; background: var(--bg-4) center/cover no-repeat; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.ac-meta { flex: 1; min-width: 0; }
+.ac-name { font-size: 19px; font-weight: 700; color: var(--tx-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ac-sub { font-size: 12px; color: var(--tx-3); }
+.ac-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ac-actions .ac-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ac-pl { display: flex; align-items: baseline; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+.ac-pl:hover { background: var(--bg-2); }
+.ac-pl-t { font-size: 13px; font-weight: 600; color: var(--tx-1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-pl-a { margin-left: auto; font-size: 11px; color: var(--tx-3); flex-shrink: 0; }
 
 .settings-btn { margin-top: auto; background: transparent; border: 1px solid var(--bd); color: var(--tx-2); padding: 9px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 700; }
 .settings-btn:hover { border-color: var(--bd-2); color: var(--tx-1); }

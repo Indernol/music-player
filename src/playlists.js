@@ -39,6 +39,13 @@ export function setSourceUrl(id, url) {
   if (pl) { pl.sourceUrl = url; _persist(); }
 }
 
+// Custom cover image for a playlist (absolute local path, or "" to clear and
+// fall back to the auto mosaic from the first tracks' artwork).
+export function setImage(id, path) {
+  const pl = _cache.find(p => p.id === id);
+  if (pl) { if (path) pl.image = path; else delete pl.image; _persist(); }
+}
+
 // allowDup: push even if the path is already present (creates a duplicate entry).
 export function addToPlaylist(id, path, allowDup = false) {
   const pl = _cache.find(p => p.id === id);
