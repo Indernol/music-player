@@ -1073,7 +1073,7 @@ function openSettings() {
 }
 
 // ─── Self-update (binary vs. source-tree version; repo mirrored on GitHub) ───
-let updateBusy = false, availableVersion = "";
+let updateBusy = false, updateReady = false, availableVersion = "";
 async function currentVersion() {
   try { return await T.app.getVersion(); } catch { return ""; }
 }
@@ -1101,9 +1101,10 @@ async function runUpdate() {
   btn.hidden = false; btn.disabled = true; btn.textContent = "⏳ Building update…";
   try {
     await invoke("self_update");
-    btn.textContent = `✅ v${availableVersion} ready — restart the app`;
-    flash(`Update v${availableVersion} built — restart the app to apply`);
-    notifyTrack({ title: "Music Player update ready", artist: `Restart to run v${availableVersion}`, album: "" });
+    updateReady = true;
+    btn.textContent = `✅ v${availableVersion} ready — click to restart`;
+    flash(`Update v${availableVersion} built — click the button to restart`);
+    notifyTrack({ title: "Music Player update ready", artist: `Click the update button to restart into v${availableVersion}`, album: "" });
   } catch (e) {
     btn.textContent = "⚠ Update failed — retry";
     btn.disabled = false; updateBusy = false;
@@ -1257,7 +1258,10 @@ async function init() {
   startPolling();
   showLibrary();
 
-  $("#updateBtn").addEventListener("click", () => { if (!updateBusy && availableVersion) runUpdate(); });
+  $("#updateBtn").addEventListener("click", () => {
+    if (updateReady) { invoke("restart_app").catch(e => { console.error("[restart]", e); flash("Restart failed — relaunch manually"); }); return; }
+    if (!updateBusy && availableVersion) runUpdate();
+  });
 
   wireSetup();
   if (IS_NATIVE && !S().setupDone) openSetup();

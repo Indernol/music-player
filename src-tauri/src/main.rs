@@ -141,6 +141,13 @@ async fn source_version() -> Result<String, String> {
         .ok_or_else(|| "no version field".into())
 }
 
+/// Relaunch the app process — used right after a successful self-update, since
+/// cargo replaced the binary at the same path.
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
 /// Rebuild the app from the source tree; progress lines stream as "update"
 /// events. On success the user just restarts the app to run the new build.
 #[tauri::command]
@@ -196,7 +203,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             scan, scan_diff, play, preload, pause, resume, stop, set_volume, seek, status,
-            source_version, self_update,
+            source_version, self_update, restart_app,
             play_stream, preload_stream, prefetch_stream,
             youtube::yt_search, youtube::yt_playlist, youtube::yt_download, youtube::yt_cancel,
             youtube::yt_config,
