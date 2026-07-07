@@ -104,14 +104,25 @@ pub fn open_path(path: String) -> Result<(), String> {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| path.clone())
     };
-    if std::process::Command::new("xdg-open").arg(&target).spawn().is_ok() {
-        return Ok(());
+    #[cfg(target_os = "windows")]
+    {
+        return std::process::Command::new("explorer")
+            .arg(&target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("cannot open file manager: {e}"));
     }
-    std::process::Command::new("distrobox-host-exec")
-        .args(["xdg-open", target.as_str()])
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("cannot open file manager: {e}"))
+    #[cfg(not(target_os = "windows"))]
+    {
+        if std::process::Command::new("xdg-open").arg(&target).spawn().is_ok() {
+            return Ok(());
+        }
+        std::process::Command::new("distrobox-host-exec")
+            .args(["xdg-open", target.as_str()])
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("cannot open file manager: {e}"))
+    }
 }
 
 /// Local image file → data URL (custom app backgrounds). Kept off the UI thread.

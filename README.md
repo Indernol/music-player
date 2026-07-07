@@ -3,6 +3,33 @@
 A **native, local-first** desktop music player (Tauri + Rust audio engine).
 Independent project — lives next to `moonbot-src/` but shares nothing with it.
 
+## Install
+
+Prebuilt bundles are produced by the release workflow (push a `v*` tag → GitHub
+Release with Linux `.AppImage`/`.deb`/`.rpm` and a Windows `-setup.exe`).
+
+**Linux (any distro), one line:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Indernol/music-player/main/install.sh | bash
+```
+
+It picks the `.deb`/`.rpm` for your package manager, or falls back to the
+portable AppImage. Pin a version with `MP_VERSION=v0.9.2`; for a private repo set
+`GITHUB_TOKEN`.
+
+**Windows:** run the `*-setup.exe` from the release, or once the manifests in
+[`winget/`](winget/) are published: `winget install Indernol.MusicPlayer`.
+
+> `yt-dlp` and `ffmpeg` are fetched automatically on first use (Linux). On
+> Windows, install them and put them on `PATH`.
+
+## Build from source
+
+Needs the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/)
+(Rust + WebKitGTK 4.1 on Linux). Then `cd src-tauri && cargo build --release`, or
+`cargo tauri build` for the packaged bundles.
+
 ## What it does
 
 - Plays your **local audio files** (mp3, flac, wav, ogg/opus, m4a, aac) through a
