@@ -723,6 +723,14 @@ const DL_TRANSIENT = [
 ];
 function dlTransientErr(msg) { const m = String(msg).toLowerCase(); return DL_TRANSIENT.some(s => m.includes(s)); }
 const DL_ICON = { queued: IC.clock, active: IC.dl, done: IC.check, error: IC.alert, canceled: IC.slash };
+// Permanently-unavailable videos (Premium-only, deleted, private, geo…):
+// remembered across batches and restarts so they are never attempted again.
+let dlBlock = {};
+async function loadDlBlock() {
+  const raw = await storeLoad("dlblock");
+  if (raw) { try { dlBlock = JSON.parse(raw) || {}; } catch {} }
+}
+function saveDlBlock() { storeSave("dlblock", JSON.stringify(dlBlock)); }
 
 function dlRow(d) {
   return `
@@ -821,19 +829,21 @@ function libraryLocalFor(id) {
 }
 function downloadTracks(paths) {
   if (!IS_NATIVE) { flash("Downloads need the native app"); return; }
-  let added = 0, linked = 0;
+  let added = 0, linked = 0, blocked = 0;
   for (const p of paths) {
     if (!isOnline(p)) continue;
     if (dlQueue.some(d => d.path === p && (d.status === "queued" || d.status === "active"))) continue;
     const local = libraryLocalFor(ytId(p));
     if (local) { PL.replacePath(p, local); linked++; continue; } // no download needed
+    if (dlBlock[ytId(p)]) { blocked++; continue; } // known-unavailable: never retried
     const t = onlineIndex.get(p);
     dlQueue.push({ path: p, id: ytId(p), title: t?.title || p, status: "queued", pct: 0 });
     added++;
   }
   if (linked) { saveOnline(); renderPlaylists(); refreshView(); }
-  if (!added) { flash(linked ? `${linked} track${linked === 1 ? "" : "s"} already in your library — linked` : "Already in the download queue"); return; }
-  if (linked) flash(`${linked} already local (linked) · downloading ${added}`);
+  const skipNote = blocked ? ` · ${blocked} unavailable skipped` : "";
+  if (!added) { flash((linked ? `${linked} track${linked === 1 ? "" : "s"} already local` : blocked ? "Nothing to download" : "Already in the download queue") + skipNote); return; }
+  if (linked || blocked) flash(`Downloading ${added}${linked ? ` · ${linked} already local` : ""}${skipNote}`);
   dlRender();
   if (!dlRunning) dlPump();
 }
@@ -888,8 +898,9 @@ async function dlPump() {
         }
       } else {
         // Final refusal (copyright claim, private/deleted, geo/age/premium…):
-        // mark it and move on — no retry, no cooldown.
+        // mark it, remember it forever, move on — no retry, no cooldown.
         d.status = "error"; d.permanent = true; d.err = msg;
+        dlBlock[d.id] = msg; saveDlBlock();
         console.error("[download final]", d.id, msg);
       }
     }
@@ -1406,6 +1417,8 @@ function openSettings() {
         <select id="setLimit" class="sel sm-sel">${[10, 20, 30, 50, 75, 100].map(n => `<option value="${n}" ${Number(s.searchLimit) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="set-row"><label>Prefer local file when downloaded</label><input type="checkbox" id="setPrefLocal" ${s.preferLocal ? "checked" : ""}></div>
       <div class="set-hint">When a track has been saved locally (file named “… [id].mp3”), play the local file instead of streaming from YouTube.</div>
+      <div class="set-row"><label>Unavailable tracks remembered</label><button id="setDlBlock" class="btn-line sm">Forget ${Object.keys(dlBlock).length}</button></div>
+      <div class="set-hint">Premium-only / deleted / private videos are never re-attempted. “Forget” lets them be tried once again.</div>
       <div class="set-row"><label>First-run setup</label><button id="setRerun" class="btn-line sm">Run again…</button></div>
     </div>
     <div class="set-group"><div class="set-title">Downloads</div>
@@ -1498,6 +1511,7 @@ function openSettings() {
     } catch (e) { console.error("[yt pick]", e); }
   });
   $("#setCookies").addEventListener("change", e => { SETTINGS.setSetting("cookiesBrowser", e.target.value); ytConfigPush().catch(() => {}); });
+  $("#setDlBlock").addEventListener("click", () => { dlBlock = {}; saveDlBlock(); $("#setDlBlock").textContent = "Forget 0"; flash("Unavailable-track list cleared"); });
   $("#setRerun").addEventListener("click", () => { $("#settingsModal").hidden = true; openSetup(); });
   $("#setLimit").addEventListener("change", e => SETTINGS.setSetting("searchLimit", Number(e.target.value)));
   $("#setPrefLocal").addEventListener("change", e => SETTINGS.setSetting("preferLocal", e.target.checked));
@@ -1729,7 +1743,7 @@ function renderFollowList() {
 // ─── Wire up ───
 async function init() {
   hydrateIcons();
-  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows()]);
+  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock()]);
   await loadLibrary();
   if (enrichLibrary()) saveLibrary();
 
