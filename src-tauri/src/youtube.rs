@@ -233,9 +233,29 @@ pub async fn yt_search(
     if q.is_empty() {
         return Ok(Vec::new());
     }
-    let n = limit.unwrap_or(20).clamp(1, 50);
+    let n = limit.unwrap_or(20).clamp(1, 100);
     let entries = flat_extract(&cfg, &format!("ytsearch{n}:{q}"))?;
     Ok(entries.iter().filter_map(track_from_json).collect())
+}
+
+/// First few track titles of a playlist — cheap preview for search hits.
+#[tauri::command]
+pub async fn yt_playlist_preview(
+    cfg: State<'_, YtCfg>,
+    url: String,
+    count: Option<u32>,
+) -> Result<Vec<String>, String> {
+    let n = count.unwrap_or(3).clamp(1, 6);
+    let range = format!("1:{n}");
+    let out = run_ytdlp(
+        &cfg,
+        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, url.trim()],
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| v["title"].as_str().map(str::to_string))
+        .collect())
 }
 
 #[derive(Serialize)]
@@ -268,7 +288,7 @@ pub async fn yt_search_playlists(
     if q.is_empty() {
         return Ok(Vec::new());
     }
-    let n = limit.unwrap_or(15).clamp(1, 30);
+    let n = limit.unwrap_or(15).clamp(1, 100);
     let page = format!(
         "https://www.youtube.com/results?search_query={}&sp=EgIQAw%3D%3D",
         url_encode(q)

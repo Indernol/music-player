@@ -43,6 +43,28 @@ let active = { type: "library", id: "" }; // current view for highlighting
 const $ = (s) => document.querySelector(s);
 const S = () => SETTINGS.getSettings();
 
+// ─── UI icons (inline SVG shapes — no emoji in the chrome) ───
+const IC = {
+  headphones: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg>`,
+  disc: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>`,
+  folder: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`,
+  note: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+  globe: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>`,
+  search: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`,
+  gear: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M4.9 4.9l2.1 2.1m10 10 2.1 2.1M2 12h3m14 0h3M4.9 19.1l2.1-2.1m10-10 2.1-2.1"/></svg>`,
+  clock: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
+  dl: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/></svg>`,
+  pin: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l1 7 2 2H6l2-2z"/></svg>`,
+  pencil: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12 5 5L20 6"/></svg>`,
+  slash: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>`,
+  alert: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v9"/><circle cx="12" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>`,
+};
+function hydrateIcons(root = document) {
+  root.querySelectorAll("[data-ic]").forEach(el => { el.innerHTML = IC[el.dataset.ic] || ""; });
+}
+
 // ─── Player control icons (inline SVG, colored via currentColor) ───
 const ICON_PLAY = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
 const ICON_PAUSE = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>`;
@@ -319,7 +341,7 @@ function openContextMenu(x, y) {
     (nOnline ? `<div class="ctx-item" data-dl="1">📥 Download ${nOnline > 1 ? nOnline + " tracks" : "track"} locally</div>` : "") +
     `<div class="ctx-sep"></div>` +
     `<div class="ctx-label">Add ${paths.length > 1 ? paths.length + " tracks" : "track"} to</div>` +
-    pls.map(p => `<div class="ctx-item" data-add="${p.id}">🎼 ${esc(p.name)}</div>`).join("") +
+    pls.map(p => `<div class="ctx-item" data-add="${p.id}"><span class="row-ic">${IC.note}</span> ${esc(p.name)}</div>`).join("") +
     `<div class="ctx-item" data-add="__new">✚ New playlist…</div>`;
   menu.hidden = false;
   menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline)); closeCtx(); });
@@ -402,7 +424,7 @@ function renderSources() {
     const count = library.filter(t => inFolder(t, f)).length;
     const on = active.type === "source" && active.id === f;
     return `<div class="src-row ${on ? "active" : ""}" data-src="${esc(f)}" title="${esc(f)}">
-      <span class="src-ico">🗂️</span>
+      <span class="src-ico" data-ic="folder"></span>
       <span class="src-name">${esc(baseName(f))}</span>
       <span class="src-count">${count}</span>
       <button class="src-btn" data-refresh="${esc(f)}" title="Check for new songs">⟳</button>
@@ -423,7 +445,7 @@ function openSource(folder) {
   markActive();
   selected.clear();
   const tracks = library.filter(t => inFolder(t, folder));
-  setViewHead({ icon: "🗂️", title: baseName(folder), subtitle: `${tracks.length} songs · ${folder}` });
+  setViewHead({ icon: IC.folder, title: baseName(folder), subtitle: `${tracks.length} songs · ${folder}` });
   renderTracks(tracks);
 }
 
@@ -465,11 +487,11 @@ function renderPlaylists() {
   const host = $("#playlistsList");
   const pls = PL.getPlaylists();
   host.innerHTML =
-    `<div class="pl-row" id="plNew">✚ New playlist</div>` +
+    `<div class="pl-row" id="plNew"><span class="row-ic">${IC.plus}</span> New playlist</div>` +
     pls.map(p => {
       const on = active.type === "playlist" && active.id === p.id;
       const fw = followFor(p.id);
-      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}">🎼 ${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">🔁</span>` : ""} <span class="pl-count">${p.paths.length}</span>
+      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}"><span class="row-ic">${IC.note}</span> ${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">🔁</span>` : ""} <span class="pl-count">${p.paths.length}</span>
         <button class="pl-del" data-del="${p.id}" title="Delete">✕</button></div>`;
     }).join("");
   host.querySelector("#plNew").addEventListener("click", async () => { const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
@@ -490,7 +512,7 @@ function openPlaylist(id) {
   const nOnline = pl.paths.filter(isOnline).length;
   const fw = followFor(id);
   setViewHead({
-    icon: "🎼", title: pl.name, subtitle: `${pl.paths.length} songs${nOnline ? ` · ${nOnline} online` : ""}${fw ? " · 🔁 followed" : ""}`,
+    icon: IC.note, title: pl.name, subtitle: `${pl.paths.length} songs${nOnline ? ` · ${nOnline} online` : ""}${fw ? " · 🔁 followed" : ""}`,
     actions:
       `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${fw ? "🔁 Following ✓" : "🔁 Follow"}</button>` +
       (nOnline ? `<button id="plDlBtn" class="btn-line sm">📥 Save locally (${nOnline} mp3)</button>` : ""),
@@ -537,7 +559,7 @@ let onlineQuery = "";
 function renderOnlineResults() {
   active = { type: "online", id: onlineQuery };
   markActive();
-  setViewHead({ icon: "📡", title: "YouTube", subtitle: `${onlineResults.length} result${onlineResults.length === 1 ? "" : "s"} for “${onlineQuery}”` });
+  setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `${onlineResults.length} result${onlineResults.length === 1 ? "" : "s"} for “${onlineQuery}”` });
   renderTracks(onlineResults);
 }
 async function searchOnline(q) {
@@ -547,7 +569,7 @@ async function searchOnline(q) {
   active = { type: "online", id: q };
   markActive();
   selected.clear();
-  setViewHead({ icon: "📡", title: "YouTube", subtitle: `Searching “${q}”…` });
+  setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}”…` });
   $("#listHead").style.display = "none";
   $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">📡</div>Searching YouTube…</div>`;
   try {
@@ -556,7 +578,7 @@ async function searchOnline(q) {
     onlineResults.forEach(t => onlineIndex.set(t.path, t));
     renderOnlineResults();
   } catch (e) {
-    setViewHead({ icon: "📡", title: "YouTube", subtitle: "Search failed" });
+    setViewHead({ icon: IC.globe, title: "YouTube", subtitle: "Search failed" });
     $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">⚠️</div>${esc(String(e))}</div>`;
   }
 }
@@ -579,7 +601,7 @@ async function impSearchGo() {
   const host = $("#impHits");
   host.innerHTML = `<div class="nx-note">Searching playlists…</div>`;
   try {
-    const hits = await invoke("yt_search_playlists", { query: q, limit: 15 });
+    const hits = await invoke("yt_search_playlists", { query: q, limit: Number(S().searchLimit) || 20 });
     if (!hits?.length) { host.innerHTML = `<div class="nx-note">No playlists found for “${esc(q)}”.</div>`; return; }
     host.innerHTML = hits.map((h, i) =>
       `<div class="imp-hit" data-hit="${i}" title="${esc(h.url)}">
@@ -591,6 +613,18 @@ async function impSearchGo() {
       $("#impUrl").value = hits[Number(el.dataset.hit)].url;
       impFetch();
     }));
+    // Background previews: first titles of each playlist, filled in lazily.
+    (async () => {
+      for (let i = 0; i < hits.length; i++) {
+        const el = host.querySelector(`[data-hit="${i}"]`);
+        if (!el || !el.isConnected) break;
+        try {
+          const titles = await invoke("yt_playlist_preview", { url: hits[i].url, count: 3 });
+          if (!el.isConnected) break;
+          if (titles?.length) el.insertAdjacentHTML("beforeend", `<div class="ih-prev">${esc(titles.join("  ·  "))}</div>`);
+        } catch { break; }
+      }
+    })();
   } catch (e) { host.innerHTML = `<div class="nx-note">Search failed: ${esc(String(e))}</div>`; }
 }
 async function impFetch() {
@@ -676,12 +710,12 @@ const DL_TRANSIENT = [
   "unable to download", "connection", "timed out", "timeout", "temporary failure", "network", "getaddrinfo",
 ];
 function dlTransientErr(msg) { const m = String(msg).toLowerCase(); return DL_TRANSIENT.some(s => m.includes(s)); }
-const DL_ICON = { queued: "⌛", active: "📥", done: "✔", error: "⚠", canceled: "⊘" };
+const DL_ICON = { queued: IC.clock, active: IC.dl, done: IC.check, error: IC.alert, canceled: IC.slash };
 
 function dlRow(d) {
   return `
     <div class="dl-row ${d.status}" title="${esc(d.err || d.title)}">
-      <span class="dl-ico">${d.permanent ? "⛔" : DL_ICON[d.status]}</span>
+      <span class="dl-ico">${d.permanent ? IC.slash : DL_ICON[d.status]}</span>
       <span class="dl-name">${esc(d.title)}</span>
       <span class="dl-prog"><i style="width:${d.status === "done" ? 100 : (d.pct || 0)}%"></i></span>
       <span class="dl-pct">${d.status === "active" ? (d.pct || 0) + "%" : d.status}</span>
@@ -886,7 +920,7 @@ function showLibrary() {
   markActive();
   selected.clear();
   const artists = new Set(library.map(t => t.artist)).size;
-  setViewHead({ icon: "💿", title: "Your Library", subtitle: `${library.length} songs · ${artists} artist${artists === 1 ? "" : "s"} · ${folders.length} folder${folders.length === 1 ? "" : "s"}` });
+  setViewHead({ icon: IC.disc, title: "Your Library", subtitle: `${library.length} songs · ${artists} artist${artists === 1 ? "" : "s"} · ${folders.length} folder${folders.length === 1 ? "" : "s"}` });
   renderTracks(library);
 }
 function markActive() {
@@ -1252,11 +1286,25 @@ function applyAccent() {
   document.documentElement.style.setProperty("--accent-2", b);
 }
 let _bgCachePath = "", _bgCacheData = "";
+function hexRgb(h) { h = String(h || "#000").replace("#", ""); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0); }
+function mixHex(hex, rgb, p) { const a = hexRgb(hex); return "#" + a.map((x, i) => Math.round(x + (rgb[i] - x) * p).toString(16).padStart(2, "0")).join(""); }
+// "Custom" theme: three user colors, all shades derived.
+function customTheme(s) {
+  const W = [255, 255, 255];
+  const panelRgb = hexRgb(s.customPanel);
+  return {
+    "--bg-0": s.customBg, "--bg-1": s.customPanel,
+    "--bg-2": mixHex(s.customPanel, W, 0.05), "--bg-3": mixHex(s.customPanel, W, 0.10), "--bg-4": mixHex(s.customPanel, W, 0.17),
+    "--tx-1": s.customText, "--tx-2": mixHex(s.customText, panelRgb, 0.38), "--tx-3": mixHex(s.customText, panelRgb, 0.62),
+  };
+}
 async function applyTheme() {
   const s = S();
   const root = document.documentElement.style;
-  const theme = SETTINGS.THEMES[s.theme] || SETTINGS.THEMES.dark;
+  const theme = s.theme === "custom" ? customTheme(s) : (SETTINGS.THEMES[s.theme] || SETTINGS.THEMES.dark);
   for (const [k, v] of Object.entries(theme)) root.setProperty(k, v);
+  root.setProperty("--r", `${s.radius ?? 12}px`);
+  document.body.style.zoom = String((s.uiScale ?? 100) / 100);
   applyAccent();
   root.setProperty("--app-bg-blur", `${s.bgBlur ?? 18}px`);
   root.setProperty("--app-bg-dim", String(s.bgDim ?? 45));
@@ -1288,9 +1336,17 @@ function applySettings() {
 function openSettings() {
   const s = S();
   $("#settingsBody").innerHTML = `
-    <div class="set-group"><div class="set-title">Appearance</div>
+    <div class="set-group"><div class="set-title">Theme</div>
       <div class="set-row"><label>Theme</label>
-        <select id="setTheme" class="sel sm-sel wide">${Object.keys(SETTINGS.THEMES).map(k => `<option value="${k}" ${s.theme === k ? "selected" : ""}>${k[0].toUpperCase() + k.slice(1)}</option>`).join("")}</select></div>
+        <select id="setTheme" class="sel sm-sel wide">${Object.keys(SETTINGS.THEMES).map(k => `<option value="${k}" ${s.theme === k ? "selected" : ""}>${k[0].toUpperCase() + k.slice(1)}</option>`).join("")}<option value="custom" ${s.theme === "custom" ? "selected" : ""}>Custom</option></select></div>
+      <div class="set-row"><label>Custom colors <span class="set-sub">(background · panels · text)</span></label>
+        <span class="color-row">
+          <input type="color" id="setCustBg" value="${s.customBg}" title="Window background">
+          <input type="color" id="setCustPanel" value="${s.customPanel}" title="Panels">
+          <input type="color" id="setCustText" value="${s.customText}" title="Text">
+        </span></div>
+      <div class="set-row"><label>Corner radius</label><input type="range" id="setRadius" min="0" max="22" value="${s.radius}"></div>
+      <div class="set-row"><label>UI scale</label><input type="range" id="setScale" min="85" max="125" value="${s.uiScale}"></div>
       <div class="set-row"><label>Accent color</label>
         <div class="swatches">${Object.entries(SETTINGS.ACCENTS).map(([k, v]) => `<button class="swatch ${s.accent === k ? "on" : ""}" data-accent="${k}" style="background:${v[0]};color:${v[0]}" title="${k}"></button>`).join("")}</div></div>
       <div class="set-row"><label>Background image</label>
@@ -1335,7 +1391,7 @@ function openSettings() {
         <select id="setCookies" class="sel sm-sel wide">${["", "firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"].map(b => `<option value="${b}" ${s.cookiesBrowser === b ? "selected" : ""}>${b || "None"}</option>`).join("")}</select></div>
       <div class="set-hint">⚠ A logged-in YouTube session often gets blocked (“format not available”) — keep <b>None</b> unless needed. Failed calls retry without cookies automatically.</div>
       <div class="set-row"><label>Search results</label>
-        <select id="setLimit" class="sel sm-sel">${[10, 20, 30, 50].map(n => `<option value="${n}" ${Number(s.searchLimit) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <select id="setLimit" class="sel sm-sel">${[10, 20, 30, 50, 75, 100].map(n => `<option value="${n}" ${Number(s.searchLimit) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="set-row"><label>Prefer local file when downloaded</label><input type="checkbox" id="setPrefLocal" ${s.preferLocal ? "checked" : ""}></div>
       <div class="set-hint">When a track has been saved locally (file named “… [id].mp3”), play the local file instead of streaming from YouTube.</div>
       <div class="set-row"><label>First-run setup</label><button id="setRerun" class="btn-line sm">Run again…</button></div>
@@ -1384,6 +1440,15 @@ function openSettings() {
   const body = $("#settingsBody");
   body.querySelectorAll("[data-accent]").forEach(b => b.addEventListener("click", () => { SETTINGS.setSetting("accent", b.dataset.accent); applyAccent(); body.querySelectorAll(".swatch").forEach(x => x.classList.toggle("on", x === b)); }));
   $("#setTheme").addEventListener("change", e => { SETTINGS.setSetting("theme", e.target.value); applyTheme(); });
+  for (const [id, key] of [["setCustBg", "customBg"], ["setCustPanel", "customPanel"], ["setCustText", "customText"]]) {
+    $("#" + id).addEventListener("input", e => {
+      SETTINGS.setSetting(key, e.target.value);
+      if (S().theme !== "custom") { SETTINGS.setSetting("theme", "custom"); $("#setTheme").value = "custom"; }
+      applyTheme();
+    });
+  }
+  $("#setRadius").addEventListener("input", e => { SETTINGS.setSetting("radius", Number(e.target.value)); applyTheme(); });
+  $("#setScale").addEventListener("input", e => { SETTINGS.setSetting("uiScale", Number(e.target.value)); applyTheme(); });
   $("#setBgImg").addEventListener("change", e => { SETTINGS.setSetting("bgImage", e.target.value.trim()); applyTheme(); });
   $("#setBgPick").addEventListener("click", async () => {
     try {
@@ -1651,6 +1716,7 @@ function renderFollowList() {
 
 // ─── Wire up ───
 async function init() {
+  hydrateIcons();
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows()]);
   await loadLibrary();
   if (enrichLibrary()) saveLibrary();
@@ -1680,7 +1746,12 @@ async function init() {
     if (curIndex >= 0) schedulePreload();
     flash(repeatMode === "off" ? "Repeat off" : repeatMode === "all" ? "Repeat all" : "Repeat one");
   });
-  $("#volume").addEventListener("input", e => { invoke("set_volume", { level: Number(e.target.value) / 100 }); e.target.style.setProperty("--fill", `${e.target.value}%`); });
+  let _volT = null;
+  $("#volume").addEventListener("input", e => {
+    invoke("set_volume", { level: Number(e.target.value) / 100 });
+    e.target.style.setProperty("--fill", `${e.target.value}%`);
+    clearTimeout(_volT); _volT = setTimeout(() => SETTINGS.setSetting("defaultVolume", Number(e.target.value)), 400);
+  });
 
   $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });
   $("#seek").addEventListener("change", async () => { const s = Number($("#seek").value); await invoke("seek", { secs: s }); wallSeek(s); seeking = false; mediaPlayback(); updateRPC(trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex]), playing); });
@@ -1689,7 +1760,7 @@ async function init() {
     const q = e.target.value.trim().toLowerCase();
     selected.clear();
     if (!q) { showLibrary(); return; }
-    setViewHead({ icon: "🔎", title: "Search", subtitle: `“${e.target.value.trim()}” — press Enter to search YouTube` });
+    setViewHead({ icon: IC.search, title: "Search", subtitle: `“${e.target.value.trim()}” — press Enter to search YouTube` });
     renderTracks(library.filter(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q) || t.album.toLowerCase().includes(q)));
   });
   $("#search").addEventListener("keydown", e => { if (e.key === "Enter") searchOnline(e.target.value.trim()); });

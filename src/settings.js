@@ -44,7 +44,12 @@ const DEFAULTS = {
   updateMode: "ask",     // ask (propose) | auto (build silently) | off
   followInterval: "6h",  // follow checks: launch (startup only) | 1h | 6h | 24h
   sortMode: "default",   // default | title | title-desc | artist | album | dur | dur-desc
-  theme: "dark",         // key of THEMES
+  theme: "dark",         // key of THEMES, or "custom"
+  customBg: "#0b0b0f",   // custom theme: window background
+  customPanel: "#121218",// custom theme: panel base (shades derived)
+  customText: "#f4f5f8", // custom theme: text (secondary shades derived)
+  radius: 12,            // corner radius (px) of panels/rows
+  uiScale: 100,          // UI zoom %
   // Interface: hide/arrange elements
   uiSources: true,       // show the Sources section
   uiSrcButtons: true,    // show "Add folder…" / "Enter a path manually"

@@ -9,9 +9,9 @@
 <body>
   <div class="app">
     <aside class="sidebar">
-      <div class="brand">🎧 <span>Music Player</span></div>
+      <div class="brand"><span class="brand-ic" data-ic="headphones"></span> <span>Music Player</span></div>
 
-      <button id="navLibrary" class="nav-item active"><span class="ni-ico">💿</span> Library</button>
+      <button id="navLibrary" class="nav-item active"><span class="ni-ico" data-ic="disc"></span> Library</button>
 
       <input id="sideFilter" type="search" placeholder="Filter sources & playlists…" autocomplete="off" class="side-filter">
 
@@ -21,8 +21,8 @@
           <button id="rescanBtn" class="icon-btn" title="Check all folders for new songs">⟳</button>
         </div>
         <div class="ss-body">
-          <button id="pickBtn" class="btn btn-block">🗂️ Add folder…</button>
-          <button id="manualBtn" class="btn-line">📝 Enter a path manually</button>
+          <button id="pickBtn" class="btn btn-block"><span data-ic="folder"></span> Add folder…</button>
+          <button id="manualBtn" class="btn-line"><span data-ic="pencil"></span> Enter a path manually</button>
           <div class="src-list" id="sourcesList"></div>
         </div>
       </div>
@@ -30,7 +30,7 @@
       <div class="side-section grow" id="secPlaylists">
         <div class="ss-head"><span class="ss-title ss-toggle" data-coll="collPlaylists" title="Click to collapse/expand"><span class="ss-caret">▾</span> Playlists</span></div>
         <div class="ss-body grow">
-          <button id="importBtn" class="btn-line">🌐 YouTube playlists…</button>
+          <button id="importBtn" class="btn-line"><span data-ic="globe"></span> YouTube playlists…</button>
           <div class="playlists-list" id="playlistsList"></div>
         </div>
       </div>
@@ -41,11 +41,11 @@
     <main class="main">
       <header class="topbar">
         <div class="search-wrap">
-          <span class="search-ico">🔎</span>
+          <span class="search-ico" data-ic="search"></span>
           <input id="search" type="search" placeholder="Search library — press Enter to search YouTube" autocomplete="off">
         </div>
         <span id="count" class="count"></span>
-        <button id="settingsBtn" class="icon-btn top-gear" title="Settings">🛠️</button>
+        <button id="settingsBtn" class="icon-btn top-gear" title="Settings" data-ic="gear"></button>
         <select id="sortSel" class="sel sm-sel sort-sel" title="Sort order">
           <option value="default">Sort: default</option>
           <option value="title">Title A→Z</option>
@@ -61,7 +61,7 @@
 
       <div class="list-head" id="listHead">
         <span class="lh-idx">#</span><span></span><span>TITLE</span>
-        <span class="lh-album">ALBUM</span><span class="lh-dur">⏱️</span><span></span>
+        <span class="lh-album">ALBUM</span><span class="lh-dur" data-ic="clock"></span><span></span>
       </div>
 
       <section id="trackList" class="tracklist">
@@ -74,7 +74,7 @@
     <div class="np-head">
       <span class="dl-title">Now playing</span>
       <span class="dl-btns">
-        <button id="npPin" class="icon-btn" title="Dock to the side (stays as a column)">📌</button>
+        <button id="npPin" class="icon-btn" title="Dock to the side (stays as a column)" data-ic="pin"></button>
         <button id="npClose" class="icon-btn" title="Close">✕</button>
       </span>
     </div>
@@ -123,7 +123,7 @@
         <button id="repeatBtn" class="ctrl" title="Repeat"></button>
       </div>
       <div class="volume">
-        <button id="dlToggle" class="dl-toggle" hidden title="Downloads">📥 <span id="dlBadge"></span></button>
+        <button id="dlToggle" class="dl-toggle" hidden title="Downloads"><span data-ic="dl"></span> <span id="dlBadge"></span></button>
         <span class="vol-ico"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M3 9v6h4l5 5V4L7 9H3z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>
         <input id="volume" type="range" min="0" max="100" value="80">
       </div>

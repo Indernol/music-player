@@ -56,6 +56,9 @@ pub struct AudioController {
     sink: Arc<Mutex<(u64, Option<Sink>)>>,
     next_epoch: AtomicU64,
     agc: Arc<AtomicBool>,
+    // Master volume survives hard starts: every fresh Sink is created at 1.0 by
+    // rodio, which silently reset playback to FULL volume on each track switch.
+    vol: Arc<Mutex<f32>>,
 }
 
 fn append_source<S>(sink: &Sink, src: S, gain: f32, agc: bool)
@@ -111,6 +114,8 @@ impl AudioController {
         let sink_t = sink.clone();
         let agc = Arc::new(AtomicBool::new(true));
         let agc_t = agc.clone();
+        let vol: Arc<Mutex<f32>> = Arc::new(Mutex::new(0.8));
+        let vol_t = vol.clone();
 
         thread::spawn(move || {
             // The OutputStream must stay alive for the whole thread.
@@ -128,6 +133,7 @@ impl AudioController {
                 match cmd {
                     AudioCmd::Play(path, gain, epoch) => {
                         let new_sink = Sink::connect_new(stream.mixer());
+                        new_sink.set_volume(*vol_t.lock().unwrap());
                         append_track(&new_sink, &path, gain, agc_on);
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
@@ -139,6 +145,7 @@ impl AudioController {
                     }
                     AudioCmd::PlayUrl(url, gain, epoch) => {
                         let new_sink = Sink::connect_new(stream.mixer());
+                        new_sink.set_volume(*vol_t.lock().unwrap());
                         append_url(&new_sink, &url, gain, agc_on);
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
@@ -149,7 +156,9 @@ impl AudioController {
                         }
                     }
                     AudioCmd::Clear(epoch) => {
-                        *sink_t.lock().unwrap() = (epoch, Some(Sink::connect_new(stream.mixer())));
+                        let s = Sink::connect_new(stream.mixer());
+                        s.set_volume(*vol_t.lock().unwrap());
+                        *sink_t.lock().unwrap() = (epoch, Some(s));
                     }
                 }
             }
@@ -160,6 +169,7 @@ impl AudioController {
             sink,
             next_epoch: AtomicU64::new(0),
             agc,
+            vol,
         }
     }
 
@@ -209,7 +219,9 @@ impl AudioController {
         self.with_sink(|s| s.play());
     }
     pub fn set_volume(&self, level: f32) {
-        self.with_sink(|s| s.set_volume(level.clamp(0.0, 2.0)));
+        let level = level.clamp(0.0, 2.0);
+        *self.vol.lock().unwrap() = level;
+        self.with_sink(|s| s.set_volume(level));
     }
     pub fn seek(&self, secs: f64) {
         self.with_sink(|s| {
