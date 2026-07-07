@@ -234,7 +234,7 @@ function renderTracks(list) {
   host.innerHTML = list.map((t, i) => {
     const isNow = nowPath === t.path;
     return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
-      <div class="tk-idx"><span class="idx-num">${i + 1}</span><span class="idx-play">▶</span><span class="eq"><i></i><i></i><i></i></span></div>
+      <div class="tk-idx"><span class="idx-play">▶</span></div>
       ${artCell(t)}
       <div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
       <div class="album">${esc(t.album)}</div>
@@ -337,6 +337,63 @@ function openContextMenu(x, y) {
 }
 function closeCtx() { const m = $("#ctxMenu"); if (m && !m.hidden) { m.hidden = true; m.innerHTML = ""; } }
 
+function placeCtx(menu, x, y) {
+  menu.hidden = false;
+  menu.style.left = Math.min(x, window.innerWidth - 224) + "px";
+  menu.style.top = Math.min(y, window.innerHeight - Math.min(menu.offsetHeight + 8, 340)) + "px";
+}
+
+// Right-click menu for a sidebar playlist: everything you can do to it.
+function openPlaylistCtx(x, y, id) {
+  const pl = PL.getPlaylists().find(p => p.id === id);
+  if (!pl) return;
+  const fw = followFor(id);
+  const menu = $("#ctxMenu");
+  menu.innerHTML =
+    `<div class="ctx-item" data-a="open">🎼 Open</div>` +
+    `<div class="ctx-item" data-a="rename">✏️ Rename…</div>` +
+    `<div class="ctx-item" data-a="follow">${fw ? "🔁 Unfollow" : "🔁 Follow…"}</div>` +
+    `<div class="ctx-item" data-a="save">📥 Save locally</div>` +
+    `<div class="ctx-sep"></div>` +
+    `<div class="ctx-item ctx-danger" data-a="del">🗑 Delete</div>`;
+  placeCtx(menu, x, y);
+  menu.querySelectorAll("[data-a]").forEach(it => it.addEventListener("click", async () => {
+    const a = it.dataset.a;
+    closeCtx();
+    if (a === "open") openPlaylist(id);
+    else if (a === "rename") {
+      const name = await askText("Rename playlist", { value: pl.name, ok: "Rename" });
+      if (name) { PL.renamePlaylist(id, name); renderPlaylists(); if (active.type === "playlist" && active.id === id) openPlaylist(id); }
+    }
+    else if (a === "follow") { if (fw) unfollowPlaylist(id); else followPlaylistFlow(id); }
+    else if (a === "save") downloadPlaylist(id);
+    else if (a === "del") {
+      if (await askConfirm("Delete this playlist?", `“${pl.name}” — its tracks stay in the library.`, "Delete")) {
+        PL.deletePlaylist(id); renderPlaylists();
+        if (active.type === "playlist" && active.id === id) showLibrary();
+      }
+    }
+  }));
+}
+
+// Right-click menu for a source folder.
+function openSourceCtx(x, y, folder) {
+  const menu = $("#ctxMenu");
+  menu.innerHTML =
+    `<div class="ctx-item" data-a="open">🗂️ Open</div>` +
+    `<div class="ctx-item" data-a="refresh">⟳ Check for new songs</div>` +
+    `<div class="ctx-sep"></div>` +
+    `<div class="ctx-item ctx-danger" data-a="remove">✕ Remove source</div>`;
+  placeCtx(menu, x, y);
+  menu.querySelectorAll("[data-a]").forEach(it => it.addEventListener("click", () => {
+    const a = it.dataset.a;
+    closeCtx();
+    if (a === "open") openSource(folder);
+    else if (a === "refresh") rescanFolder(folder);
+    else if (a === "remove") removeSource(folder);
+  }));
+}
+
 // ─── Sources (folders) ───
 function renderSources() {
   const host = $("#sourcesList");
@@ -352,7 +409,10 @@ function renderSources() {
       <button class="src-btn" data-remove="${esc(f)}" title="Remove source">✕</button>
     </div>`;
   }).join("");
-  host.querySelectorAll("[data-src]").forEach(el => el.addEventListener("click", (e) => { if (e.target.dataset.refresh !== undefined || e.target.dataset.remove !== undefined) return; openSource(el.dataset.src); }));
+  host.querySelectorAll("[data-src]").forEach(el => {
+    el.addEventListener("click", (e) => { if (e.target.dataset.refresh !== undefined || e.target.dataset.remove !== undefined) return; openSource(el.dataset.src); });
+    el.addEventListener("contextmenu", (e) => { e.preventDefault(); openSourceCtx(e.clientX, e.clientY, el.dataset.src); });
+  });
   host.querySelectorAll("[data-refresh]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); rescanFolder(b.dataset.refresh); }));
   host.querySelectorAll("[data-remove]").forEach(b => b.addEventListener("click", (e) => { e.stopPropagation(); removeSource(b.dataset.remove); }));
   $("#sideFilter")?.dispatchEvent(new Event("input")); // keep the filter applied
@@ -413,7 +473,10 @@ function renderPlaylists() {
         <button class="pl-del" data-del="${p.id}" title="Delete">✕</button></div>`;
     }).join("");
   host.querySelector("#plNew").addEventListener("click", async () => { const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
-  host.querySelectorAll("[data-pl]").forEach(el => el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined) return; openPlaylist(el.dataset.pl); }));
+  host.querySelectorAll("[data-pl]").forEach(el => {
+    el.addEventListener("click", (e) => { if (e.target.dataset.del !== undefined) return; openPlaylist(el.dataset.pl); });
+    el.addEventListener("contextmenu", (e) => { e.preventDefault(); openPlaylistCtx(e.clientX, e.clientY, el.dataset.pl); });
+  });
   host.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", async (e) => { e.stopPropagation(); if (await askConfirm("Delete this playlist?", "", "Delete")) { PL.deletePlaylist(btn.dataset.del); renderPlaylists(); } }));
   $("#sideFilter")?.dispatchEvent(new Event("input")); // keep the filter applied
 }
@@ -860,7 +923,9 @@ function updateNowPlaying(t, path) {
   }
   const dur = t?.duration_secs || 0;
   $("#totTime").textContent = fmtDur(dur);
-  $("#seek").max = dur > 0 ? dur : 1; $("#seek").value = 0; $("#curTime").textContent = "0:00";
+  const sk = $("#seek");
+  sk.max = dur > 0 ? dur : 1; sk.value = 0; sk.style.setProperty("--fill", "0%");
+  $("#curTime").textContent = "0:00"; _lastTimeTxt = "0:00";
   notifyTrack(t); updateRPC(t, true); mediaUpdate(t); renderNpPanel();
 }
 async function playFrom(viewIdx) { queue = view.map(t => t.path); history = []; await hardPlay(viewIdx); }
@@ -885,7 +950,13 @@ async function hardPlay(i) {
   const path = effectivePath(queue[i]);
   const t = trackByPath(path) || trackByPath(queue[i]);
   updateNowPlaying(t, path); updatePlayingRow(); // show metadata instantly
-  if (isOnline(path)) $("#nowSub").textContent += " · loading…";
+  if (isOnline(path)) {
+    $("#nowSub").textContent += " · loading…";
+    // Streams take a moment to resolve: silence the previous track right away
+    // instead of letting it play over the "loading" state.
+    try { const se = await invoke("stop"); curEpoch = Number(se) || curEpoch; } catch {}
+    if (seq !== playSeq) return;
+  }
   let e;
   try { e = await startSource("play", path, gainFor(t)); }
   catch (err) {
@@ -935,17 +1006,36 @@ async function prev() {
   else if (curIndex > 0) await hardPlay(curIndex - 1);
   else { await invoke("seek", { secs: 0 }); wallSeek(0); }
 }
+// Smooth 60fps progress bar (fill % + time), gated so it costs nothing when
+// paused, hidden or unfocused.
+let _lastTimeTxt = "";
+function startProgressLoop() {
+  const loop = () => {
+    if (playing && !seeking && curIndex >= 0 && !document.hidden) {
+      const el = $("#seek");
+      const p = wallPos();
+      el.value = p;
+      const max = Number(el.max) || 1;
+      el.style.setProperty("--fill", `${Math.min(100, (p / max) * 100).toFixed(2)}%`);
+      const txt = fmtDur(p);
+      if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
+    }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+
 let _posTick = 0;
 function startPolling() {
   setInterval(async () => {
     // Paused or idle: nothing can change on its own — poll nothing (CPU).
     if (curIndex < 0 || !playing) return;
-    if (!seeking && !document.hidden) {
-      const p = wallPos(); $("#seek").value = p; $("#curTime").textContent = fmtDur(p);
-    }
     if (++_posTick % 4 === 0) mediaPlayback(); // ~1.2s: keep the desktop widget's position fresh
     const st = await invoke("status"); if (!st) return;
     if ((st.epoch || 0) !== curEpoch) return; // stale: previous sink still up while a play/stream starts
+    // Re-anchor the wall clock on the engine's real position when they drift
+    // (stream connect latency etc.) — kills progress-bar jumps.
+    if (queueSettled && st.position > 0.5 && Math.abs(st.position - wallPos()) > 1.5) wallSeek(st.position);
     const queued = st.queued || 0;
     if (!queueSettled) {
       if (queued >= expectedQueued) queueSettled = true;
@@ -1193,7 +1283,7 @@ function applySettings() {
   shuffle = S().shuffleDefault; $("#shuffleBtn").classList.toggle("active", shuffle);
   repeatMode = ["off", "all", "one"].includes(S().repeatDefault) ? S().repeatDefault : "off";
   updateRepeatBtn();
-  const v = S().defaultVolume; $("#volume").value = v; invoke("set_volume", { level: v / 100 });
+  const v = S().defaultVolume; $("#volume").value = v; $("#volume").style.setProperty("--fill", `${v}%`); invoke("set_volume", { level: v / 100 });
 }
 function openSettings() {
   const s = S();
@@ -1590,7 +1680,7 @@ async function init() {
     if (curIndex >= 0) schedulePreload();
     flash(repeatMode === "off" ? "Repeat off" : repeatMode === "all" ? "Repeat all" : "Repeat one");
   });
-  $("#volume").addEventListener("input", e => invoke("set_volume", { level: Number(e.target.value) / 100 }));
+  $("#volume").addEventListener("input", e => { invoke("set_volume", { level: Number(e.target.value) / 100 }); e.target.style.setProperty("--fill", `${e.target.value}%`); });
 
   $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });
   $("#seek").addEventListener("change", async () => { const s = Number($("#seek").value); await invoke("seek", { secs: s }); wallSeek(s); seeking = false; mediaPlayback(); updateRPC(trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex]), playing); });
@@ -1649,6 +1739,10 @@ async function init() {
   window.addEventListener("blur", () => document.body.classList.add("win-blur"));
   window.addEventListener("focus", () => document.body.classList.remove("win-blur"));
 
+  // Never show the WebView's native right-click menu (Reload etc.) — custom
+  // menus only; text fields keep their native copy/paste menu.
+  document.addEventListener("contextmenu", e => { if (!e.target.closest("input, textarea")) e.preventDefault(); });
+
   document.addEventListener("click", e => { if (!e.target.closest("#ctxMenu") && e.target.dataset.more === undefined) closeCtx(); });
   document.addEventListener("scroll", closeCtx, true);
   document.addEventListener("keydown", e => {
@@ -1664,6 +1758,7 @@ async function init() {
   listenMediaEvents();
   listenDlEvents();
   startPolling();
+  startProgressLoop();
   showLibrary();
 
   $("#updateBtn").addEventListener("click", () => {

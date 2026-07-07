@@ -24,10 +24,12 @@ use std::time::Duration;
 const FADE: Duration = Duration::from_millis(20);
 // Automatic gain control: evens out perceived loudness across tracks (YouTube
 // rips have no ReplayGain tags, so tag-based normalization can't help them).
-const AGC_TARGET: f32 = 0.85;
-const AGC_ATTACK: f32 = 4.0;
-const AGC_RELEASE: f32 = 0.005;
-const AGC_MAX_GAIN: f32 = 4.0;
+// Deliberately gentle: a low max gain + slow attack prevents quiet intros from
+// being boosted hard and then BLASTING when the track kicks in.
+const AGC_TARGET: f32 = 0.75;
+const AGC_ATTACK: f32 = 8.0; // slow ramp-up
+const AGC_RELEASE: f32 = 0.004; // fast cut when it gets loud
+const AGC_MAX_GAIN: f32 = 1.8;
 
 enum AudioCmd {
     Play(String, f32, u64),    // path, linear gain, epoch — hard start (fresh sink)

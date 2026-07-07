@@ -113,8 +113,13 @@ input[type="range"] {
   background: transparent; height: 16px; cursor: pointer; padding: 0;
 }
 input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px; border-radius: 2px; background: var(--bg-4);
+  height: 4px; border-radius: 2px;
+  /* played portion filled with the accent (JS keeps --fill in sync) */
+  background: linear-gradient(to right, var(--accent) var(--fill, 0%), var(--bg-4) var(--fill, 0%));
 }
+/* Seek bar: clean line, thumb only appears on hover (à la Spotify) */
+.seekbar::-webkit-slider-thumb { opacity: 0; transition: opacity .12s, transform .1s; }
+.seekbar:hover::-webkit-slider-thumb, .seekbar:active::-webkit-slider-thumb { opacity: 1; }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 12px; height: 12px; border-radius: 50%; margin-top: -4px;
@@ -146,21 +151,18 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); backgro
 }
 .track:hover { background: var(--bg-2); }
 .track.selected { background: var(--bg-3); }
-.track.playing .t { color: var(--accent-2); }
-.tk-idx { position: relative; display: grid; place-items: center; color: var(--tx-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* Now-playing row: enclosed by an accent ring + soft glow (no eq bars). */
+.track.playing {
+  background: var(--bg-2);
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 16px -8px var(--accent);
+}
+.track.playing .t { color: var(--accent-2); font-weight: 700; }
+body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
+.tk-idx { position: relative; display: grid; place-items: center; color: var(--tx-3); font-size: 12px; }
 .tk-idx .idx-play { display: none; color: var(--tx-1); font-size: 10px; }
-.track:hover .idx-num { display: none; }
 .track:hover .idx-play { display: block; }
-.track.playing .idx-num { display: none; }
-/* The eq bars live in every row; classes decide visibility (no re-render needed) */
-.eq { display: none; gap: 2px; align-items: flex-end; height: 14px; }
-.track.playing .eq { display: inline-flex; }
-body.paused .track.playing .eq { display: none; }
-.track:hover .eq { display: none !important; }
-.eq i { width: 3px; border-radius: 1px; background: var(--accent-2); height: 40%; animation: eq .9s ease-in-out infinite; }
-.eq i:nth-child(2) { animation-delay: .28s; }
-.eq i:nth-child(3) { animation-delay: .56s; }
-@keyframes eq { 0%, 100% { height: 25%; } 50% { height: 100%; } }
+.track.playing .tk-idx::before { content: "●"; color: var(--accent); font-size: 9px; }
+.track.playing:hover .tk-idx::before { display: none; }
 .album { font-size: 13px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .art { width: 40px; height: 40px; border-radius: 6px; display: grid; place-items: center; font-weight: 800; font-size: 16px; color: rgba(255,255,255,.92); overflow: hidden; }
 .meta { min-width: 0; }
@@ -259,6 +261,18 @@ body.has-bg .main { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 1
 body.has-bg .dl-drawer,
 body.has-bg .np-drawer { background: rgba(10, 10, 15, .97); }
 body.has-bg .ctx-menu, body.has-bg .modal { background: rgb(18, 18, 24); }
+/* Solid dark hover/selection colors look like black holes over a wallpaper —
+   switch to translucent light overlays instead. */
+body.has-bg .track:hover,
+body.has-bg .pl-row:hover,
+body.has-bg .src-row:hover,
+body.has-bg .nx-row:hover,
+body.has-bg .imp-hit:hover,
+body.has-bg .nav-item.active { background: rgba(255, 255, 255, .07); }
+body.has-bg .track.selected { background: rgba(255, 255, 255, .12); }
+body.has-bg .track.playing { background: rgba(255, 255, 255, .05); }
+body.has-bg .pl-row.active,
+body.has-bg .src-row.active { background: rgba(255, 255, 255, .10); }
 
 /* ─── Now Playing panel (big art + up next) ─── */
 .np-drawer {
@@ -380,7 +394,7 @@ body.compact .art { width: 32px; height: 32px; font-size: 13px; }
 body.compact .list-head { padding-bottom: 5px; }
 
 /* Reduce motion */
-body.no-anim .eq i { animation: none; height: 65%; }
+
 body.no-anim * { transition: none !important; }
 
 /* ─── Playlist import modal ─── */
@@ -440,7 +454,7 @@ select.sel.sm-sel.wide { width: 130px; }
 @keyframes dlpulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 body.no-anim .dl-toggle.busy::before { animation: none; }
 /* Save CPU when the window isn't focused: freeze cosmetic animations. */
-body.win-blur .eq i, body.win-blur .dl-toggle.busy::before { animation-play-state: paused; }
+body.win-blur .dl-toggle.busy::before { animation-play-state: paused; }
 .dl-drawer {
   position: fixed; top: 10px; right: 10px; bottom: 118px; z-index: 79;
   width: min(400px, 92vw);
