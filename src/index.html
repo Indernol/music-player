@@ -18,7 +18,7 @@
       <div class="side-section" id="secSources">
         <div class="ss-head">
           <span class="ss-title ss-toggle" data-coll="collSources" title="Click to collapse/expand"><span class="ss-caret">▾</span> Sources</span>
-          <button id="rescanBtn" class="icon-btn" title="Check all folders for new songs">⟳</button>
+          <button id="rescanBtn" class="icon-btn" title="Check all folders for new songs" data-ic="refresh"></button>
         </div>
         <div class="ss-body">
           <button id="pickBtn" class="btn btn-block"><span data-ic="folder"></span> Add folder…</button>
@@ -35,7 +35,7 @@
         </div>
       </div>
 
-      <button id="updateBtn" class="update-btn" hidden>⬆ Update available</button>
+      <button id="updateBtn" class="update-btn" hidden>Update available</button>
     </aside>
 
     <main class="main">
@@ -46,6 +46,7 @@
         </div>
         <span id="count" class="count"></span>
         <button id="settingsBtn" class="icon-btn top-gear" title="Settings" data-ic="gear"></button>
+        <span class="sort-ico" data-ic="filter" title="Sort"></span>
         <select id="sortSel" class="sel sm-sel sort-sel" title="Sort order">
           <option value="default">Sort: default</option>
           <option value="title">Title A→Z</option>
@@ -65,7 +66,7 @@
       </div>
 
       <section id="trackList" class="tracklist">
-        <div class="empty"><div class="empty-ico">🎶</div>Add a folder as a source to start.</div>
+        <div class="empty"><div class="empty-ico" data-ic="music"></div>Add a folder as a source to start.</div>
       </section>
     </main>
   </div>
@@ -75,10 +76,10 @@
       <span class="dl-title">Now playing</span>
       <span class="dl-btns">
         <button id="npPin" class="icon-btn" title="Dock to the side (stays as a column)" data-ic="pin"></button>
-        <button id="npClose" class="icon-btn" title="Close">✕</button>
+        <button id="npClose" class="icon-btn" title="Close" data-ic="x"></button>
       </span>
     </div>
-    <div class="ov-art" id="ovArt">🎶</div>
+    <div class="ov-art" id="ovArt" data-ic="music"></div>
     <div class="ov-title" id="ovTitle">Nothing playing</div>
     <div class="ov-sub" id="ovSub"></div>
     <div class="ov-meta" id="ovMeta"></div>
@@ -93,7 +94,7 @@
         <button id="dlRetry" class="btn-line sm" hidden>Retry</button>
         <button id="dlRetryBlocked" class="btn-line sm" hidden title="Retry the skipped/blocked tracks too (clears them from the never-retry list)">Retry blocked</button>
         <button id="dlAction" class="btn-line sm">Stop all</button>
-        <button id="dlClose" class="icon-btn" title="Hide (downloads keep running)">✕</button>
+        <button id="dlClose" class="icon-btn" title="Hide (downloads keep running)" data-ic="x"></button>
       </span>
     </div>
     <div id="dlList" class="dl-list"></div>
@@ -102,7 +103,7 @@
   <footer class="player">
     <div class="player-main">
       <div class="now">
-        <div class="np-art" id="npArt">🎶</div>
+        <div class="np-art" id="npArt" data-ic="music"></div>
         <div class="np-txt">
           <div class="now-title" id="nowTitle">Nothing playing</div>
           <div class="now-sub" id="nowSub"></div>
@@ -142,7 +143,7 @@
     <div class="modal">
       <div class="modal-head">
         <h2>Settings</h2>
-        <button id="settingsClose" class="icon-btn" title="Close">✕</button>
+        <button id="settingsClose" class="icon-btn" title="Close" data-ic="x"></button>
       </div>
       <div id="settingsBody" class="modal-body"></div>
     </div>
@@ -153,7 +154,7 @@
       <div class="modal-head"><h2>Use browser cookies?</h2></div>
       <div class="modal-body">
         <p class="dlg-msg">yt-dlp will read the YouTube cookies of the account logged in that browser and act as that account.
-⚠ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format not available”), and heavy downloading on your account is more traceable. Only accept if you need age/member-restricted content.</p>
+Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format not available”), and heavy downloading on your account is more traceable. Only accept if you need age/member-restricted content.</p>
         <div id="ckList" class="ck-list"></div>
         <div class="setup-actions">
           <button id="ckCancel" class="btn-line">Cancel</button>
@@ -179,11 +180,11 @@
 
   <div id="setupModal" class="modal-backdrop" hidden>
     <div class="modal setup">
-      <div class="modal-head"><h2 id="setupTitle">Welcome 🎧</h2></div>
+      <div class="modal-head"><h2 id="setupTitle">Welcome</h2></div>
       <div class="modal-body">
         <div class="setup-step" data-step="0">
           <p class="setup-p">First launch! Do you want to configure the app now (yt-dlp binary, browser cookies, download folder), or start with the defaults?</p>
-          <p class="setup-hint">Everything stays editable later in <b>🛠️ Settings</b>.</p>
+          <p class="setup-hint">Everything stays editable later in <b>Settings</b>.</p>
           <div class="setup-actions">
             <button id="suDefaults" class="btn-line">Use defaults</button>
             <button id="suConfigure" class="btn">Configure now</button>
@@ -200,7 +201,7 @@
         </div>
         <div class="setup-step" data-step="2" hidden>
           <p class="setup-p"><b>2/3 — Browser cookies</b> (optional): lets yt-dlp act as your logged-in browser for age/member-restricted tracks.</p>
-          <p class="setup-hint">⚠ A logged-in YouTube session often makes YouTube <b>block</b> extraction ("format not available"). Keep <b>None</b> unless you specifically need restricted content — the app falls back to no-cookies automatically if a call fails.</p>
+          <p class="setup-hint">A logged-in YouTube session often makes YouTube <b>block</b> extraction ("format not available"). Keep <b>None</b> unless you specifically need restricted content — the app falls back to no-cookies automatically if a call fails.</p>
           <div class="setup-row">
             <label class="imp-lbl" for="suCookies">Browser</label>
             <select id="suCookies" class="sel">
@@ -221,12 +222,12 @@
           <div class="setup-row">
             <label class="imp-lbl">Folder</label>
             <input type="text" id="suDlDir" class="text-in grow" placeholder="~/Music/MusicPlayer">
-            <button id="suDlPick" class="btn-line sm">🗂️</button>
+            <button id="suDlPick" class="btn-line sm" data-ic="folder"></button>
           </div>
           <label class="setup-chk"><input type="checkbox" id="suPrefLocal" checked> Play the local file when a track is downloaded</label>
           <label class="setup-chk"><input type="checkbox" id="suAutoSave"> Tick “Save locally” by default when importing a playlist</label>
           <label class="setup-chk"><input type="checkbox" id="suNotify" checked> Desktop notification on track change</label>
-          <div class="setup-actions"><button id="suFinish" class="btn">Finish ✓</button></div>
+          <div class="setup-actions"><button id="suFinish" class="btn">Finish</button></div>
         </div>
       </div>
     </div>
@@ -236,7 +237,7 @@
     <div class="modal">
       <div class="modal-head">
         <h2>YouTube playlists</h2>
-        <button id="importClose" class="icon-btn" title="Close">✕</button>
+        <button id="importClose" class="icon-btn" title="Close" data-ic="x"></button>
       </div>
       <div class="modal-body">
         <div class="imp-row">
@@ -262,7 +263,7 @@
             <select id="impDest"></select>
           </div>
           <div class="imp-foot-row">
-            <label class="imp-dl" title="Watch this playlist and auto-add its future tracks"><input type="checkbox" id="impFollow"> 🔁 Follow</label>
+            <label class="imp-dl" title="Watch this playlist and auto-add its future tracks"><input type="checkbox" id="impFollow"> <span class="bic" data-ic="repeat"></span> Follow</label>
             <label class="imp-dl" title="Also download the selected tracks as local mp3 files"><input type="checkbox" id="impDl"> Save locally (mp3)</label>
             <button id="impGo" class="btn">Import</button>
           </div>

@@ -60,10 +60,27 @@ const IC = {
   check: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12 5 5L20 6"/></svg>`,
   slash: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>`,
   alert: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v9"/><circle cx="12" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>`,
+  filter: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>`,
+  link: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l6-6"/><path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1"/><path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1"/></svg>`,
+  image: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m4 17 5-5 4 4 3-3 4 4"/></svg>`,
+  eye: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  upload: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9m0 0 4 4m-4-4-4 4"/><path d="M4 3h16"/></svg>`,
+  play: `<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`,
+  list: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>`,
+  refresh: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>`,
+  x: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>`,
+  minus: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7"/></svg>`,
+  repeat: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>`,
+  save: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/></svg>`,
+  radio: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M7 8a6 6 0 0 0 0 8M17 8a6 6 0 0 1 0 8M4.5 5a10 10 0 0 0 0 14M19.5 5a10 10 0 0 1 0 14"/></svg>`,
+  music: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
 };
 function hydrateIcons(root = document) {
   root.querySelectorAll("[data-ic]").forEach(el => { el.innerHTML = IC[el.dataset.ic] || ""; });
 }
+// Inline an SVG icon inside a button/menu label (aligned via .bic).
+function ic(svg) { return `<span class="bic">${svg}</span>`; }
 
 // ─── Player control icons (inline SVG, colored via currentColor) ───
 const ICON_PLAY = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
@@ -282,12 +299,12 @@ function renderTracks(list, presorted = false) {
   updateCount();
   const host = $("#trackList");
   $("#listHead").style.display = list.length ? "" : "none";
-  if (!list.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">🎶</div>Nothing here yet.</div>`; return; }
+  if (!list.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.music}</div>Nothing here yet.</div>`; return; }
   const nowPath = curIndex >= 0 ? queue[curIndex] : null;
   host.innerHTML = list.map((t, i) => {
     const isNow = nowPath === t.path;
     return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
-      <div class="tk-idx"><span class="idx-num">${i + 1}</span><span class="idx-play">▶</span></div>
+      <div class="tk-idx"><span class="idx-num">${i + 1}</span><span class="idx-play">${IC.play}</span></div>
       ${artCell(t)}
       <div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
       <div class="album">${esc(t.album)}</div>
@@ -403,18 +420,18 @@ function openContextMenu(x, y) {
   const nLocal = paths.map(localFileFor).filter(Boolean).length;
   const nsfx = paths.length > 1 ? paths.length + " tracks" : "track";
   menu.innerHTML =
-    `<div class="ctx-item" data-play="1">▶ Play</div>` +
-    (nOnline ? `<div class="ctx-item" data-dl="1">📥 Download ${nOnline > 1 ? nOnline + " tracks" : "track"} locally</div>` : "") +
-    (paths.length === 1 && localFileFor(paths[0]) ? `<div class="ctx-item" data-reveal="1">📂 Open file location</div>` : "") +
+    `<div class="ctx-item" data-play="1">${ic(IC.play)}Play</div>` +
+    (nOnline ? `<div class="ctx-item" data-dl="1">${ic(IC.save)}Download ${nOnline > 1 ? nOnline + " tracks" : "track"} locally</div>` : "") +
+    (paths.length === 1 && localFileFor(paths[0]) ? `<div class="ctx-item" data-reveal="1">${ic(IC.folder)}Open file location</div>` : "") +
     // ── removal / deletion ──
     ((inPlaylist || nLocal) ? `<div class="ctx-sep"></div>` : "") +
-    (inPlaylist ? `<div class="ctx-item" data-rm="pl">➖ Remove from this playlist</div>` : "") +
-    (nLocal ? `<div class="ctx-item ctx-danger" data-rm="local">🗑 Delete local file${nLocal > 1 ? "s" : ""}${inPlaylist ? " (keep in playlist)" : ""}</div>` : "") +
-    (inPlaylist && nLocal ? `<div class="ctx-item ctx-danger" data-rm="both">🗑 Remove from playlist + delete local</div>` : "") +
+    (inPlaylist ? `<div class="ctx-item" data-rm="pl">${ic(IC.minus)}Remove from this playlist</div>` : "") +
+    (nLocal ? `<div class="ctx-item ctx-danger" data-rm="local">${ic(IC.trash)}Delete local file${nLocal > 1 ? "s" : ""}${inPlaylist ? " (keep in playlist)" : ""}</div>` : "") +
+    (inPlaylist && nLocal ? `<div class="ctx-item ctx-danger" data-rm="both">${ic(IC.trash)}Remove from playlist + delete local</div>` : "") +
     `<div class="ctx-sep"></div>` +
     `<div class="ctx-label">Add ${nsfx} to</div>` +
-    pls.map(p => `<div class="ctx-item" data-add="${p.id}"><span class="row-ic">${IC.note}</span> ${esc(p.name)}</div>`).join("") +
-    `<div class="ctx-item" data-add="__new">✚ New playlist…</div>`;
+    pls.map(p => `<div class="ctx-item" data-add="${p.id}">${ic(IC.note)}${esc(p.name)}</div>`).join("") +
+    `<div class="ctx-item" data-add="__new">${ic(IC.plus)}New playlist…</div>`;
   placeCtx(menu, x, y);
   menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline)); closeCtx(); });
   menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playFrom(i); closeCtx(); });
@@ -480,14 +497,14 @@ function openPlaylistCtx(x, y, id) {
   const fw = followFor(id);
   const menu = $("#ctxMenu");
   menu.innerHTML =
-    `<div class="ctx-item" data-a="open">🎼 Open</div>` +
-    `<div class="ctx-item" data-a="rename">✏️ Rename…</div>` +
-    `<div class="ctx-item" data-a="cover">🖼 Set cover…</div>` +
-    (pl.image ? `<div class="ctx-item" data-a="uncover">Remove cover</div>` : "") +
-    `<div class="ctx-item" data-a="follow">${fw ? "🔁 Unfollow" : "🔁 Follow…"}</div>` +
-    `<div class="ctx-item" data-a="save">📥 Save locally</div>` +
+    `<div class="ctx-item" data-a="open">${ic(IC.note)}Open</div>` +
+    `<div class="ctx-item" data-a="rename">${ic(IC.pencil)}Rename…</div>` +
+    `<div class="ctx-item" data-a="cover">${ic(IC.image)}Set cover…</div>` +
+    (pl.image ? `<div class="ctx-item" data-a="uncover">${ic(IC.x)}Remove cover</div>` : "") +
+    `<div class="ctx-item" data-a="follow">${ic(IC.repeat)}${fw ? "Unfollow" : "Follow…"}</div>` +
+    `<div class="ctx-item" data-a="save">${ic(IC.save)}Save locally</div>` +
     `<div class="ctx-sep"></div>` +
-    `<div class="ctx-item ctx-danger" data-a="del">🗑 Delete</div>`;
+    `<div class="ctx-item ctx-danger" data-a="del">${ic(IC.trash)}Delete</div>`;
   placeCtx(menu, x, y);
   menu.querySelectorAll("[data-a]").forEach(it => it.addEventListener("click", async () => {
     const a = it.dataset.a;
@@ -526,11 +543,11 @@ async function revealPath(path) {
 function openSourceCtx(x, y, folder) {
   const menu = $("#ctxMenu");
   menu.innerHTML =
-    `<div class="ctx-item" data-a="open">🗂️ Open</div>` +
-    `<div class="ctx-item" data-a="reveal">📂 Open folder location</div>` +
-    `<div class="ctx-item" data-a="refresh">⟳ Check for new songs</div>` +
+    `<div class="ctx-item" data-a="open">${ic(IC.folder)}Open</div>` +
+    `<div class="ctx-item" data-a="reveal">${ic(IC.folder)}Open folder location</div>` +
+    `<div class="ctx-item" data-a="refresh">${ic(IC.refresh)}Check for new songs</div>` +
     `<div class="ctx-sep"></div>` +
-    `<div class="ctx-item ctx-danger" data-a="remove">✕ Remove source</div>`;
+    `<div class="ctx-item ctx-danger" data-a="remove">${ic(IC.x)}Remove source</div>`;
   placeCtx(menu, x, y);
   menu.querySelectorAll("[data-a]").forEach(it => it.addEventListener("click", () => {
     const a = it.dataset.a;
@@ -553,8 +570,8 @@ function renderSources() {
       <span class="src-ico" data-ic="folder"></span>
       <span class="src-name">${esc(baseName(f))}</span>
       <span class="src-count">${count}</span>
-      <button class="src-btn" data-refresh="${esc(f)}" title="Check for new songs">⟳</button>
-      <button class="src-btn" data-remove="${esc(f)}" title="Remove source">✕</button>
+      <button class="src-btn" data-refresh="${esc(f)}" title="Check for new songs">${IC.refresh}</button>
+      <button class="src-btn" data-remove="${esc(f)}" title="Remove source">${IC.x}</button>
     </div>`;
   }).join("");
   host.querySelectorAll("[data-src]").forEach(el => {
@@ -658,9 +675,9 @@ function renderPlaylists() {
     pls.map(p => {
       const on = active.type === "playlist" && active.id === p.id;
       const fw = followFor(p.id);
-      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}"><span class="pl-cover" data-cover="${p.id}">${IC.note}</span> <span class="pl-name">${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">🔁</span>` : ""}</span> <span class="pl-count">${p.paths.length}</span>
-        <button class="pl-eye" data-eye="${p.id}" title="Preview tracks">👁</button>
-        <button class="pl-del" data-del="${p.id}" title="Delete">✕</button></div>`;
+      return `<div class="pl-row ${on ? "active" : ""}" data-pl="${p.id}"><span class="pl-cover" data-cover="${p.id}">${IC.note}</span> <span class="pl-name">${esc(p.name)}${fw ? ` <span class="pl-follow" title="Following “${esc(fw.title)}” — new tracks are added automatically">${IC.repeat}</span>` : ""}</span> <span class="pl-count">${p.paths.length}</span>
+        <button class="pl-eye" data-eye="${p.id}" title="Preview tracks">${IC.eye}</button>
+        <button class="pl-del" data-del="${p.id}" title="Delete">${IC.x}</button></div>`;
     }).join("");
   host.querySelector("#plNew").addEventListener("click", async () => { const name = await askText("New playlist", { placeholder: "Playlist name", ok: "Create" }); if (name !== null) { PL.createPlaylist(name); renderPlaylists(); } });
   host.querySelectorAll("[data-pl]").forEach(el => {
@@ -682,15 +699,38 @@ function openPlaylist(id) {
   const nOnline = pl.paths.filter(isOnline).length;
   const fw = followFor(id);
   setViewHead({
-    icon: IC.note, title: pl.name, subtitle: `${pl.paths.length} songs${nOnline ? ` · ${nOnline} online` : ""}${fw ? " · 🔁 followed" : ""}`,
+    icon: IC.note, title: pl.name, subtitle: `${pl.paths.length} songs${nOnline ? ` · ${nOnline} online` : ""}${fw ? ` · ${ic(IC.repeat)} followed` : ""}`,
     actions:
-      `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${fw ? "🔁 Following ✓" : "🔁 Follow"}</button>` +
-      (nOnline ? `<button id="plDlBtn" class="btn-line sm">📥 Save locally (${nOnline} mp3)</button>` : ""),
+      `<button id="plUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
+      `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${ic(IC.repeat)} ${fw ? "Following" : "Follow"}</button>` +
+      (nOnline ? `<button id="plDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nOnline} mp3)</button>` : ""),
   });
+  $("#plUrlBtn")?.addEventListener("click", () => addByUrl(id));
   $("#plDlBtn")?.addEventListener("click", () => downloadPlaylist(id));
   $("#plFollowBtn")?.addEventListener("click", () => (followFor(id) ? unfollowPlaylist(id) : followPlaylistFlow(id)));
   const vhIcon = $("#viewHead .vh-icon"); if (vhIcon) { vhIcon.classList.add("vh-cover"); plCoverInto(vhIcon, pl); }
   renderTracks(pl.paths.map(p => byPath.get(p) || onlineIndex.get(p)).filter(Boolean));
+}
+
+// Add a YouTube video OR playlist by URL straight into this playlist. yt_playlist
+// returns one track for a video URL and many for a playlist URL, so both work.
+async function addByUrl(plId) {
+  if (!IS_NATIVE) { flash("Adding by URL needs the native app"); return; }
+  const url = await askText("Add from URL", { placeholder: "YouTube video or playlist URL", ok: "Add" });
+  if (!url) return;
+  flash("Fetching…");
+  try {
+    const res = await invoke("yt_playlist", { url: url.trim() });
+    const tracks = (res.tracks || []).map(onlineFromResult);
+    if (!tracks.length) { flash("Nothing found at that URL"); return; }
+    tracks.forEach(t => onlineIndex.set(t.path, t));
+    let n = 0;
+    for (const t of tracks) { const dup = PL.countExisting(plId, [t.path]); PL.addToPlaylist(plId, t.path); if (!dup) n++; }
+    saveOnline();
+    renderPlaylists();
+    if (active.type === "playlist" && active.id === plId) openPlaylist(plId);
+    flash(n ? `Added ${n} track${n === 1 ? "" : "s"}` : "Already in the playlist");
+  } catch (e) { flash(`Could not add: ${e}`); }
 }
 
 // Follow an ALREADY-imported playlist: reuse its remembered source URL, or ask
@@ -712,7 +752,7 @@ async function followPlaylistFlow(id) {
     addFollow({ url, title: res.title || pl.name, playlistId: id, autoDownload: S().autoSaveImports, knownIds: [...upstream, ...local] });
     PL.setSourceUrl(id, url);
     renderPlaylists(); openPlaylist(id);
-    flash(`🔁 Following “${res.title || pl.name}” — new tracks will be added automatically`);
+    flash(`Following “${res.title || pl.name}” — new tracks will be added automatically`);
   } catch (e) { flash(`Cannot follow: ${e}`); }
 }
 async function unfollowPlaylist(id) {
@@ -787,9 +827,9 @@ function injectArtistCard() {
     `<div class="ac-avatar"${a.thumbnail ? ` style="background-image:url('${esc(a.thumbnail)}')"` : ""}></div>
      <div class="ac-meta"><div class="ac-name">${esc(a.title)}</div><div class="ac-sub">YouTube channel</div></div>
      <div class="ac-actions">
-       <button class="btn-line sm ${ytArtistMode === "videos" ? "ac-on" : ""}" data-ac="videos">▶ Videos</button>
-       <button class="btn-line sm ${ytArtistMode === "playlists" ? "ac-on" : ""}" data-ac="playlists">≡ Playlists</button>
-       <button class="btn-line sm" data-ac="dl">⬇ Download all</button>
+       <button class="btn-line sm ${ytArtistMode === "videos" ? "ac-on" : ""}" data-ac="videos">${ic(IC.play)}Videos</button>
+       <button class="btn-line sm ${ytArtistMode === "playlists" ? "ac-on" : ""}" data-ac="playlists">${ic(IC.list)}Playlists</button>
+       <button class="btn-line sm" data-ac="dl">${ic(IC.upload)}Download all</button>
      </div>`;
   $("#trackList").insertAdjacentElement("afterbegin", card);
   card.querySelector('[data-ac="videos"]').addEventListener("click", () => { if (ytArtistMode !== "videos") { ytArtistMode = "videos"; renderOnlineResults(); } });
@@ -801,20 +841,20 @@ function renderArtistPlaylists() {
   $("#listHead").style.display = "none";
   host.innerHTML = ytArtistPls.length
     ? ytArtistPls.map((p, i) => `<div class="ac-pl" data-acpl="${i}" title="${esc(p.url)}"><span class="ac-pl-t">${esc(p.title)}</span><span class="ac-pl-a">${esc(p.author || "")}</span></div>`).join("")
-    : `<div class="empty"><div class="empty-ico">🎶</div>No public playlists on this channel.</div>`;
+    : `<div class="empty"><div class="empty-ico">${IC.music}</div>No public playlists on this channel.</div>`;
   host.querySelectorAll("[data-acpl]").forEach(el => el.addEventListener("click", () => importChannelPlaylist(ytArtistPls[Number(el.dataset.acpl)].url)));
 }
 async function loadArtistPlaylists() {
   if (!ytArtist) return;
   ytArtistMode = "playlists";
   const host = $("#trackList");
-  host.innerHTML = `<div class="empty"><div class="empty-ico">📡</div>Loading playlists…</div>`;
+  host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.radio}</div>Loading playlists…</div>`;
   injectArtistCard();
   try {
     ytArtistPls = await invoke("yt_channel_playlists", { url: ytArtist.url, limit: 40, offset: 0 });
     renderOnlineResults();
   } catch (e) {
-    host.innerHTML = `<div class="empty"><div class="empty-ico">⚠️</div>${esc(String(e))}</div>`;
+    host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.alert}</div>${esc(String(e))}</div>`;
     injectArtistCard();
   }
 }
@@ -848,7 +888,7 @@ async function searchOnline(q, page = 0) {
   selected.clear();
   setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}” — page ${ytPage + 1}…` });
   $("#listHead").style.display = "none";
-  $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">📡</div>Searching YouTube…</div>`;
+  $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.radio}</div>Searching YouTube…</div>`;
   try {
     const limit = Number(S().searchLimit) || 20;
     const res = await invoke("yt_search", { query: q, limit, offset: ytPage * limit });
@@ -858,7 +898,7 @@ async function searchOnline(q, page = 0) {
     renderOnlineResults();
   } catch (e) {
     setViewHead({ icon: IC.globe, title: "YouTube", subtitle: "Search failed" });
-    $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">⚠️</div>${esc(String(e))}</div>`;
+    $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.alert}</div>${esc(String(e))}</div>`;
   }
   // Resolve the artist card in the background (first page only).
   if (ytPage === 0) {
@@ -1003,8 +1043,8 @@ async function impGo() {
   $("#importModal").hidden = true;
   const nm = PL.getPlaylists().find(p => p.id === dest)?.name || "playlist";
   flash(chosen.length
-    ? `Imported ${chosen.length} track${chosen.length === 1 ? "" : "s"} into “${nm}”${following ? " · 🔁 following" : ""}`
-    : `🔁 Following “${nm}” — new tracks will be added automatically`);
+    ? `Imported ${chosen.length} track${chosen.length === 1 ? "" : "s"} into “${nm}”${following ? " · following" : ""}`
+    : `Following “${nm}” — new tracks will be added automatically`);
   openPlaylist(dest);
   if ($("#impDl").checked && chosen.length) downloadTracks(chosen.map(t => t.path)); // background batch
 }
@@ -1040,7 +1080,7 @@ function dlRow(d) {
       <span class="dl-name">${esc(d.title)}</span>
       <span class="dl-prog"><i style="width:${d.status === "done" ? 100 : (d.pct || 0)}%"></i></span>
       <span class="dl-pct">${d.status === "active" ? (d.pct || 0) + "%" : d.status}</span>
-      ${d.status === "queued" || d.status === "active" ? `<button class="dl-x" data-dlx="${esc(d.path)}" title="Cancel">✕</button>` : ""}
+      ${d.status === "queued" || d.status === "active" ? `<button class="dl-x" data-dlx="${esc(d.path)}" title="Cancel">${IC.x}</button>` : ""}
     </div>`;
 }
 let dlOpen = false; // drawer is opt-in: nothing pops up on its own
@@ -1117,9 +1157,9 @@ function openDlCtx(x, y, path) {
   if (!d) return;
   const menu = $("#ctxMenu");
   const parts = [];
-  if ((d.status === "error" && !d.permanent) || d.status === "canceled") parts.push(`<div class="ctx-item" data-a="retry">↻ Retry this track</div>`);
-  else if (d.status === "error" && d.permanent) parts.push(`<div class="ctx-item" data-a="force">↻ Retry anyway (unblock)</div>`);
-  if (d.status === "queued" || d.status === "active") parts.push(`<div class="ctx-item" data-a="cancel">✕ Cancel</div>`);
+  if ((d.status === "error" && !d.permanent) || d.status === "canceled") parts.push(`<div class="ctx-item" data-a="retry">${ic(IC.refresh)}Retry this track</div>`);
+  else if (d.status === "error" && d.permanent) parts.push(`<div class="ctx-item" data-a="force">${ic(IC.refresh)}Retry anyway (unblock)</div>`);
+  if (d.status === "queued" || d.status === "active") parts.push(`<div class="ctx-item" data-a="cancel">${ic(IC.x)}Cancel</div>`);
   parts.push(`<div class="ctx-item" data-a="drop">Remove from this list</div>`);
   parts.push(`<div class="ctx-sep"></div>`);
   parts.push(`<div class="ctx-item ctx-danger" data-a="unpl">Remove from playlists</div>`);
@@ -1299,7 +1339,7 @@ async function dlPump() {
   renderPlaylists(); refreshView();
   dlRunning = false;
   dlRender();
-  if (ok) flash(`📥 ${ok} track${ok === 1 ? "" : "s"} saved locally`);
+  if (ok) flash(`${ok} track${ok === 1 ? "" : "s"} saved locally`);
 }
 
 function showLibrary() {
@@ -1551,7 +1591,7 @@ function renderNpPanel() {
     $("#ovSub").textContent = t.artist;
     $("#ovMeta").textContent = `${t.album}${t.duration_secs ? ` · ${fmtDur(t.duration_secs)}` : ""} · ${isOnline(eff) ? "streaming" : "local file"}`;
   } else {
-    art.classList.remove("has-cover"); art.style.backgroundImage = ""; art.style.background = "var(--bg-3)"; art.textContent = "🎶";
+    art.classList.remove("has-cover"); art.style.backgroundImage = ""; art.style.background = "var(--bg-3)"; art.innerHTML = IC.music;
     $("#ovTitle").textContent = "Nothing playing"; $("#ovSub").textContent = ""; $("#ovMeta").textContent = "";
   }
   // Up next — same list for sequential AND shuffle (pre-computed order).
@@ -1795,8 +1835,8 @@ function openSettings() {
       <div class="set-row"><label>Background image</label>
         <span class="dir-pick">
           <input type="text" id="setBgImg" class="text-in" placeholder="none — URL or file" value="${esc(s.bgImage)}">
-          <button id="setBgPick" class="btn-line sm" title="Pick an image">🖼️</button>
-          <button id="setBgClear" class="btn-line sm" title="Remove background">✕</button>
+          <button id="setBgPick" class="btn-line sm" title="Pick an image">${ic(IC.image)}</button>
+          <button id="setBgClear" class="btn-line sm" title="Remove background">${IC.x}</button>
         </span></div>
       <div class="set-row"><label>Background blur</label><input type="range" id="setBgBlur" min="0" max="40" value="${s.bgBlur}"></div>
       <div class="set-row"><label>Background darkness</label><input type="range" id="setBgDim" min="0" max="90" value="${s.bgDim}"></div>
@@ -1832,14 +1872,14 @@ function openSettings() {
       <div class="set-row"><label>yt-dlp binary</label>
         <span class="dir-pick">
           <input type="text" id="setYtPath" class="text-in" placeholder="auto-detect" value="${esc(s.ytdlpPath)}">
-          <button id="setYtPick" class="btn-line sm" title="Pick the binary">🗂️</button>
+          <button id="setYtPick" class="btn-line sm" title="Pick the binary">${ic(IC.folder)}</button>
           <button id="setYtTest" class="btn-line sm" title="Test">Test</button>
-          <button id="setYtInstall" class="btn-line sm" title="Download yt-dlp automatically">⬇ Install</button>
+          <button id="setYtInstall" class="btn-line sm" title="Download yt-dlp automatically">${ic(IC.upload)}Install</button>
         </span></div>
       <div class="set-hint" id="setYtStatus">Empty = auto-detect (PATH, Desktop folders, external drives, linuxbrew). Missing? Click <b>Install</b> to download it.</div>
       <div class="set-row"><label>Cookies from browser</label>
         <select id="setCookies" class="sel sm-sel wide">${["", "firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"].map(b => `<option value="${b}" ${s.cookiesBrowser === b ? "selected" : ""}>${b || "None"}</option>`).join("")}</select></div>
-      <div class="set-hint">⚠ A logged-in YouTube session often gets blocked (“format not available”) — keep <b>None</b> unless needed. Failed calls retry without cookies automatically.</div>
+      <div class="set-hint">A logged-in YouTube session often gets blocked (“format not available”) — keep <b>None</b> unless needed. Failed calls retry without cookies automatically.</div>
       <div class="set-row"><label>Search results</label>
         <select id="setLimit" class="sel sm-sel">${[10, 20, 30, 50, 75, 100].map(n => `<option value="${n}" ${Number(s.searchLimit) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="set-row"><label>Prefer local file when downloaded</label><input type="checkbox" id="setPrefLocal" ${s.preferLocal ? "checked" : ""}></div>
@@ -1852,10 +1892,10 @@ function openSettings() {
       <div class="set-row"><label>Download folder</label>
         <span class="dir-pick">
           <input type="text" id="setDlDir" class="text-in" placeholder="~/Music/MusicPlayer" value="${esc(s.downloadDir)}">
-          <button id="setDlPick" class="btn-line sm" title="Choose a folder (any disk)">📂</button>
+          <button id="setDlPick" class="btn-line sm" title="Choose a folder (any disk)">${ic(IC.folder)}</button>
         </span></div>
       <div class="set-row"><label>Tick “Save locally” by default when importing</label><input type="checkbox" id="setAutoSave" ${s.autoSaveImports ? "checked" : ""}></div>
-      <div class="set-hint">Where “📥 Download locally” saves mp3 files (via yt-dlp). Pick any folder on any disk with the folder picker. Empty = <b>~/Music/MusicPlayer</b>. The folder is added as a source automatically after a download.</div>
+      <div class="set-hint">Where “Download locally” saves mp3 files (via yt-dlp). Pick any folder on any disk with the folder picker. Empty = <b>~/Music/MusicPlayer</b>. The folder is added as a source automatically after a download.</div>
     </div>
     <div class="set-group"><div class="set-title">Notifications</div>
       <div class="set-row"><label>Desktop notification on track change</label><input type="checkbox" id="setNotify" ${s.notifyOnChange ? "checked" : ""}></div>
@@ -1875,8 +1915,8 @@ function openSettings() {
           <option value="24h" ${s.followInterval === "24h" ? "selected" : ""}>Every day</option>
         </select></div>
       <div id="setFollowList"></div>
-      <div class="set-row"><label></label><button id="setFollowCheck" class="btn-line sm">🔁 Check all now</button></div>
-      <div class="set-hint">Follow a playlist from <b>🔗 Import from URL…</b> (tick “🔁 Follow”). New upstream tracks land in the linked playlist; with ⬇ they are also downloaded to the library. Checks also run on launch.</div>
+      <div class="set-row"><label></label><button id="setFollowCheck" class="btn-line sm">${ic(IC.repeat)}Check all now</button></div>
+      <div class="set-hint">Follow a playlist from <b>Import from URL…</b> (tick “Follow”). New upstream tracks land in the linked playlist; with the download option they are also downloaded to the library. Checks also run on launch.</div>
     </div>
     <div class="set-group"><div class="set-title">Updates</div>
       <div class="set-row"><label>When a new version is available</label>
@@ -1927,16 +1967,16 @@ function openSettings() {
   const ytStatus = (msg, ok) => { const el = $("#setYtStatus"); el.textContent = msg; el.style.color = ok ? "#34d399" : (ok === false ? "#f59e0b" : ""); };
   const ytTest = async () => {
     ytStatus("Testing…");
-    try { ytStatus(`✔ ${await ytConfigPush()}`, true); }
-    catch (e) { ytStatus(`✘ ${e}`, false); }
+    try { ytStatus(`${await ytConfigPush()}`, true); }
+    catch (e) { ytStatus(`${e}`, false); }
   };
   $("#setYtPath").addEventListener("change", e => { SETTINGS.setSetting("ytdlpPath", e.target.value.trim()); ytTest(); });
   $("#setYtTest").addEventListener("click", ytTest);
   $("#setYtInstall").addEventListener("click", async () => {
     const btn = $("#setYtInstall"); btn.disabled = true;
     ytStatus("Downloading yt-dlp… (this can take a moment)");
-    try { const r = await ytInstall(); $("#setYtPath").value = ""; ytStatus(`✔ Installed: ${r}`, true); flash("yt-dlp installed"); }
-    catch (e) { ytStatus(`✘ ${e}`, false); }
+    try { const r = await ytInstall(); $("#setYtPath").value = ""; ytStatus(`Installed: ${r}`, true); flash("yt-dlp installed"); }
+    catch (e) { ytStatus(`${e}`, false); }
     finally { btn.disabled = false; }
   });
   $("#setYtPick").addEventListener("click", async () => {
@@ -2021,7 +2061,7 @@ async function checkFollow(f, manual = false) {
   await saveOnline();
   renderPlaylists(); refreshView();
   if (f.autoDownload) downloadTracks(fresh.map(t => t.path));
-  flash(`🔁 ${fresh.length} new track${fresh.length === 1 ? "" : "s"} from “${f.title}”${pl ? ` → “${pl.name}”` : ""}${f.autoDownload ? " · downloading" : ""}`);
+  flash(`${fresh.length} new track${fresh.length === 1 ? "" : "s"} from “${f.title}”${pl ? ` → “${pl.name}”` : ""}${f.autoDownload ? " · downloading" : ""}`);
   return fresh.length;
 }
 
@@ -2039,7 +2079,7 @@ async function checkFollows(manual = false, respectDue = false) {
       await sleep(1500); // pacing between yt-dlp calls
     }
     saveFollows();
-    if (manual) flash(!ran ? "No followed playlists to check" : total ? `🔁 ${total} new track${total === 1 ? "" : "s"} added` : "Follows are up to date");
+    if (manual) flash(!ran ? "No followed playlists to check" : total ? `${total} new track${total === 1 ? "" : "s"} added` : "Follows are up to date");
   } finally { _followsBusy = false; }
 }
 
@@ -2057,7 +2097,7 @@ async function checkUpdate(manual = false) {
     availableVersion = src;
     if (S().updateMode === "auto" && !manual) { runUpdate(); return; }
     btn.hidden = false;
-    btn.textContent = `⬆ Update to v${src}`;
+    btn.textContent = `Update to v${src}`;
     if (manual) flash(`Update available: v${cur} → v${src}`);
   } else {
     availableVersion = "";
@@ -2069,15 +2109,15 @@ async function runUpdate() {
   if (updateBusy || !IS_NATIVE) return;
   updateBusy = true;
   const btn = $("#updateBtn");
-  btn.hidden = false; btn.disabled = true; btn.textContent = "⏳ Building update…";
+  btn.hidden = false; btn.disabled = true; btn.textContent = "Building update…";
   try {
     await invoke("self_update");
     updateReady = true;
-    btn.textContent = `✅ v${availableVersion} ready — click to restart`;
+    btn.textContent = `v${availableVersion} ready — click to restart`;
     flash(`Update v${availableVersion} built — click the button to restart`);
     notifyTrack({ title: "Music Player update ready", artist: `Click the update button to restart into v${availableVersion}`, album: "" });
   } catch (e) {
-    btn.textContent = "⚠ Update failed — retry";
+    btn.textContent = "Update failed — retry";
     btn.disabled = false; updateBusy = false;
     console.error("[update]", e);
     flash("Update failed — see console/log");
@@ -2147,7 +2187,7 @@ async function ytInstall() {
 }
 function setupStep(n) {
   document.querySelectorAll("#setupModal .setup-step").forEach(el => el.hidden = el.dataset.step !== String(n));
-  $("#setupTitle").textContent = n === 0 ? "Welcome 🎧" : "Setup";
+  $("#setupTitle").textContent = n === 0 ? "Welcome" : "Setup";
 }
 async function setupDetect() {
   const st = $("#suYtStatus");
@@ -2156,9 +2196,9 @@ async function setupDetect() {
   st.className = "setup-status"; st.textContent = "Setting up yt-dlp (downloading if needed)…";
   try {
     const r = await ytConfigPush();
-    st.classList.add("ok"); st.textContent = `✔ Ready: ${r}`;
+    st.classList.add("ok"); st.textContent = `Ready: ${r}`;
   } catch (e) {
-    st.classList.add("bad"); st.textContent = `✘ ${e}`;
+    st.classList.add("bad"); st.textContent = `${e}`;
   }
 }
 function finishSetup() {
@@ -2228,8 +2268,8 @@ function renderFollowList() {
         ${pls.map(p => `<option value="${p.id}" ${f.playlistId === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}
         ${pls.some(p => p.id === f.playlistId) ? "" : `<option value="" selected>(playlist deleted)</option>`}
       </select>
-      <label class="fl-dl" title="Auto-download new tracks to the library"><input type="checkbox" data-fl-dl="${f.id}" ${f.autoDownload ? "checked" : ""}> ⬇</label>
-      <button class="fl-x" data-fl-x="${f.id}" title="Unfollow">✕</button>
+      <label class="fl-dl" title="Auto-download new tracks to the library"><input type="checkbox" data-fl-dl="${f.id}" ${f.autoDownload ? "checked" : ""}> ${ic(IC.save)}</label>
+      <button class="fl-x" data-fl-x="${f.id}" title="Unfollow">${IC.x}</button>
     </div>`).join("");
   const byId = (id) => follows.find(f => f.id === id);
   host.querySelectorAll("[data-fl-on]").forEach(el => el.addEventListener("change", e => { const f = byId(el.dataset.flOn); if (f) { f.enabled = e.target.checked; saveFollows(); renderPlaylists(); } }));
