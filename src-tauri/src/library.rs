@@ -89,6 +89,31 @@ pub async fn delete_file(path: String) -> Result<(), String> {
     std::fs::remove_file(p).map_err(|e| e.to_string())
 }
 
+/// Reveal a path in the host file manager. For a file we open its containing
+/// folder (so it works for both source folders and individual tracks). The app
+/// runs inside a distrobox container whose `xdg-open` forwards to the host; if
+/// that isn't wired, fall back to `distrobox-host-exec xdg-open`.
+#[tauri::command]
+pub fn open_path(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    let target = if p.is_dir() {
+        path.clone()
+    } else {
+        p.parent()
+            .map(|d| d.to_string_lossy().into_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| path.clone())
+    };
+    if std::process::Command::new("xdg-open").arg(&target).spawn().is_ok() {
+        return Ok(());
+    }
+    std::process::Command::new("distrobox-host-exec")
+        .args(["xdg-open", target.as_str()])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("cannot open file manager: {e}"))
+}
+
 /// Local image file → data URL (custom app backgrounds). Kept off the UI thread.
 #[tauri::command]
 pub async fn read_image(path: String) -> Result<String, String> {

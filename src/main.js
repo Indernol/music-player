@@ -405,6 +405,7 @@ function openContextMenu(x, y) {
   menu.innerHTML =
     `<div class="ctx-item" data-play="1">▶ Play</div>` +
     (nOnline ? `<div class="ctx-item" data-dl="1">📥 Download ${nOnline > 1 ? nOnline + " tracks" : "track"} locally</div>` : "") +
+    (paths.length === 1 && localFileFor(paths[0]) ? `<div class="ctx-item" data-reveal="1">📂 Open file location</div>` : "") +
     // ── removal / deletion ──
     ((inPlaylist || nLocal) ? `<div class="ctx-sep"></div>` : "") +
     (inPlaylist ? `<div class="ctx-item" data-rm="pl">➖ Remove from this playlist</div>` : "") +
@@ -417,6 +418,7 @@ function openContextMenu(x, y) {
   placeCtx(menu, x, y);
   menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline)); closeCtx(); });
   menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playFrom(i); closeCtx(); });
+  menu.querySelector("[data-reveal]")?.addEventListener("click", () => { revealPath(localFileFor(paths[0])); closeCtx(); });
 
   menu.querySelector('[data-rm="pl"]')?.addEventListener("click", () => {
     closeCtx();
@@ -513,11 +515,19 @@ function openPlaylistCtx(x, y, id) {
   }));
 }
 
+// Open a folder (or a file's containing folder) in the host file manager.
+async function revealPath(path) {
+  if (!IS_NATIVE) { flash("Available only in the app"); return; }
+  if (!path) return;
+  try { await invoke("open_path", { path }); }
+  catch (e) { flash(`Could not open location: ${e}`); }
+}
 // Right-click menu for a source folder.
 function openSourceCtx(x, y, folder) {
   const menu = $("#ctxMenu");
   menu.innerHTML =
     `<div class="ctx-item" data-a="open">🗂️ Open</div>` +
+    `<div class="ctx-item" data-a="reveal">📂 Open folder location</div>` +
     `<div class="ctx-item" data-a="refresh">⟳ Check for new songs</div>` +
     `<div class="ctx-sep"></div>` +
     `<div class="ctx-item ctx-danger" data-a="remove">✕ Remove source</div>`;
@@ -526,6 +536,7 @@ function openSourceCtx(x, y, folder) {
     const a = it.dataset.a;
     closeCtx();
     if (a === "open") openSource(folder);
+    else if (a === "reveal") revealPath(folder);
     else if (a === "refresh") rescanFolder(folder);
     else if (a === "remove") removeSource(folder);
   }));
