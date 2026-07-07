@@ -876,11 +876,12 @@ async function prev() {
 let _posTick = 0;
 function startPolling() {
   setInterval(async () => {
-    if (curIndex < 0) return;
-    if (!seeking && playing) {
+    // Paused or idle: nothing can change on its own — poll nothing (CPU).
+    if (curIndex < 0 || !playing) return;
+    if (!seeking && !document.hidden) {
       const p = wallPos(); $("#seek").value = p; $("#curTime").textContent = fmtDur(p);
-      if (++_posTick % 4 === 0) mediaPlayback(); // ~1.2s: keep the desktop widget's position fresh
     }
+    if (++_posTick % 4 === 0) mediaPlayback(); // ~1.2s: keep the desktop widget's position fresh
     const st = await invoke("status"); if (!st) return;
     if ((st.epoch || 0) !== curEpoch) return; // stale: previous sink still up while a play/stream starts
     const queued = st.queued || 0;
@@ -1536,6 +1537,9 @@ async function init() {
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#settingsClose").addEventListener("click", () => $("#settingsModal").hidden = true);
   $("#settingsModal").addEventListener("click", e => { if (e.target.id === "settingsModal") $("#settingsModal").hidden = true; });
+
+  window.addEventListener("blur", () => document.body.classList.add("win-blur"));
+  window.addEventListener("focus", () => document.body.classList.remove("win-blur"));
 
   document.addEventListener("click", e => { if (!e.target.closest("#ctxMenu") && e.target.dataset.more === undefined) closeCtx(); });
   document.addEventListener("scroll", closeCtx, true);

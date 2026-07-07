@@ -106,6 +106,22 @@ input[type="checkbox"]:checked::after {
   transform: rotate(-45deg);
 }
 input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+
+/* ─── Custom range sliders (volume, seek, settings) — no native rendering ─── */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  background: transparent; height: 16px; cursor: pointer; padding: 0;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px; background: var(--bg-4);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; border-radius: 50%; margin-top: -4px;
+  background: var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+  transition: transform .1s;
+}
+input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); background: var(--accent-2); }
 .btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 9px 12px; font-weight: 700; cursor: pointer; font-size: 13px; transition: filter .12s; }
 .btn:hover { filter: brightness(1.1); }
 .btn-block { width: 100%; }
@@ -114,7 +130,7 @@ input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent-2); outli
 
 /* ─── Main ─── */
 .main { background: linear-gradient(180deg, rgba(139,92,246,0.08), var(--bg-1) 220px); border-radius: var(--r); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.topbar { padding: 16px 22px; display: flex; gap: 14px; align-items: center; }
+.topbar { padding: 16px 22px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; row-gap: 8px; }
 .search-wrap { position: relative; flex: 1; max-width: 440px; }
 .search-ico { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); font-size: 13px; opacity: .6; pointer-events: none; }
 .search-wrap input { width: 100%; padding-left: 32px; }
@@ -233,26 +249,16 @@ body::before {
 }
 body.has-bg::before { display: block; }
 body.has-bg { background: #000; }
-/* Frosted-glass panels: backdrop blur keeps text readable whatever is behind. */
+/* NOTE: no backdrop-filter here on purpose — WebKitGTK often runs without GPU
+   accel (software rendering) and live blur burns the CPU. The wallpaper layer
+   above is blurred ONCE (static), and panels are tinted; drawers/menus float
+   over translucent panels so they stay near-opaque to remain readable. */
 body.has-bg .sidebar,
 body.has-bg .player,
-body.has-bg .main {
-  background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100));
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-/* Drawers float OVER already-translucent panels: extra opacity + stronger blur
-   so the content underneath never bleeds through. */
+body.has-bg .main { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100)); }
 body.has-bg .dl-drawer,
-body.has-bg .np-drawer {
-  background: rgba(8, 8, 12, calc((var(--panel-alpha, 85) + 12) / 100));
-  backdrop-filter: blur(28px) saturate(1.1);
-  -webkit-backdrop-filter: blur(28px) saturate(1.1);
-}
-body.has-bg .modal, body.has-bg .ctx-menu {
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
+body.has-bg .np-drawer { background: rgba(10, 10, 15, .97); }
+body.has-bg .ctx-menu, body.has-bg .modal { background: rgb(18, 18, 24); }
 
 /* ─── Now Playing panel (big art + up next) ─── */
 .np-drawer {
@@ -316,9 +322,9 @@ body.has-bg .modal, body.has-bg .ctx-menu {
 .pl-row.active { background: var(--bg-3); color: var(--tx-1); }
 
 /* ─── View header ─── */
-.view-head { display: flex; align-items: center; gap: 16px; padding: 4px 24px 14px; }
-.vh-actions { margin-left: auto; flex-shrink: 0; }
-.vh-actions .btn-line.sm { font-size: 12px; padding: 8px 14px; }
+.view-head { display: flex; align-items: center; gap: 14px; row-gap: 8px; padding: 4px 24px 14px; flex-wrap: wrap; }
+.vh-actions { margin-left: auto; flex-shrink: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.vh-actions .btn-line.sm { font-size: 12px; padding: 8px 14px; width: auto; }
 .vh-icon { width: 76px; height: 76px; border-radius: 12px; display: grid; place-items: center; font-size: 34px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 24px rgba(0,0,0,.35); flex-shrink: 0; }
 .vh-title { font-size: 30px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.1; }
 .vh-sub { font-size: 12px; color: var(--tx-2); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
@@ -391,20 +397,21 @@ select.sel.sm-sel.wide { width: 130px; }
 
 /* ─── Downloads: edge badge + opt-in side drawer ─── */
 .dl-toggle {
-  position: fixed; right: 16px; bottom: 112px; z-index: 78;
-  display: flex; align-items: center; gap: 7px;
-  background: var(--bg-2); border: 1px solid var(--bd-2); color: var(--tx-1);
-  border-radius: 999px; padding: 9px 14px; font-size: 12px; font-weight: 700;
-  cursor: pointer; box-shadow: 0 8px 22px rgba(0, 0, 0, .45);
-  transition: border-color .12s, transform .1s;
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg-3); border: 1px solid var(--bd-2); color: var(--tx-1);
+  border-radius: 999px; padding: 6px 12px; font-size: 11px; font-weight: 700;
+  cursor: pointer; margin-right: 6px; flex-shrink: 0;
+  transition: border-color .12s;
 }
-.dl-toggle:hover { border-color: var(--accent); transform: translateY(-1px); }
+.dl-toggle:hover { border-color: var(--accent); }
 .dl-toggle.busy::before {
   content: ""; width: 7px; height: 7px; border-radius: 50%;
   background: var(--accent-2); animation: dlpulse 1.2s ease-in-out infinite;
 }
 @keyframes dlpulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 body.no-anim .dl-toggle.busy::before { animation: none; }
+/* Save CPU when the window isn't focused: freeze cosmetic animations. */
+body.win-blur .eq i, body.win-blur .dl-toggle.busy::before { animation-play-state: paused; }
 .dl-drawer {
   position: fixed; top: 10px; right: 10px; bottom: 118px; z-index: 79;
   width: min(400px, 92vw);
