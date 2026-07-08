@@ -162,8 +162,11 @@ async fn self_update(app: tauri::AppHandle) -> Result<String, String> {
     let dir = source_dir()?;
     let mut child = std::process::Command::new("bash")
         .arg("-lc")
+        // `touch tauri.conf.json` forces Tauri's build script to re-run so the
+        // frontend (src/) is re-embedded — cargo alone doesn't watch it, so a
+        // pure HTML/JS/CSS change would otherwise never make it into the binary.
         .arg(format!(
-            "export PATH=\"$HOME/.cargo/bin:$PATH\"; cd '{}' && cargo build 2>&1",
+            "export PATH=\"$HOME/.cargo/bin:$PATH\"; cd '{}' && touch tauri.conf.json && cargo build 2>&1",
             dir.display()
         ))
         .stdout(std::process::Stdio::piped())
@@ -190,6 +193,11 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // "Launch at login" toggle (Settings → System). No autostart args needed.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(AppState {
             audio: AudioController::new(),
         })

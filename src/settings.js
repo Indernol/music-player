@@ -41,6 +41,7 @@ const DEFAULTS = {
   searchLimit: 20,       // YouTube search result count
   ytdlpPath: "",         // explicit yt-dlp binary; empty = auto-detect
   cookiesBrowser: "",    // --cookies-from-browser value; empty = off
+  startOnBoot: false,    // launch the app automatically at login (OS autostart; source of truth is the autostart plugin)
   setupDone: false,      // first-run wizard completed
   updateMode: "ask",     // ask (propose) | auto (build silently) | off
   followInterval: "6h",  // follow checks: launch (startup only) | 1h | 6h | 24h

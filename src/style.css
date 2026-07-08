@@ -206,13 +206,24 @@ body.has-bg select.sel { background: rgba(255,255,255,.08); border-color: rgba(2
 body.bg-light.has-bg input[type="search"],
 body.bg-light.has-bg input[type="text"],
 body.bg-light.has-bg select.sel { background: rgba(0,0,0,.05); }
-/* Keep header text readable over any wallpaper without darkening the whole panel. */
+/* Readability safety net: with translucent panels a wallpaper always bleeds
+   through, so the scheme alone can't guarantee contrast. Give every panel text
+   a subtle halo in the OPPOSITE tone — a dark glow behind light text, a light
+   glow behind dark text — so labels stay legible over any background, including
+   contrasty ones where bright and dark regions show through at once. */
+body.has-bg .sidebar,
+body.has-bg .main,
+body.has-bg .player { text-shadow: 0 1px 3px rgba(0,0,0,.6), 0 0 2px rgba(0,0,0,.45); }
+body.bg-light.has-bg .sidebar,
+body.bg-light.has-bg .main,
+body.bg-light.has-bg .player { text-shadow: 0 1px 3px rgba(255,255,255,.7), 0 0 2px rgba(255,255,255,.55); }
+/* Slightly stronger halo on the big header title. */
 body.has-bg .vh-title,
 body.has-bg .vh-sub,
-body.has-bg .count { text-shadow: 0 1px 10px rgba(0,0,0,.55); }
+body.has-bg .count { text-shadow: 0 1px 10px rgba(0,0,0,.6), 0 0 3px rgba(0,0,0,.5); }
 body.bg-light.has-bg .vh-title,
 body.bg-light.has-bg .vh-sub,
-body.bg-light.has-bg .count { text-shadow: 0 1px 8px rgba(255,255,255,.6); }
+body.bg-light.has-bg .count { text-shadow: 0 1px 8px rgba(255,255,255,.7), 0 0 3px rgba(255,255,255,.55); }
 
 .tracklist { flex: 1; overflow-y: auto; padding: 4px 12px 16px; }
 .empty { color: var(--tx-3); text-align: center; padding: 60px 20px; }
@@ -299,6 +310,26 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--bd); background: inherit; flex-shrink: 0; }
 .modal-head h2 { font-size: 17px; }
 .modal-body { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
+/* Settings: tabbed two-pane layout (nav sidebar + scrolling panes) */
+.modal.settings { width: min(760px, 95vw); }
+.modal.settings .modal-body { flex-direction: row; padding: 0; gap: 0; overflow: hidden; }
+.set-nav { flex: 0 0 178px; display: flex; flex-direction: column; gap: 2px; padding: 12px 10px; border-right: 1px solid var(--bd); overflow-y: auto; background: rgba(255, 255, 255, .015); }
+body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
+.set-tab { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 11px; border: 0; border-radius: 9px; background: transparent; color: var(--tx-2); font-size: 13px; font-weight: 600; cursor: pointer; transition: background .13s, color .13s; }
+.set-tab .bic { color: var(--tx-3); transition: color .13s; display: inline-flex; }
+.set-tab:hover { background: rgba(255, 255, 255, .05); color: var(--tx-1); }
+.set-tab:hover .bic { color: var(--tx-2); }
+.set-tab.on { background: rgba(255, 255, 255, .06); color: var(--accent-2); box-shadow: inset 2px 0 0 var(--accent); }
+.set-tab.on .bic { color: var(--accent); }
+.set-panes { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.set-pane { display: none; flex-direction: column; gap: 12px; }
+.set-pane.on { display: flex; }
+@media (max-width: 640px) {
+  .modal.settings .modal-body { flex-direction: column; }
+  .set-nav { flex: 0 0 auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--bd); }
+  .set-tab { width: auto; white-space: nowrap; }
+  .set-tab.on { box-shadow: inset 0 -2px 0 var(--accent); }
+}
 /* Settings groups as cards */
 .set-group { padding: 13px 16px 10px; border: 1px solid var(--bd); border-radius: 12px; background: rgba(255, 255, 255, .025); }
 body.bg-light.has-bg .set-group { background: rgba(0, 0, 0, .03); }

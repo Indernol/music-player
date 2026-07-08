@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.12.2"
+version = "0.13.0"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -12,6 +12,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+# "Launch at login": registers/removes an OS autostart entry (Linux .desktop in
+# ~/.config/autostart, Windows registry run-key, macOS LaunchAgent). Driven from
+# Settings → System via plugin:autostart|{enable,disable,is_enabled}.
+tauri-plugin-autostart = "2"
 discord-rich-presence = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

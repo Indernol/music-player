@@ -1772,13 +1772,27 @@ async function applyTheme() {
   }
   root.setProperty("--app-bg-image", src ? `url("${src}")` : "none");
   document.body.classList.toggle("has-bg", !!src);
-  // Text/panel scheme on top of the wallpaper: auto-detect its brightness
-  // (data-URL images are sampled; http images fall back to dark) or forced.
+  // Text/panel scheme on top of the wallpaper. "light" here = light SCHEME =
+  // dark text (used only when the background actually reads bright). Manual
+  // modes force it; "auto" samples the image but must judge what the eye truly
+  // sees BEHIND the text — i.e. the wallpaper after the dim overlay AND under
+  // the translucent panels — not the raw pixels (that was the old bug: a mid
+  // pink averaged near the threshold while the dimmed/paneled result was dark).
   let light = false;
   if (src) {
-    if (s.bgTextMode === "light") light = false;
-    else if (s.bgTextMode === "dark") light = true; // dark TEXT => light scheme
-    else light = (await probeLuma(src)) > 0.55;
+    if (s.bgTextMode === "light") light = false;      // light text (dark scheme)
+    else if (s.bgTextMode === "dark") light = true;   // dark text (light scheme)
+    else {
+      // Effective luminance the eye sees behind panel text: the dark panel
+      // (#0a0a0f ≈ 0.04) drawn at panel-alpha over the wallpaper, which the dim
+      // overlay has already darkened (brightness = 1 − dim). Sampling the raw
+      // image ignored both and mis-picked the scheme on mid-tone wallpapers.
+      const raw = await probeLuma(src);
+      const dim = Math.min(1, Math.max(0, (s.bgDim ?? 45) / 100));
+      const alpha = Math.min(1, Math.max(0, (s.panelAlpha ?? 85) / 100));
+      const eff = alpha * 0.04 + (1 - alpha) * (raw * (1 - dim));
+      light = eff > 0.5;
+    }
   }
   document.body.classList.toggle("bg-light", !!src && light);
 }
@@ -1820,6 +1834,18 @@ function applySettings() {
 function openSettings() {
   const s = S();
   $("#settingsBody").innerHTML = `
+    <nav class="set-nav">
+      <button class="set-tab on" data-tab="appearance">${ic(IC.image)}<span>Appearance</span></button>
+      <button class="set-tab" data-tab="interface">${ic(IC.list)}<span>Interface</span></button>
+      <button class="set-tab" data-tab="playback">${ic(IC.play)}<span>Playback</span></button>
+      <button class="set-tab" data-tab="youtube">${ic(IC.globe)}<span>YouTube</span></button>
+      <button class="set-tab" data-tab="downloads">${ic(IC.dl)}<span>Downloads</span></button>
+      <button class="set-tab" data-tab="integrations">${ic(IC.radio)}<span>Integrations</span></button>
+      <button class="set-tab" data-tab="library">${ic(IC.note)}<span>Library</span></button>
+      <button class="set-tab" data-tab="system">${ic(IC.gear)}<span>System</span></button>
+    </nav>
+    <div class="set-panes">
+    <section class="set-pane on" data-pane="appearance">
     <div class="set-group"><div class="set-title">Theme</div>
       <div class="set-row"><label>Theme</label>
         <select id="setTheme" class="sel sm-sel wide">${Object.keys(SETTINGS.THEMES).map(k => `<option value="${k}" ${s.theme === k ? "selected" : ""}>${k[0].toUpperCase() + k.slice(1)}</option>`).join("")}<option value="custom" ${s.theme === "custom" ? "selected" : ""}>Custom</option></select></div>
@@ -1850,6 +1876,8 @@ function openSettings() {
       <div class="set-row"><label>Panel opacity</label><input type="range" id="setPanelA" min="35" max="100" value="${s.panelAlpha}"></div>
       <div class="set-hint">Blur / darkness / opacity apply live when a background image is set — mix them with any theme + accent.</div>
     </div>
+    </section>
+    <section class="set-pane" data-pane="interface">
     <div class="set-group"><div class="set-title">Interface</div>
       <div class="set-row"><label>Sources section</label><input type="checkbox" id="setUiSources" ${s.uiSources ? "checked" : ""}></div>
       <div class="set-row"><label>“Add folder” buttons</label><input type="checkbox" id="setUiSrcBtns" ${s.uiSrcButtons ? "checked" : ""}></div>
@@ -1867,12 +1895,16 @@ function openSettings() {
       <div class="set-row"><label>Compact rows (denser lists)</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
       <div class="set-row"><label>Preload next track (gapless)</label><input type="checkbox" id="setPreload" ${s.preloadNext ? "checked" : ""}></div>
     </div>
+    </section>
+    <section class="set-pane" data-pane="playback">
     <div class="set-group"><div class="set-title">Playback</div>
       <div class="set-row"><label>Default volume</label><input type="range" id="setVol" min="0" max="100" value="${s.defaultVolume}"></div>
       <div class="set-row"><label>Keep all tracks at the same volume</label><input type="checkbox" id="setNorm" ${s.normalizeDefault ? "checked" : ""}></div>
       <div class="set-hint">Automatic gain control evens out quiet/loud tracks (works for streams and YouTube mp3s without tags). Applies from the next track.</div>
       <div class="set-row"><label>Shuffle by default</label><input type="checkbox" id="setShuf" ${s.shuffleDefault ? "checked" : ""}></div>
     </div>
+    </section>
+    <section class="set-pane" data-pane="youtube">
     <div class="set-group"><div class="set-title">YouTube</div>
       <div class="set-row"><label>yt-dlp binary</label>
         <span class="dir-pick">
@@ -1893,6 +1925,8 @@ function openSettings() {
       <div class="set-hint">Premium-only / deleted / private videos are never re-attempted. “Forget” lets them be tried once again.</div>
       <div class="set-row"><label>First-run setup</label><button id="setRerun" class="btn-line sm">Run again…</button></div>
     </div>
+    </section>
+    <section class="set-pane" data-pane="downloads">
     <div class="set-group"><div class="set-title">Downloads</div>
       <div class="set-row"><label>Download folder</label>
         <span class="dir-pick">
@@ -1902,6 +1936,8 @@ function openSettings() {
       <div class="set-row"><label>Tick “Save locally” by default when importing</label><input type="checkbox" id="setAutoSave" ${s.autoSaveImports ? "checked" : ""}></div>
       <div class="set-hint">Where “Download locally” saves mp3 files (via yt-dlp). Pick any folder on any disk with the folder picker. Empty = <b>~/Music/MusicPlayer</b>. The folder is added as a source automatically after a download.</div>
     </div>
+    </section>
+    <section class="set-pane" data-pane="integrations">
     <div class="set-group"><div class="set-title">Notifications</div>
       <div class="set-row"><label>Desktop notification on track change</label><input type="checkbox" id="setNotify" ${s.notifyOnChange ? "checked" : ""}></div>
       <div class="set-hint">Tip: your desktop's media widget already shows the track (MPRIS) — turn this off if you see two popups.</div>
@@ -1911,6 +1947,8 @@ function openSettings() {
       <div class="set-row"><label>Discord Application ID</label><input type="text" id="setRpcId" class="text-in" placeholder="Discord app client id" value="${esc(s.rpcClientId)}"></div>
       <div class="set-hint">Create an app at <b>discord.com/developers</b> → copy its <b>Application ID</b>. Requires the Discord desktop app running.</div>
     </div>
+    </section>
+    <section class="set-pane" data-pane="library">
     <div class="set-group"><div class="set-title">Followed playlists</div>
       <div class="set-row"><label>Check for new tracks</label>
         <select id="setFollowIv" class="sel sm-sel wide">
@@ -1922,6 +1960,12 @@ function openSettings() {
       <div id="setFollowList"></div>
       <div class="set-row"><label></label><button id="setFollowCheck" class="btn-line sm">${ic(IC.repeat)}Check all now</button></div>
       <div class="set-hint">Follow a playlist from <b>Import from URL…</b> (tick “Follow”). New upstream tracks land in the linked playlist; with the download option they are also downloaded to the library. Checks also run on launch.</div>
+    </div>
+    </section>
+    <section class="set-pane" data-pane="system">
+    <div class="set-group"><div class="set-title">Startup</div>
+      <div class="set-row"><label>Launch at login</label><input type="checkbox" id="setBoot" ${s.startOnBoot ? "checked" : ""} ${IS_NATIVE ? "" : "disabled"}></div>
+      <div class="set-hint">Start Music Player automatically when you sign in. On Linux this adds a desktop entry to your autostart folder; on Windows/macOS it registers a login item.${IS_NATIVE ? "" : " <b>Needs the native app.</b>"}</div>
     </div>
     <div class="set-group"><div class="set-title">Updates</div>
       <div class="set-row"><label>When a new version is available</label>
@@ -1937,8 +1981,38 @@ function openSettings() {
         </span></div>
       <div class="set-hint">The app is built from the local source tree (mirrored on the private GitHub repo). “Update” rebuilds it, then click again to restart.</div>
     </div>
-    <div class="set-actions"><button id="setReset" class="btn-line">↺ Reset to defaults</button></div>`;
+    <div class="set-actions"><button id="setReset" class="btn-line">↺ Reset to defaults</button></div>
+    </section>
+    </div>`;
   const body = $("#settingsBody");
+  // Tab navigation: show one category pane at a time (all IDs stay in the DOM so
+  // every field handler below still binds regardless of the active tab).
+  body.querySelectorAll(".set-tab").forEach(tab => tab.addEventListener("click", () => {
+    const name = tab.dataset.tab;
+    body.querySelectorAll(".set-tab").forEach(x => x.classList.toggle("on", x === tab));
+    body.querySelectorAll(".set-pane").forEach(p => p.classList.toggle("on", p.dataset.pane === name));
+    body.querySelector(".set-panes").scrollTop = 0;
+  }));
+  // "Launch at login": the autostart plugin owns the real OS state — reflect it
+  // on open, and flip it (with rollback on failure) when the box is toggled.
+  if (IS_NATIVE) {
+    T.core.invoke("plugin:autostart|is_enabled").then(on => {
+      const el = $("#setBoot"); if (el) el.checked = !!on;
+      if (!!on !== S().startOnBoot) SETTINGS.setSetting("startOnBoot", !!on);
+    }).catch(e => console.error("[autostart] is_enabled", e));
+    $("#setBoot").addEventListener("change", async e => {
+      const on = e.target.checked;
+      try {
+        await T.core.invoke(on ? "plugin:autostart|enable" : "plugin:autostart|disable");
+        SETTINGS.setSetting("startOnBoot", on);
+        flash(on ? "Music Player will launch at login" : "Launch at login disabled");
+      } catch (err) {
+        console.error("[autostart]", err);
+        e.target.checked = !on;
+        flash("Couldn't change the startup setting");
+      }
+    });
+  }
   body.querySelectorAll("[data-accent]").forEach(b => b.addEventListener("click", () => { SETTINGS.setSetting("accent", b.dataset.accent); applyAccent(); body.querySelectorAll(".swatch").forEach(x => x.classList.toggle("on", x === b)); }));
   $("#setTheme").addEventListener("change", e => { SETTINGS.setSetting("theme", e.target.value); applyTheme(); });
   for (const [id, key] of [["setCustBg", "customBg"], ["setCustPanel", "customPanel"], ["setCustText", "customText"]]) {
