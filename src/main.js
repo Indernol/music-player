@@ -764,7 +764,7 @@ function openPlaylist(id) {
   const nOnline = pl.paths.filter(isOnline).length;
   const fw = followFor(id);
   setViewHead({
-    icon: IC.note, title: pl.name, subtitle: `${pl.paths.length} songs${nOnline ? ` · ${nOnline} online` : ""}${fw ? ` · ${ic(IC.repeat)} followed` : ""}`,
+    icon: IC.note, title: pl.name, subtitle: `${pl.paths.length} songs${nOnline ? ` · ${nOnline} online` : ""}${fw ? ` · ↻ followed` : ""}`,
     actions:
       `<button id="plUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
       `<button id="plFollowBtn" class="btn-line sm" title="${fw ? esc(`Following “${fw.title}” — click to unfollow`) : "Watch the source playlist and auto-add its new tracks"}">${ic(IC.repeat)} ${fw ? "Following" : "Follow"}</button>` +
