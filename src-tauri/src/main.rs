@@ -135,50 +135,58 @@ fn source_dir() -> Result<std::path::PathBuf, String> {
     }
 }
 
-/// Version currently in the source tree (what a rebuild would produce).
-#[tauri::command]
-async fn source_version() -> Result<String, String> {
-    let conf = source_dir()?.join("tauri.conf.json");
-    let txt = std::fs::read_to_string(&conf).map_err(|e| e.to_string())?;
-    let v: serde_json::Value = serde_json::from_str(&txt).map_err(|e| e.to_string())?;
-    v["version"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| "no version field".into())
+fn git_out(dir: &std::path::Path, args: &[&str]) -> std::io::Result<std::process::Output> {
+    std::process::Command::new("git").arg("-C").arg(dir).args(args).output()
 }
 
-/// Relaunch the app process — used right after a successful self-update, since
-/// cargo replaced the binary at the same path.
-#[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
-    app.restart();
+/// The build command. Prefer `cargo` on PATH (app launched inside the toolchain
+/// env); otherwise build inside the `mp-dev` distrobox where the Rust toolchain
+/// lives — so the in-app Update / downgrade work even when the app runs on a
+/// host that has no cargo. `touch tauri.conf.json` forces Tauri to re-embed the
+/// frontend (its build script doesn't watch src/).
+fn build_argv(dir: &std::path::Path) -> (String, Vec<String>) {
+    let inner = format!(
+        "export PATH=\"$HOME/.cargo/bin:$PATH\"; cd '{}' && touch tauri.conf.json && cargo build 2>&1",
+        dir.display()
+    );
+    let has_cargo = std::process::Command::new("bash")
+        .arg("-lc")
+        .arg("command -v cargo >/dev/null 2>&1")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if has_cargo {
+        ("bash".into(), vec!["-lc".into(), inner])
+    } else {
+        let user = std::env::var("USER").unwrap_or_else(|_| "indernol".into());
+        (
+            "podman".into(),
+            vec![
+                "exec".into(), "-u".into(), user, "mp-dev".into(),
+                "bash".into(), "-lc".into(), inner,
+            ],
+        )
+    }
 }
 
-/// Rebuild the app from the source tree; progress lines stream as "update"
-/// events. On success the user just restarts the app to run the new build.
-#[tauri::command]
-async fn self_update(app: tauri::AppHandle) -> Result<String, String> {
+/// Stream a cargo build; "update" events carry the progress lines.
+fn do_build(app: &tauri::AppHandle) -> Result<String, String> {
     use std::io::BufRead;
     use tauri::Emitter;
     let dir = source_dir()?;
-    let mut child = std::process::Command::new("bash")
-        .arg("-lc")
-        // `touch tauri.conf.json` forces Tauri's build script to re-run so the
-        // frontend (src/) is re-embedded — cargo alone doesn't watch it, so a
-        // pure HTML/JS/CSS change would otherwise never make it into the binary.
-        .arg(format!(
-            "export PATH=\"$HOME/.cargo/bin:$PATH\"; cd '{}' && touch tauri.conf.json && cargo build 2>&1",
-            dir.display()
-        ))
+    let (prog, args) = build_argv(&dir);
+    let mut child = std::process::Command::new(&prog)
+        .args(&args)
         .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("cannot run the build: {e}"))?;
+        .map_err(|e| format!("cannot run the build ({prog}): {e}"))?;
     let mut tail: Vec<String> = Vec::new();
     if let Some(out) = child.stdout.take() {
         for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
             let _ = app.emit("update", line.clone());
             tail.push(line);
-            if tail.len() > 30 {
+            if tail.len() > 40 {
                 tail.remove(0);
             }
         }
@@ -188,6 +196,42 @@ async fn self_update(app: tauri::AppHandle) -> Result<String, String> {
         return Err(format!("build failed:\n{}", tail.join("\n")));
     }
     Ok("built".into())
+}
+
+/// Latest version PUBLISHED ON GITHUB (origin/main) so "check for updates"
+/// reflects GitHub, not whatever happens to be checked out locally.
+#[tauri::command]
+async fn source_version() -> Result<String, String> {
+    let dir = source_dir()?;
+    let _ = git_out(
+        &dir,
+        &["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=10", "fetch", "origin", "--tags", "--quiet"],
+    );
+    let txt = git_out(&dir, &["show", "origin/main:src-tauri/tauri.conf.json"])
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .or_else(|| std::fs::read_to_string(dir.join("tauri.conf.json")).ok())
+        .ok_or("cannot read version")?;
+    let v: serde_json::Value = serde_json::from_str(&txt).map_err(|e| e.to_string())?;
+    v["version"].as_str().map(str::to_string).ok_or_else(|| "no version field".into())
+}
+
+/// Relaunch the app process — used right after a build replaced the binary.
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
+/// Update to the latest version on GitHub: fetch, move the tree onto origin/main,
+/// then rebuild. (The app's source tree is only ever a clean checkout.)
+#[tauri::command]
+async fn self_update(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = source_dir()?;
+    let _ = git_out(&dir, &["fetch", "origin", "--tags", "--quiet"]);
+    // Best-effort: if origin/main isn't available (offline), just build what's here.
+    let _ = git_out(&dir, &["checkout", "-B", "main", "origin/main"]);
+    do_build(&app)
 }
 
 #[derive(serde::Serialize)]
@@ -217,7 +261,7 @@ async fn list_versions() -> Result<Vec<VersionEntry>, String> {
         "-c", "http.lowSpeedTime=10", // give up if the network stalls for 10s
         "fetch", "origin", "--tags", "--quiet",
     ]);
-    let out = git(&["log", "--all", "--date-order", "--pretty=%H\x1f%cs\x1f%s", "-n", "120"])
+    let out = git(&["log", "--all", "--date-order", "--pretty=%H\x1f%cs\x1f%s", "-n", "500"])
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err("not a git checkout (version switching needs the source repo)".into());
@@ -253,26 +297,20 @@ async fn list_versions() -> Result<Vec<VersionEntry>, String> {
 #[tauri::command]
 async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, String> {
     let dir = source_dir()?;
-    let git = |args: &[&str]| {
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(&dir)
-            .args(args)
-            .output()
-    };
-    let status = git(&["status", "--porcelain"]).map_err(|e| e.to_string())?;
-    if !String::from_utf8_lossy(&status.stdout).trim().is_empty() {
-        return Err("The local source has uncommitted changes — can't switch versions safely.".into());
-    }
-    let co = git(&["-c", "advice.detachedHead=false", "checkout", &rev]).map_err(|e| e.to_string())?;
+    // Make sure the target commit (possibly GitHub-only) is available locally.
+    let _ = git_out(&dir, &["fetch", "origin", "--tags", "--quiet"]);
+    // Force-checkout the chosen version: the source tree is only ever a clean
+    // checkout, so this is safe and avoids a "dirty tree" dead-end for the user.
+    let co = git_out(&dir, &["-c", "advice.detachedHead=false", "checkout", "-f", &rev])
+        .map_err(|e| e.to_string())?;
     if !co.status.success() {
         return Err(format!(
             "git checkout failed: {}",
             String::from_utf8_lossy(&co.stderr).trim()
         ));
     }
-    // Rebuild at the newly checked-out version (reuses the self-update build).
-    self_update(app).await
+    // Rebuild AT this version (not origin/main — that's what self_update does).
+    do_build(&app)
 }
 
 fn main() {
