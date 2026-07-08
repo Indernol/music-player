@@ -135,8 +135,32 @@ fn source_dir() -> Result<std::path::PathBuf, String> {
     }
 }
 
+const DEV_BOX: &str = "mp-dev"; // distrobox holding git + the Rust toolchain
+
+fn dev_user() -> String {
+    std::env::var("USER").unwrap_or_else(|_| "indernol".into())
+}
+
+/// Best-effort: make sure the dev container is running before we exec into it.
+fn ensure_devbox() {
+    let _ = std::process::Command::new("podman").args(["start", DEV_BOX]).output();
+}
+
+/// Run git in the source repo. Immutable/atomic hosts (Bazzite/Silverblue) have
+/// no git on the host — the dev tools live in the mp-dev distrobox — so if the
+/// host git isn't found, run git INSIDE that container (the repo path is shared).
 fn git_out(dir: &std::path::Path, args: &[&str]) -> std::io::Result<std::process::Output> {
-    std::process::Command::new("git").arg("-C").arg(dir).args(args).output()
+    match std::process::Command::new("git").arg("-C").arg(dir).args(args).output() {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            ensure_devbox();
+            let dirs = dir.to_string_lossy().to_string();
+            let mut cmd = std::process::Command::new("podman");
+            cmd.args(["exec", "-u", &dev_user(), DEV_BOX, "git", "-C", &dirs]);
+            cmd.args(args);
+            cmd.output()
+        }
+        other => other,
+    }
 }
 
 /// The build command. Prefer `cargo` on PATH (app launched inside the toolchain
@@ -158,11 +182,11 @@ fn build_argv(dir: &std::path::Path) -> (String, Vec<String>) {
     if has_cargo {
         ("bash".into(), vec!["-lc".into(), inner])
     } else {
-        let user = std::env::var("USER").unwrap_or_else(|_| "indernol".into());
+        ensure_devbox();
         (
             "podman".into(),
             vec![
-                "exec".into(), "-u".into(), user, "mp-dev".into(),
+                "exec".into(), "-u".into(), dev_user(), DEV_BOX.into(),
                 "bash".into(), "-lc".into(), inner,
             ],
         )
@@ -247,13 +271,7 @@ struct VersionEntry {
 #[tauri::command]
 async fn list_versions() -> Result<Vec<VersionEntry>, String> {
     let dir = source_dir()?;
-    let git = |args: &[&str]| {
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(&dir)
-            .args(args)
-            .output()
-    };
+    let git = |args: &[&str]| git_out(&dir, args);
     // Pull the latest versions published on GitHub first (best-effort — offline
     // or no cached credentials just falls back to whatever is already local).
     let _ = git(&[
