@@ -2314,7 +2314,7 @@ function openSettings() {
           <select id="setVerSel" class="sel sm-sel wide"><option value="">Loading versions…</option></select>
           <button id="setVerGo" class="btn-line sm" disabled>Build</button>
         </span></div>
-      <div class="set-hint" id="setVerHint">Pick any earlier (or later) version — it checks it out and rebuilds, then restarts. Needs a clean source tree.</div>
+      <div class="set-hint" id="setVerHint">Fetches versions from GitHub, then checks one out and rebuilds before restarting. Needs a clean source tree.</div>
     </div>
     <div class="set-actions"><button id="setReset" class="btn-line">↺ Reset to defaults</button></div>
     </section>

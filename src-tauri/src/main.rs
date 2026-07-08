@@ -210,6 +210,13 @@ async fn list_versions() -> Result<Vec<VersionEntry>, String> {
             .args(args)
             .output()
     };
+    // Pull the latest versions published on GitHub first (best-effort — offline
+    // or no cached credentials just falls back to whatever is already local).
+    let _ = git(&[
+        "-c", "http.lowSpeedLimit=1000",
+        "-c", "http.lowSpeedTime=10", // give up if the network stalls for 10s
+        "fetch", "origin", "--tags", "--quiet",
+    ]);
     let out = git(&["log", "--all", "--date-order", "--pretty=%H\x1f%cs\x1f%s", "-n", "120"])
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
