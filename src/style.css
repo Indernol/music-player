@@ -157,11 +157,16 @@ input[type="range"]::-webkit-slider-runnable-track {
 .seekbar:hover::-webkit-slider-thumb, .seekbar:active::-webkit-slider-thumb { opacity: 1; }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
-  width: 12px; height: 12px; border-radius: 50%; margin-top: -4px;
-  background: var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+  width: var(--thumb-size, 12px); height: var(--thumb-size, 12px); border-radius: 50%;
+  margin-top: calc((4px - var(--thumb-size, 12px)) / 2);
+  background-color: var(--accent);
+  background-image: var(--thumb-img, none); background-size: cover; background-position: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
   transition: transform .1s;
 }
-input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); background: var(--accent-2); }
+/* With a custom image, don't recolor on hover — just scale. */
+input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
+body:not(.has-thumb) input[type="range"]:hover::-webkit-slider-thumb { background-color: var(--accent-2); }
 /* no native blue focus ring — the accent thumb is the focus indicator */
 input[type="range"]:focus, input[type="range"]:focus-visible { outline: none; }
 input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--vio-glow), 0 1px 4px rgba(0, 0, 0, .45); }
@@ -175,7 +180,10 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 
 /* ─── Main ─── */
 .main { background: linear-gradient(180deg, rgba(139,92,246,0.08), var(--bg-1) 220px); border-radius: var(--r); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.topbar { padding: 13px 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; row-gap: 8px; }
+.topbar { padding: var(--topbar-pad, 13px) 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; row-gap: 8px; }
+body.compact-top .topbar { --topbar-pad: 7px; gap: 8px; }
+body.compact-top .search-wrap input { padding-top: 6px; padding-bottom: 6px; }
+body.compact-top .top-gear, body.compact-top .icon-btn { width: 26px; height: 26px; }
 .tk-idx .idx-play svg { width: 11px; height: 11px; }
 .search-wrap { position: relative; flex: 1; max-width: 440px; }
 .search-ico { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); font-size: 13px; opacity: .6; pointer-events: none; }
@@ -206,24 +214,22 @@ body.has-bg select.sel { background: rgba(255,255,255,.08); border-color: rgba(2
 body.bg-light.has-bg input[type="search"],
 body.bg-light.has-bg input[type="text"],
 body.bg-light.has-bg select.sel { background: rgba(0,0,0,.05); }
-/* Readability safety net: with translucent panels a wallpaper always bleeds
-   through, so the scheme alone can't guarantee contrast. Give every panel text
-   a subtle halo in the OPPOSITE tone — a dark glow behind light text, a light
-   glow behind dark text — so labels stay legible over any background, including
-   contrasty ones where bright and dark regions show through at once. */
-body.has-bg .sidebar,
-body.has-bg .main,
-body.has-bg .player { text-shadow: 0 1px 3px rgba(0,0,0,.6), 0 0 2px rgba(0,0,0,.45); }
-body.bg-light.has-bg .sidebar,
-body.bg-light.has-bg .main,
-body.bg-light.has-bg .player { text-shadow: 0 1px 3px rgba(255,255,255,.7), 0 0 2px rgba(255,255,255,.55); }
-/* Slightly stronger halo on the big header title. */
+/* Readability over a wallpaper: the translucent panels let the background bleed
+   through and wash out the dim grey text (SOURCES / PLAYLISTS labels, artist
+   names, counts, placeholders). Instead of per-glyph glows (muddy), lift the
+   secondary/tertiary text tones toward the scheme's high-contrast end while a
+   background is set — a clean, flat contrast boost. */
+body.has-bg { --tx-1: #ffffff; --tx-2: #eef0f5; --tx-3: #d3d7e0; }
+body.bg-light.has-bg { --tx-1: #000000; --tx-2: #16171c; --tx-3: #303138; }
+/* NB: intentionally NO blanket text-shadow on the panels — applied to every row
+   of a long list it repaints on each scroll frame and makes the whole UI lag on
+   software-rendered WebKitGTK. The brightened --tx-* tones above already carry
+   the contrast; only the big header title (few nodes) keeps a shadow, below. */
+/* The big header title sits over the busiest area — give it a touch more. */
 body.has-bg .vh-title,
-body.has-bg .vh-sub,
-body.has-bg .count { text-shadow: 0 1px 10px rgba(0,0,0,.6), 0 0 3px rgba(0,0,0,.5); }
+body.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(0,0,0,.6); }
 body.bg-light.has-bg .vh-title,
-body.bg-light.has-bg .vh-sub,
-body.bg-light.has-bg .count { text-shadow: 0 1px 8px rgba(255,255,255,.7), 0 0 3px rgba(255,255,255,.55); }
+body.bg-light.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(255,255,255,.7); }
 
 .tracklist { flex: 1; overflow-y: auto; padding: 4px 12px 16px; }
 .empty { color: var(--tx-3); text-align: center; padding: 60px 20px; }
@@ -303,7 +309,7 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .ctx-label { padding: 6px 12px 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--tx-3); font-weight: 800; }
 
 /* ─── Settings modal ─── */
-.modal-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.6); display: grid; place-items: center; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.6); display: grid; place-items: center; overscroll-behavior: contain; }
 /* Only the body scrolls — the header stays put and the scrollbar is clipped
    inside the rounded corners (no bar cutting across the header / top corner). */
 .modal { width: min(560px, 92vw); max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
@@ -321,7 +327,7 @@ body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
 .set-tab:hover .bic { color: var(--tx-2); }
 .set-tab.on { background: rgba(255, 255, 255, .06); color: var(--accent-2); box-shadow: inset 2px 0 0 var(--accent); }
 .set-tab.on .bic { color: var(--accent); }
-.set-panes { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.set-panes { flex: 1 1 auto; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; }
 .set-pane { display: none; flex-direction: column; gap: 12px; }
 .set-pane.on { display: flex; }
 @media (max-width: 640px) {
@@ -339,6 +345,9 @@ body.bg-light.has-bg .set-group { background: rgba(0, 0, 0, .03); }
 .set-row input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
 .set-row input[type="range"] { width: 150px; accent-color: var(--accent); }
 .text-in { width: 210px; }
+.num-in { width: 88px; background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 8px; padding: 7px 9px; font-size: 13px; outline: none; }
+.num-in:focus { border-color: var(--accent); }
+body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
 .set-hint { font-size: 11px; color: var(--tx-3); line-height: 1.5; margin-top: 6px; }
 .swatches { display: flex; gap: 8px; }
 .swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
@@ -357,20 +366,41 @@ body::before {
   content: ""; position: fixed; inset: -60px; z-index: -1; pointer-events: none;
   background: var(--app-bg-image, none) center / cover no-repeat;
   filter: blur(var(--app-bg-blur, 18px)) brightness(calc(1 - var(--app-bg-dim, 45) / 100));
+  /* Promote to its own GPU layer so the (static) blur is cached as a texture and
+     NOT recomputed every time a panel above it repaints — big win for scroll /
+     hover smoothness over a wallpaper on software-rendered WebKitGTK. */
+  transform: translateZ(0); will-change: transform; backface-visibility: hidden;
   display: none;
 }
 body.has-bg::before { display: block; }
 body.has-bg { background: #000; }
-/* NOTE: no backdrop-filter here on purpose — WebKitGTK often runs without GPU
-   accel (software rendering) and live blur burns the CPU. The wallpaper layer
-   above is blurred ONCE (static), and panels are tinted; drawers/menus float
-   over translucent panels so they stay near-opaque to remain readable. */
+/* Every surface — panels, drawers, menus AND modals — uses the same panel-alpha
+   tint, so the whole UI is uniformly see-through; the Panel opacity slider drives
+   all of them at once and the dim slider makes it darker behind. The wallpaper
+   layer is blurred ONCE (static) behind the panels, so those need no live blur.
+   Floating layers (modals / drawers / menus), however, sit over the sharp UI, so
+   they DO get a real backdrop-filter blur — otherwise the busy library shows
+   straight through and they're unusable. (Costs GPU/CPU on software-rendered
+   WebKitGTK, but the user explicitly wants the frosted-glass look.) */
 body.has-bg .sidebar,
 body.has-bg .player,
-body.has-bg .main { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100)); }
+body.has-bg .main,
 body.has-bg .dl-drawer,
-body.has-bg .np-drawer { background: rgba(10, 10, 15, .97); }
-body.has-bg .ctx-menu, body.has-bg .modal { background: rgb(18, 18, 24); }
+body.has-bg .np-drawer,
+body.has-bg .ctx-menu,
+body.has-bg .modal { background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100)); }
+/* Frosted glass on the WINDOW only: the blur lives on each floating panel itself
+   (modal / drawers / menus), so it frosts just what's directly behind that panel's
+   rectangle — the rest of the app stays sharp. The full-screen backdrop only dims
+   very slightly for focus; it must NOT blur, or the whole background goes soft. */
+body.has-bg .modal-backdrop { background: rgba(0, 0, 0, .18); }
+body.has-bg .modal,
+body.has-bg .dl-drawer,
+body.has-bg .np-drawer,
+body.has-bg .ctx-menu {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
 /* Solid dark hover/selection colors look like black holes over a wallpaper —
    switch to translucent light overlays instead. */
 body.has-bg .track:hover,
@@ -378,11 +408,24 @@ body.has-bg .pl-row:hover,
 body.has-bg .src-row:hover,
 body.has-bg .nx-row:hover,
 body.has-bg .imp-hit:hover,
+body.has-bg .imp-item:hover,
+body.has-bg .ck-opt:hover,
+body.has-bg .ac-pl:hover,
+body.has-bg .now:hover,
+body.has-bg .icon-btn:hover,
+body.has-bg .ctrl:hover,
+body.has-bg .track .more:hover,
+body.has-bg .pl-row .pl-del:hover,
+body.has-bg .pl-row .pl-eye:hover,
+body.has-bg .src-btn:hover,
+body.has-bg .fl-x:hover,
+body.has-bg .dl-x:hover,
 body.has-bg .nav-item.active { background: rgba(255, 255, 255, .07); }
 body.has-bg .track.selected { background: rgba(255, 255, 255, .12); }
 body.has-bg .track.playing { background: rgba(255, 255, 255, .05); }
 body.has-bg .pl-row.active,
-body.has-bg .src-row.active { background: rgba(255, 255, 255, .10); }
+body.has-bg .src-row.active,
+body.has-bg #npPin.active { background: rgba(255, 255, 255, .10); }
 
 /* ─── Light wallpaper scheme: dark text on light panels (auto or forced) ─── */
 body.bg-light.has-bg {
@@ -392,17 +435,30 @@ body.bg-light.has-bg {
 }
 body.bg-light.has-bg .sidebar,
 body.bg-light.has-bg .player,
-body.bg-light.has-bg .main { background: rgba(255, 255, 255, calc(var(--panel-alpha, 85) / 100)); }
+body.bg-light.has-bg .main,
 body.bg-light.has-bg .dl-drawer,
-body.bg-light.has-bg .np-drawer { background: rgba(252, 252, 254, .97); }
+body.bg-light.has-bg .np-drawer,
 body.bg-light.has-bg .ctx-menu,
-body.bg-light.has-bg .modal { background: #eef0f5; }
+body.bg-light.has-bg .modal { background: rgba(255, 255, 255, calc(var(--panel-alpha, 85) / 100)); }
+body.bg-light.has-bg .modal-backdrop { background: rgba(255, 255, 255, .15); }
 body.bg-light.has-bg .modal-head { background: inherit; }
 body.bg-light.has-bg .track:hover,
 body.bg-light.has-bg .pl-row:hover,
 body.bg-light.has-bg .src-row:hover,
 body.bg-light.has-bg .nx-row:hover,
 body.bg-light.has-bg .imp-hit:hover,
+body.bg-light.has-bg .imp-item:hover,
+body.bg-light.has-bg .ck-opt:hover,
+body.bg-light.has-bg .ac-pl:hover,
+body.bg-light.has-bg .now:hover,
+body.bg-light.has-bg .icon-btn:hover,
+body.bg-light.has-bg .ctrl:hover,
+body.bg-light.has-bg .track .more:hover,
+body.bg-light.has-bg .pl-row .pl-del:hover,
+body.bg-light.has-bg .pl-row .pl-eye:hover,
+body.bg-light.has-bg .src-btn:hover,
+body.bg-light.has-bg .fl-x:hover,
+body.bg-light.has-bg .dl-x:hover,
 body.bg-light.has-bg .nav-item.active { background: rgba(0, 0, 0, .06); }
 body.bg-light.has-bg .track.selected { background: rgba(0, 0, 0, .10); }
 body.bg-light.has-bg .track.playing { background: rgba(0, 0, 0, .05); }
@@ -514,6 +570,29 @@ input[type="color"] {
 input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
 input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 .set-sub { font-size: 10px; color: var(--tx-3); font-weight: 400; }
+
+/* Import chooser */
+.pick-opt { display: flex; align-items: center; gap: 13px; width: 100%; text-align: left; background: var(--bg-2); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 11px; padding: 14px 15px; cursor: pointer; transition: background .12s, border-color .12s; }
+.pick-opt + .pick-opt { margin-top: 10px; }
+.pick-opt:hover { background: var(--bg-3); border-color: var(--bd-2); }
+.pick-opt .bic { color: var(--accent-2); flex-shrink: 0; }
+.pick-txt { display: flex; flex-direction: column; gap: 3px; }
+.pick-txt b { font-size: 14px; }
+.pick-sub { font-size: 12px; color: var(--tx-3); }
+body.has-bg .pick-opt { background: rgba(255,255,255,.05); }
+body.has-bg .pick-opt:hover { background: rgba(255,255,255,.09); }
+
+/* External playlist import (Spotify link / pasted list) */
+#extInput { width: 100%; min-height: 118px; resize: vertical; background: var(--bg-3); border: 1px solid var(--bd); color: var(--tx-1); border-radius: 8px; padding: 10px 12px; font-size: 13px; font-family: inherit; line-height: 1.5; outline: none; }
+#extInput:focus { border-color: var(--accent); }
+body.has-bg #extInput { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
+body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
+#extModal .imp-row { display: flex; align-items: center; gap: 10px; }
+#extModal .imp-row input { flex: 1; }
+#extModal .imp-foot-row { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+#extModal .imp-foot-row .btn { margin-left: auto; }
+.ext-bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,.1); overflow: hidden; }
+.ext-bar > div { height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width .15s ease; }
 
 /* ─── Sidebar sections + Sources (added) ─── */
 .side-section { display: flex; flex-direction: column; gap: 8px; }

@@ -27,6 +27,7 @@ const DEFAULTS = {
   compactRows: false,
   animations: true,
   smoothScroll: true,    // eased scrolling on lists/panels (Performance group)
+  smoothStrength: 3,     // smooth-scroll intensity 1 (subtle) … 5 (long glide)
   defaultVolume: 80,
   normalizeDefault: true,
   shuffleDefault: false,
@@ -35,6 +36,15 @@ const DEFAULTS = {
   rpcEnabled: false,
   rpcClientId: "",
   preloadNext: true,     // gapless: pre-queue the next track
+  resumePlayback: true,  // on launch, restore the last track (paused) at its saved position
+  resumeDownloads: true, // on launch, re-queue downloads that hadn't finished (yt-dlp continues .part files)
+  historyLimit: 50,      // listening history size (0 = don't keep … up to 1000)
+  rpcDelay: 0,           // Discord RPC: seconds to wait before showing a new track (debounces fast skips)
+  rpcPauseClear: 0,      // Discord RPC: seconds after pausing before the presence is removed (0 = immediately)
+  compactTopbar: false,  // slimmer top bar
+  topbarPad: 13,         // top bar vertical padding (px) — customizable height
+  sliderImage: "",       // custom image for the slider thumb (the "pink dot"); empty = accent color
+  thumbSize: 12,         // slider thumb diameter (px)
   downloadDir: "",       // empty = ~/Music/MusicPlayer (resolved by the backend)
   preferLocal: true,     // play the local file when an online track is downloaded
   autoSaveImports: false, // pre-tick "Save locally" in the import dialog

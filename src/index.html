@@ -12,6 +12,7 @@
       <div class="brand"><span class="brand-ic" data-ic="headphones"></span> <span>Music Player</span></div>
 
       <button id="navLibrary" class="nav-item active"><span class="ni-ico" data-ic="disc"></span> Library</button>
+      <button id="navHistory" class="nav-item"><span class="ni-ico" data-ic="clock"></span> Recently played</button>
 
       <input id="sideFilter" type="search" placeholder="Filter sources & playlists…" autocomplete="off" class="side-filter">
 
@@ -30,7 +31,7 @@
       <div class="side-section grow" id="secPlaylists">
         <div class="ss-head"><span class="ss-title ss-toggle" data-coll="collPlaylists" title="Click to collapse/expand"><span class="ss-caret">▾</span> Playlists</span></div>
         <div class="ss-body grow">
-          <button id="importBtn" class="btn-line"><span data-ic="globe"></span> YouTube playlists…</button>
+          <button id="importBtn" class="btn-line"><span data-ic="dl"></span> Import…</button>
           <div class="playlists-list" id="playlistsList"></div>
         </div>
       </div>
@@ -266,6 +267,43 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
             <button id="impGo" class="btn">Import</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pickModal" class="modal-backdrop" hidden>
+    <div class="modal dlg">
+      <div class="modal-head">
+        <h2>Import a playlist</h2>
+        <button id="pickClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <button class="pick-opt" id="pickYt"><span class="bic" data-ic="globe"></span><span class="pick-txt"><b>From YouTube</b><span class="pick-sub">Search, or paste a YouTube / YT Music playlist link</span></span></button>
+        <button class="pick-opt" id="pickSp"><span class="bic" data-ic="link"></span><span class="pick-txt"><b>From Spotify or another app</b><span class="pick-sub">Paste a Spotify link, or a list of songs</span></span></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="extModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Import a playlist</h2>
+        <button id="extClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <div class="set-hint">Paste a <b>Spotify playlist / album link</b>, or a list of songs (one <b>Artist – Title</b> per line) exported from any app. Each track is matched on YouTube and added to a new playlist.</div>
+        <textarea id="extInput" placeholder="https://open.spotify.com/playlist/…&#10;— or —&#10;Daft Punk - Get Lucky&#10;Tame Impala - The Less I Know The Better"></textarea>
+        <div class="imp-row">
+          <label class="imp-lbl" for="extName">Name</label>
+          <input id="extName" type="text" placeholder="Playlist name (auto from Spotify)" autocomplete="off">
+        </div>
+        <div class="imp-foot-row">
+          <label class="imp-dl" title="Also download every matched track as a local mp3"><input type="checkbox" id="extDl"> Save locally (mp3)</label>
+          <button id="extCancel" class="btn-line sm" hidden>Cancel</button>
+          <button id="extGo" class="btn">Import</button>
+        </div>
+        <div id="extBar" class="ext-bar" hidden><div id="extBarFill"></div></div>
+        <div id="extStatus" class="set-hint"></div>
       </div>
     </div>
   </div>

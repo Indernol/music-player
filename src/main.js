@@ -33,6 +33,9 @@ let curIndex = -1, preIndex = -1;
 let expectedQueued = 0, queueSettled = false;
 let curEpoch = 0; // tags the current sink; stale status polls are ignored
 let playing = false, shuffle = false, normalize = true;
+// Restored-from-last-session state: the track is shown paused at _resumePos but
+// the engine hasn't started it yet — the first Play hard-starts it and seeks.
+let _needsStart = false, _resumePos = 0;
 let repeatMode = "off"; // off | all | one
 let history = [];
 let seeking = false;
@@ -177,6 +180,68 @@ async function saveOnline() {
 async function loadOnline() {
   const raw = await storeLoad("online");
   if (raw) { try { const d = JSON.parse(raw); for (const k of Object.keys(d)) onlineIndex.set(k, d[k]); } catch {} }
+}
+
+// ─── Resume where you left off (Settings → Playback) ───
+// Persist the current queue + track + position so the next launch restores it,
+// PAUSED, at the same spot. Saved on pause / track change / periodically.
+let _lastSavePos = -1;
+function savePlayback() {
+  if (!S().resumePlayback) return;
+  if (curIndex < 0 || !queue.length) { storeSave("playback", ""); return; }
+  const pos = Math.round(wallPos());
+  if (pos === _lastSavePos && !playing) return; // avoid redundant writes
+  _lastSavePos = pos;
+  storeSave("playback", JSON.stringify({ queue, index: curIndex, position: pos, shuffle }));
+}
+async function restorePlayback() {
+  if (!S().resumePlayback) return;
+  const raw = await storeLoad("playback");
+  if (!raw) return;
+  let st; try { st = JSON.parse(raw); } catch { return; }
+  if (!st || !Array.isArray(st.queue) || !st.queue.length || st.index == null) return;
+  queue = st.queue;
+  curIndex = Math.min(Math.max(0, st.index), queue.length - 1);
+  shuffle = !!st.shuffle; $("#shuffleBtn").classList.toggle("active", shuffle);
+  const t = trackByPath(effectivePath(queue[curIndex])) || trackByPath(queue[curIndex]);
+  if (!t) { queue = []; curIndex = -1; return; }
+  _resumePos = Math.max(0, st.position || 0);
+  _needsStart = true;
+  updateNowPlaying(t, queue[curIndex]);   // show metadata (this resets the seek bar)
+  playing = false; setPlayIcon(false);
+  wallStart(_resumePos); wallPause();      // freeze the wall clock at the saved spot
+  const sk = $("#seek"), max = Number(sk.max) || 1;
+  sk.value = _resumePos; sk.style.setProperty("--fill", `${Math.min(100, (_resumePos / max) * 100).toFixed(2)}%`);
+  $("#curTime").textContent = fmtDur(_resumePos); _lastTimeTxt = fmtDur(_resumePos);
+  updatePlayingRow();
+}
+
+// ─── Listening history (Settings → Playback: keep 0…1000 titles) ───
+let history2 = [];
+async function loadHistory() {
+  const raw = await storeLoad("history");
+  if (raw) { try { history2 = JSON.parse(raw); } catch {} }
+  if (!Array.isArray(history2)) history2 = [];
+}
+function saveHistory() { storeSave("history", JSON.stringify(history2.slice(0, 1000))); }
+function recordHistory(t, path) {
+  const lim = Math.max(0, Math.min(1000, Number(S().historyLimit) || 0));
+  if (!lim) { if (history2.length) { history2 = []; saveHistory(); } return; }
+  if (!t) return;
+  const p = path || t.path;
+  history2 = history2.filter(h => h.path !== p); // most-recent, no dupes
+  history2.unshift({ path: p, title: t.title || "", artist: t.artist || "", album: t.album || "", thumbnail: t.thumbnail || "", duration_secs: t.duration_secs || 0, at: Date.now() });
+  if (history2.length > lim) history2.length = lim;
+  saveHistory();
+}
+function showHistory() {
+  active = { type: "history", id: "" };
+  markActive();
+  selected.clear();
+  const tracks = history2.map(h => trackByPath(h.path) || h).filter(Boolean);
+  setViewHead({ icon: IC.clock, title: "Recently played", subtitle: `${tracks.length} track${tracks.length === 1 ? "" : "s"}`, actions: tracks.length ? `<button id="histClear" class="btn-line sm">Clear history</button>` : "" });
+  renderTracks(tracks, true); // keep recency order (presorted)
+  const cb = $("#histClear"); if (cb) cb.addEventListener("click", () => { history2 = []; saveHistory(); showHistory(); });
 }
 // Downloaded files are named "Title [videoId].mp3"; when the mp3 has no tags
 // (older downloads), borrow title/artist/artwork from the online metadata.
@@ -764,6 +829,70 @@ async function unfollowPlaylist(id) {
   flash("Unfollowed");
 }
 
+// ─── Import a playlist from another app ───
+// A local/YouTube player can't read Spotify audio, but it can take a playlist's
+// song list (title + artist) — from a public Spotify link (backend scrape) or a
+// pasted "Artist - Title" list — match each track on YouTube, and collect them
+// into a new local playlist (optionally downloaded to mp3).
+function openImportPick() { $("#pickModal").hidden = false; }
+let _extBusy = false, _extCancel = false;
+function openExtImport() {
+  if (!IS_NATIVE) { flash("Importing needs the native app"); return; }
+  _extBusy = false; _extCancel = false;
+  $("#extInput").value = ""; $("#extName").value = ""; $("#extDl").checked = S().autoSaveImports;
+  extStatus(""); $("#extBar").hidden = true; $("#extBarFill").style.width = "0%";
+  $("#extCancel").hidden = true; $("#extGo").disabled = false;
+  $("#extModal").hidden = false; $("#extInput").focus();
+}
+function extStatus(msg, err) { const el = $("#extStatus"); el.textContent = msg; el.style.color = err ? "#f59e0b" : ""; }
+function extDone() { _extBusy = false; $("#extGo").disabled = false; $("#extCancel").hidden = true; }
+async function runExtImport() {
+  if (_extBusy) return;
+  const raw = $("#extInput").value.trim();
+  if (!raw) { extStatus("Paste a Spotify link or a song list first.", true); return; }
+  _extBusy = true; _extCancel = false;
+  $("#extGo").disabled = true; $("#extCancel").hidden = false;
+  let name = $("#extName").value.trim();
+  let queries = [];
+  const sp = raw.match(/(?:https?:\/\/[^\s]*open\.spotify\.com\/[^\s]+|spotify:(?:playlist|album|track):[A-Za-z0-9]+)/);
+  try {
+    if (sp) {
+      extStatus("Reading the Spotify playlist…");
+      const imp = await invoke("import_spotify", { url: sp[0] });
+      if (!name) name = imp.name;
+      queries = (imp.tracks || []).map(t => `${t.artist} ${t.title}`.trim()).filter(Boolean);
+    } else {
+      // Pasted list: one song per line (drop stray URLs / blank lines).
+      queries = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^https?:\/\//.test(l));
+    }
+  } catch (e) { extStatus(String(e), true); extDone(); return; }
+  if (!queries.length) { extStatus("Nothing to import.", true); extDone(); return; }
+
+  $("#extBar").hidden = false;
+  const resolved = [], missed = [];
+  for (let i = 0; i < queries.length; i++) {
+    if (_extCancel) break;
+    extStatus(`Matching ${i + 1}/${queries.length} on YouTube — “${queries[i]}”`);
+    $("#extBarFill").style.width = `${Math.round((i / queries.length) * 100)}%`;
+    try {
+      const res = await invoke("yt_search", { query: queries[i], limit: 1, offset: 0 });
+      const hit = Array.isArray(res) && res[0];
+      if (hit) resolved.push(onlineFromResult(hit)); else missed.push(queries[i]);
+    } catch { missed.push(queries[i]); }
+  }
+  $("#extBarFill").style.width = "100%";
+  if (!resolved.length) { extStatus("Couldn't match any track on YouTube.", true); extDone(); return; }
+
+  resolved.forEach(t => onlineIndex.set(t.path, t));
+  const pl = PL.createPlaylist(name || "Imported playlist");
+  resolved.forEach(t => PL.addToPlaylist(pl.id, t.path));
+  saveOnline(); renderPlaylists(); openPlaylist(pl.id);
+  const dl = $("#extDl").checked;
+  if (dl) downloadTracks(resolved.map(t => t.path));
+  $("#extModal").hidden = true; extDone();
+  flash(`Imported ${resolved.length} track${resolved.length === 1 ? "" : "s"}${missed.length ? ` · ${missed.length} not found` : ""}${_extCancel ? " (stopped)" : ""}${dl ? " · downloading…" : ""}`);
+}
+
 // ─── YouTube search (Enter in the search bar) ───
 let onlineResults = [];
 let onlineQuery = "";
@@ -1073,6 +1202,34 @@ async function loadDlBlock() {
 }
 function saveDlBlock() { storeSave("dlblock", JSON.stringify(dlBlock)); }
 
+// ─── Resume unfinished downloads (Settings → Downloads) ───
+// Persist the still-pending set so a relaunch can re-queue them; yt-dlp resumes
+// any leftover .part file on its own. Only writes when the pending set changes.
+let _dlqSig = "";
+function saveDlQueue() {
+  if (!S().resumeDownloads) { if (_dlqSig) { _dlqSig = ""; storeSave("dlqueue", ""); } return; }
+  const pending = dlQueue.filter(d => d.status === "queued" || d.status === "active")
+    .map(d => ({ path: d.path, id: d.id, title: d.title }));
+  const sig = pending.map(p => p.path).join("|");
+  if (sig === _dlqSig) return;
+  _dlqSig = sig;
+  storeSave("dlqueue", pending.length ? JSON.stringify(pending) : "");
+}
+async function resumeDownloads() {
+  if (!S().resumeDownloads) return;
+  const raw = await storeLoad("dlqueue");
+  if (!raw) return;
+  let items; try { items = JSON.parse(raw); } catch { return; }
+  if (!Array.isArray(items) || !items.length) return;
+  for (const it of items) {
+    if (it.path && !onlineIndex.has(it.path)) {
+      onlineIndex.set(it.path, { path: it.path, id: it.id, title: it.title || it.path, artist: "", album: "YouTube", duration_secs: 0, gain: 1, thumbnail: "" });
+    }
+  }
+  const paths = items.map(it => it.path).filter(Boolean);
+  if (paths.length) { downloadTracks(paths); flash(`Resuming ${paths.length} download${paths.length === 1 ? "" : "s"}…`); }
+}
+
 function dlRow(d) {
   return `
     <div class="dl-row ${d.status}" data-path="${esc(d.path)}" title="${esc(d.err || d.title)}">
@@ -1085,6 +1242,7 @@ function dlRow(d) {
 }
 let dlOpen = false; // drawer is opt-in: nothing pops up on its own
 function dlRender() {
+  saveDlQueue(); // persist the pending set whenever it changes
   const bar = $("#dlBar"), tog = $("#dlToggle");
   if (!dlQueue.length) { bar.hidden = true; tog.hidden = true; dlOpen = false; return; }
   const n = { done: 0, error: 0, canceled: 0, queued: 0, active: 0 };
@@ -1352,6 +1510,7 @@ function showLibrary() {
 }
 function markActive() {
   $("#navLibrary").classList.toggle("active", active.type === "library");
+  $("#navHistory").classList.toggle("active", active.type === "history");
   renderSources();
   // playlist highlight is refreshed by renderPlaylists on open; refresh to sync
   document.querySelectorAll("#playlistsList .pl-row[data-pl]").forEach(el => el.classList.toggle("active", active.type === "playlist" && active.id === el.dataset.pl));
@@ -1418,7 +1577,10 @@ function updateNowPlaying(t, path) {
   const sk = $("#seek");
   sk.max = dur > 0 ? dur : 1; sk.value = 0; sk.style.setProperty("--fill", "0%");
   $("#curTime").textContent = "0:00"; _lastTimeTxt = "0:00";
-  notifyTrack(t); updateRPC(t, true); mediaUpdate(t); renderNpPanel();
+  notifyTrack(t); mediaUpdate(t); renderNpPanel();
+  // NB: Rich Presence is intentionally NOT updated here — updateNowPlaying runs
+  // before the wall clock is re-anchored, so the RPC push happens at the real
+  // playback start (hardPlay / gapless advance) with an explicit position of 0.
 }
 async function playFrom(viewIdx) { queue = view.map(t => t.path); history = []; if (shuffle) buildShuffle(viewIdx); await hardPlay(viewIdx); }
 // If an online track was downloaded (file named "… [<id>].mp3"), play the local
@@ -1437,6 +1599,7 @@ async function startSource(cmd, path, gain) {
 let playSeq = 0; // guards against overlapping hardPlay calls (fast double-clicks)
 async function hardPlay(i) {
   if (i < 0 || i >= queue.length) return;
+  _needsStart = false; // a real playback start supersedes any pending resume
   const seq = ++playSeq;
   curIndex = i;
   const path = effectivePath(queue[i]);
@@ -1458,11 +1621,15 @@ async function hardPlay(i) {
     // while the UI already shows the new one as stopped.
     try { const se = await invoke("stop"); curEpoch = Number(se) || curEpoch; } catch {}
     playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback();
+    rpcStop(t); // playback stopped → drop the progress bar
     return;
   }
   if (seq !== playSeq) return; // superseded by a newer click
   curEpoch = Number(e) || 0;
   playing = true; wallStart(0); updatePlayingRow();
+  rpcTrack(t);            // fresh track → progress bar at 0 (honours rpcDelay)
+  recordHistory(t, queue[i]);
+  savePlayback();
   if (t) $("#nowSub").textContent = `${t.artist} — ${t.album}`;
   mediaPlayback();
   await schedulePreload();
@@ -1487,11 +1654,20 @@ async function schedulePreload() {
 }
 async function togglePlay() {
   if (curIndex < 0 && view.length) return playFrom(0);
-  if (playing) { await invoke("pause"); playing = false; wallPause(); setPlayIcon(false); }
-  else { await invoke("resume"); playing = true; wallResume(); setPlayIcon(true); }
-  updateRPC(trackByPath(queue[curIndex]), playing); updatePlayingRow(); mediaPlayback();
+  if (_needsStart && !playing) {
+    // First Play after a session-resume: actually start the restored track and
+    // jump to where we left off.
+    const pos = _resumePos; _needsStart = false;
+    await hardPlay(curIndex);
+    if (pos > 1) { try { await invoke("seek", { secs: pos }); wallSeek(pos); } catch {} }
+    return;
+  }
+  const cur = trackByPath(queue[curIndex]);
+  if (playing) { await invoke("pause"); playing = false; wallPause(); setPlayIcon(false); savePlayback(); rpcPause(cur); }
+  else { await invoke("resume"); playing = true; wallResume(); setPlayIcon(true); rpcResume(cur); }
+  updatePlayingRow(); mediaPlayback();
 }
-async function next() { const j = nextIndex(curIndex, true); if (j < 0) { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); return; } history.push(curIndex); await hardPlay(j); }
+async function next() { const j = nextIndex(curIndex, true); if (j < 0) { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); return; } history.push(curIndex); await hardPlay(j); }
 async function prev() {
   if (wallPos() > 3) { await invoke("seek", { secs: 0 }); wallSeek(0); return; }
   if (history.length) await hardPlay(history.pop());
@@ -1523,6 +1699,7 @@ function startPolling() {
     // Paused or idle: nothing can change on its own — poll nothing (CPU).
     if (curIndex < 0 || !playing) return;
     if (++_posTick % 4 === 0) mediaPlayback(); // ~1.2s: keep the desktop widget's position fresh
+    if (_posTick % 14 === 0) savePlayback();   // ~4s: persist resume point while playing
     const st = await invoke("status"); if (!st) return;
     if ((st.epoch || 0) !== curEpoch) return; // stale: previous sink still up while a play/stream starts
     // Re-anchor the wall clock on the engine's real position when they drift
@@ -1539,20 +1716,76 @@ function startPolling() {
       history.push(curIndex); curIndex = preIndex;
       const t = trackByPath(effectivePath(queue[curIndex])) || trackByPath(queue[curIndex]);
       wallStart(0); updateNowPlaying(t, queue[curIndex]); updatePlayingRow(); mediaPlayback();
+      rpcTrack(t); recordHistory(t, queue[curIndex]); savePlayback(); // gapless advance
       await schedulePreload();
     } else if (queued === 0 && playing) {
       // Sink drained: end of queue — or the preload failed (e.g. stream error).
       // If there is a next track, recover by hard-starting it instead of dying.
       const j = nextIndex(curIndex);
       if (j >= 0) { history.push(curIndex); await hardPlay(j); }
-      else { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); }
+      else { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); } // queue drained → clear the progress bar
     }
   }, 300);
+}
+
+// ─── Smooth wheel scrolling (Performance → Smooth scrolling + intensity) ───
+// CSS scroll-behavior only eases programmatic/keyboard scrolls, never the mouse
+// wheel — which is why it "didn't work". So we animate the wheel ourselves:
+// accumulate a target offset per container and lerp its scrollTop toward it each
+// frame. smoothStrength (1..5) sets both the wheel step and the glide length.
+// This handler also LOCKS the background: while a modal is open, a wheel over
+// anything not inside it is swallowed so the library/playlists don't scroll.
+const _sm = { el: null, target: 0, ease: 0.18, raf: 0 };
+function scrollableFrom(node) {
+  let el = node;
+  while (el && el.nodeType === 1 && el !== document.body) {
+    if (el.scrollHeight - el.clientHeight > 1) {
+      const oy = getComputedStyle(el).overflowY;
+      if (oy === "auto" || oy === "scroll") return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+function _smStep() {
+  _sm.raf = 0;
+  const el = _sm.el;
+  if (!el) return;
+  const diff = _sm.target - el.scrollTop;
+  if (Math.abs(diff) < 0.5) { el.scrollTop = _sm.target; return; }
+  el.scrollTop += diff * _sm.ease;
+  _sm.raf = requestAnimationFrame(_smStep);
+}
+function onWheelSmooth(e) {
+  if (e.ctrlKey || e.defaultPrevented) return; // let pinch-zoom through
+  const el = scrollableFrom(e.target);
+  // Modal open → block the background from scrolling behind it.
+  const modal = document.querySelector(".modal-backdrop:not([hidden])");
+  if (modal && (!el || !modal.contains(el))) { e.preventDefault(); return; }
+  if (!S().smoothScroll || !el) return; // native scroll when smoothing is off
+  let delta = e.deltaY;
+  if (!delta) return; // horizontal / no-op wheels pass through
+  if (e.deltaMode === 1) delta *= 16;             // lines → px
+  else if (e.deltaMode === 2) delta *= el.clientHeight; // pages → px
+  const strength = Math.min(5, Math.max(1, S().smoothStrength ?? 3));
+  const step = 0.7 + strength * 0.28;         // 0.98 … 2.1 wheel-distance multiplier
+  _sm.ease = 0.34 - (strength - 1) * 0.04;    // 0.34 (snappy) … 0.18 (glide) — never sluggish
+  e.preventDefault();
+  // Re-seed the target on a fresh container or once the previous glide settled,
+  // so scrollbar drags / programmatic jumps don't fight the animation.
+  if (_sm.el !== el || !_sm.raf) { _sm.el = el; _sm.target = el.scrollTop; }
+  const max = el.scrollHeight - el.clientHeight;
+  _sm.target = Math.max(0, Math.min(max, _sm.target + delta * step));
+  if (!_sm.raf) _sm.raf = requestAnimationFrame(_smStep);
+}
+function initSmoothScroll() {
+  window.addEventListener("wheel", onWheelSmooth, { passive: false });
 }
 
 // ─── Interface arrangement: hide/collapse sections, dock the up-next panel ───
 function applyUiPrefs() {
   const s = S();
+  $("#navHistory").hidden = !(Number(s.historyLimit) > 0);
   $("#secSources").hidden = !s.uiSources;
   $("#pickBtn").hidden = !s.uiSrcButtons;
   $("#manualBtn").hidden = !s.uiSrcButtons;
@@ -1681,16 +1914,46 @@ async function notifyTrack(t) {
   try { await T.core.invoke("plugin:notification|notify", { options: { title: t.title, body: `${t.artist} — ${t.album}` } }); }
   catch (e) { console.error("[notify]", e); }
 }
-async function updateRPC(t, isPlaying) {
+// posOverride: pass 0 when a track has just started so Discord's progress bar
+// resets to the beginning — relying on wallPos() there is wrong because the wall
+// clock isn't re-anchored (wallStart(0)) until playback is actually confirmed,
+// so it would still report the PREVIOUS track's elapsed time.
+async function updateRPC(t, isPlaying, posOverride) {
   if (!IS_NATIVE || !S().rpcEnabled || !S().rpcClientId) return;
   try {
     await invoke("rpc_update", {
       clientId: S().rpcClientId, title: t?.title || "", artist: t?.artist || "", playing: !!isPlaying,
-      art: t?.thumbnail || "", durationSecs: t?.duration_secs || 0, positionSecs: wallPos(),
+      art: t?.thumbnail || "", durationSecs: t?.duration_secs || 0,
+      positionSecs: posOverride != null ? posOverride : wallPos(),
     });
   } catch (e) { console.error("[rpc]", e); }
 }
 async function clearRPC() { if (IS_NATIVE) { try { await invoke("rpc_clear"); } catch {} } }
+
+// Discord RPC policy layer (Settings → Discord Rich Presence):
+//  • rpcDelay: wait N s before showing a NEW track — skipping quickly through
+//    several tracks won't spam Discord ("titles apart" effect: only what you
+//    settle on shows).  • rpcPauseClear: N s after pausing, remove the presence
+//    entirely (0 = immediately). On resume the presence comes back at once.
+let _rpcDelayTimer = null, _rpcPauseTimer = null;
+function _rpcClearTimers() { clearTimeout(_rpcDelayTimer); clearTimeout(_rpcPauseTimer); _rpcDelayTimer = _rpcPauseTimer = null; }
+function rpcTrack(t) { // a new track just started playing
+  clearTimeout(_rpcPauseTimer); _rpcPauseTimer = null;
+  clearTimeout(_rpcDelayTimer);
+  const delay = Math.max(0, Number(S().rpcDelay) || 0) * 1000;
+  if (!delay) { updateRPC(t, true, 0); return; }
+  _rpcDelayTimer = setTimeout(() => { if (playing && curIndex >= 0) updateRPC(t, true, 0); }, delay);
+}
+function rpcResume(t) { clearTimeout(_rpcPauseTimer); _rpcPauseTimer = null; updateRPC(t, true); }
+function rpcPause(t) {
+  clearTimeout(_rpcDelayTimer);
+  const secs = Math.max(0, Number(S().rpcPauseClear) || 0);
+  if (secs <= 0) { _rpcClearTimers(); clearRPC(); return; } // remove presence at once
+  updateRPC(t, false); // show "Paused" for a while…
+  clearTimeout(_rpcPauseTimer);
+  _rpcPauseTimer = setTimeout(() => { if (!playing) clearRPC(); }, secs * 1000); // …then remove it
+}
+function rpcStop(t) { _rpcClearTimers(); updateRPC(t, false); }
 
 // ─── Library (persisted) ───
 async function saveLibrary() { enrichLibrary(); await storeSave("library", JSON.stringify({ folders, tracks: library })); }
@@ -1756,6 +2019,12 @@ async function applyTheme() {
   const theme = s.theme === "custom" ? customTheme(s) : (SETTINGS.THEMES[s.theme] || SETTINGS.THEMES.dark);
   for (const [k, v] of Object.entries(theme)) root.setProperty(k, v);
   root.setProperty("--r", `${s.radius ?? 12}px`);
+  root.setProperty("--topbar-pad", `${s.topbarPad ?? 13}px`);
+  root.setProperty("--thumb-size", `${s.thumbSize ?? 12}px`);
+  document.body.classList.toggle("compact-top", !!s.compactTopbar);
+  // Custom slider-thumb image (the "pink dot"). Resolved to a data URL for local
+  // paths, like the wallpaper, and applied as a CSS var used by every range thumb.
+  applyThumbImage(s);
   document.body.style.zoom = String((s.uiScale ?? 100) / 100);
   applyAccent();
   root.setProperty("--app-bg-blur", `${s.bgBlur ?? 18}px`);
@@ -1818,6 +2087,20 @@ function probeLuma(src) {
     img.src = src;
   });
 }
+let _thumbCache = { path: "", data: "" };
+async function applyThumbImage(s) {
+  const root = document.documentElement.style;
+  let src = (s.sliderImage || "").trim();
+  if (src && !/^(https?:|data:)/.test(src)) {
+    if (_thumbCache.path !== src) {
+      try { _thumbCache.data = await invoke("read_image", { path: src }); _thumbCache.path = src; }
+      catch { _thumbCache.data = ""; _thumbCache.path = src; }
+    }
+    src = _thumbCache.data;
+  }
+  root.setProperty("--thumb-img", src ? `url("${src}")` : "none");
+  document.body.classList.toggle("has-thumb", !!src);
+}
 function applySettings() {
   applyTheme();
   applyUiPrefs();
@@ -1830,6 +2113,30 @@ function applySettings() {
   repeatMode = ["off", "all", "one"].includes(S().repeatDefault) ? S().repeatDefault : "off";
   updateRepeatBtn();
   const v = S().defaultVolume; $("#volume").value = v; $("#volume").style.setProperty("--fill", `${v}%`); invoke("set_volume", { level: v / 100 });
+}
+// Version switcher / downgrade (Settings → System → Updates). Lists the version
+// commits from local git and, on Build, checks one out + rebuilds + restarts.
+async function initVersionSwitcher() {
+  const sel = $("#setVerSel"), go = $("#setVerGo"), hint = $("#setVerHint");
+  if (!sel || !IS_NATIVE) { if (sel) sel.innerHTML = `<option value="">Needs the native app</option>`; return; }
+  let list = [];
+  try { list = await invoke("list_versions"); }
+  catch (e) { sel.innerHTML = `<option value="">Unavailable</option>`; hint.textContent = String(e); return; }
+  if (!Array.isArray(list) || !list.length) { sel.innerHTML = `<option value="">No versions found</option>`; return; }
+  sel.innerHTML = list.map(v => `<option value="${v.hash}" ${v.current ? "selected" : ""}>${esc(v.version)}${v.current ? " — current" : ""} · ${esc(v.date)}</option>`).join("");
+  const sync = () => { const cur = list.find(v => v.hash === sel.value); go.disabled = !sel.value || (cur && cur.current); };
+  sync();
+  sel.onchange = sync;
+  go.onclick = async () => {
+    const v = list.find(x => x.hash === sel.value); if (!v) return;
+    if (!await askConfirm(`Switch to ${v.version}?`, "The app rebuilds at that version and restarts. Your library, playlists and settings are kept.", "Build & switch")) return;
+    go.disabled = true; hint.textContent = `Building ${v.version}… this can take a minute.`;
+    try {
+      await invoke("switch_version", { rev: v.hash });
+      hint.textContent = `Built ${v.version} — restarting…`;
+      setTimeout(() => invoke("restart_app").catch(() => {}), 600);
+    } catch (e) { hint.textContent = String(e); go.disabled = false; flash(`Switch failed: ${e}`); }
+  };
 }
 function openSettings() {
   const s = S();
@@ -1876,6 +2183,18 @@ function openSettings() {
       <div class="set-row"><label>Panel opacity</label><input type="range" id="setPanelA" min="35" max="100" value="${s.panelAlpha}"></div>
       <div class="set-hint">Blur / darkness / opacity apply live when a background image is set — mix them with any theme + accent.</div>
     </div>
+    <div class="set-group"><div class="set-title">Top bar &amp; sliders</div>
+      <div class="set-row"><label>Compact top bar</label><input type="checkbox" id="setCompactTop" ${s.compactTopbar ? "checked" : ""}></div>
+      <div class="set-row"><label>Top bar height</label><input type="range" id="setTopPad" min="4" max="22" value="${s.topbarPad ?? 13}"></div>
+      <div class="set-row"><label>Slider knob size</label><input type="range" id="setThumbSize" min="8" max="28" value="${s.thumbSize ?? 12}"></div>
+      <div class="set-row"><label>Slider knob image <span class="set-sub">(the “dot” on volume / seek)</span></label>
+        <span class="dir-pick">
+          <input type="text" id="setThumbImg" class="text-in" placeholder="none — URL or file" value="${esc(s.sliderImage)}">
+          <button id="setThumbPick" class="btn-line sm" title="Pick an image">${ic(IC.image)}</button>
+          <button id="setThumbClear" class="btn-line sm" title="Remove">${IC.x}</button>
+        </span></div>
+      <div class="set-hint">Put any image on the slider knob — a face, a logo, an emoji screenshot… Square images look best.</div>
+    </div>
     </section>
     <section class="set-pane" data-pane="interface">
     <div class="set-group"><div class="set-title">Interface</div>
@@ -1890,6 +2209,7 @@ function openSettings() {
     <div class="set-group"><div class="set-title">Performance</div>
       <div class="set-hint">Turn these off on a slower machine or to save battery — the app stays fully functional.</div>
       <div class="set-row"><label>Smooth scrolling</label><input type="checkbox" id="setSmooth" ${s.smoothScroll ? "checked" : ""}></div>
+      <div class="set-row"><label>Smooth intensity <span class="set-sub">(subtle → long glide)</span></label><input type="range" id="setSmoothAmt" min="1" max="5" step="1" value="${s.smoothStrength ?? 3}"></div>
       <div class="set-row"><label>Interface animations</label><input type="checkbox" id="setAnim" ${s.animations ? "checked" : ""}></div>
       <div class="set-row"><label>Album artwork</label><input type="checkbox" id="setArt" ${s.showArt ? "checked" : ""}></div>
       <div class="set-row"><label>Compact rows (denser lists)</label><input type="checkbox" id="setCompact" ${s.compactRows ? "checked" : ""}></div>
@@ -1902,6 +2222,10 @@ function openSettings() {
       <div class="set-row"><label>Keep all tracks at the same volume</label><input type="checkbox" id="setNorm" ${s.normalizeDefault ? "checked" : ""}></div>
       <div class="set-hint">Automatic gain control evens out quiet/loud tracks (works for streams and YouTube mp3s without tags). Applies from the next track.</div>
       <div class="set-row"><label>Shuffle by default</label><input type="checkbox" id="setShuf" ${s.shuffleDefault ? "checked" : ""}></div>
+      <div class="set-row"><label>Resume where I left off</label><input type="checkbox" id="setResume" ${s.resumePlayback ? "checked" : ""}></div>
+      <div class="set-hint">On launch, reopen the last track paused at the spot you stopped — press play to continue.</div>
+      <div class="set-row"><label>Keep a listening history <span class="set-sub">(0 = off · up to 1000)</span></label><input type="number" id="setHist" class="num-in" min="0" max="1000" step="10" value="${s.historyLimit ?? 50}"></div>
+      <div class="set-hint">Recently played tracks appear in the <b>Recently played</b> tab in the sidebar.</div>
     </div>
     </section>
     <section class="set-pane" data-pane="youtube">
@@ -1934,6 +2258,7 @@ function openSettings() {
           <button id="setDlPick" class="btn-line sm" title="Choose a folder (any disk)">${ic(IC.folder)}</button>
         </span></div>
       <div class="set-row"><label>Tick “Save locally” by default when importing</label><input type="checkbox" id="setAutoSave" ${s.autoSaveImports ? "checked" : ""}></div>
+      <div class="set-row"><label>Resume unfinished downloads on launch</label><input type="checkbox" id="setResumeDl" ${s.resumeDownloads ? "checked" : ""}></div>
       <div class="set-hint">Where “Download locally” saves mp3 files (via yt-dlp). Pick any folder on any disk with the folder picker. Empty = <b>~/Music/MusicPlayer</b>. The folder is added as a source automatically after a download.</div>
     </div>
     </section>
@@ -1946,6 +2271,10 @@ function openSettings() {
       <div class="set-row"><label>Show what I'm listening to</label><input type="checkbox" id="setRpc" ${s.rpcEnabled ? "checked" : ""}></div>
       <div class="set-row"><label>Discord Application ID</label><input type="text" id="setRpcId" class="text-in" placeholder="Discord app client id" value="${esc(s.rpcClientId)}"></div>
       <div class="set-hint">Create an app at <b>discord.com/developers</b> → copy its <b>Application ID</b>. Requires the Discord desktop app running.</div>
+      <div class="set-row"><label>Show delay on a new track <span class="set-sub">(seconds)</span></label><input type="number" id="setRpcDelay" class="num-in" min="0" max="60" step="1" value="${s.rpcDelay ?? 0}"></div>
+      <div class="set-hint">Wait this long before updating Discord — skipping quickly through tracks then won't spam it (only what you settle on shows).</div>
+      <div class="set-row"><label>Remove when paused after <span class="set-sub">(seconds · 0 = at once)</span></label><input type="number" id="setRpcPause" class="num-in" min="0" max="3600" step="5" value="${s.rpcPauseClear ?? 0}"></div>
+      <div class="set-hint">When you pause, how long before the presence disappears from Discord. It comes back instantly on resume.</div>
     </div>
     </section>
     <section class="set-pane" data-pane="library">
@@ -1980,6 +2309,12 @@ function openSettings() {
           <button id="updateBtn" class="btn-line sm" hidden>Update</button>
         </span></div>
       <div class="set-hint">The app is built from the local source tree (mirrored on the private GitHub repo). “Update” rebuilds it, then click again to restart.</div>
+      <div class="set-row"><label>Switch / downgrade version</label>
+        <span class="dir-pick">
+          <select id="setVerSel" class="sel sm-sel wide"><option value="">Loading versions…</option></select>
+          <button id="setVerGo" class="btn-line sm" disabled>Build</button>
+        </span></div>
+      <div class="set-hint" id="setVerHint">Pick any earlier (or later) version — it checks it out and rebuilds, then restarts. Needs a clean source tree.</div>
     </div>
     <div class="set-actions"><button id="setReset" class="btn-line">↺ Reset to defaults</button></div>
     </section>
@@ -2043,6 +2378,7 @@ function openSettings() {
   $("#setCompact").addEventListener("change", e => { SETTINGS.setSetting("compactRows", e.target.checked); document.body.classList.toggle("compact", e.target.checked); });
   $("#setAnim").addEventListener("change", e => { SETTINGS.setSetting("animations", e.target.checked); document.body.classList.toggle("no-anim", !e.target.checked); });
   $("#setSmooth").addEventListener("change", e => { SETTINGS.setSetting("smoothScroll", e.target.checked); document.body.classList.toggle("smooth", e.target.checked); });
+  $("#setSmoothAmt").addEventListener("input", e => SETTINGS.setSetting("smoothStrength", Number(e.target.value)));
   $("#setVol").addEventListener("change", e => { SETTINGS.setSetting("defaultVolume", Number(e.target.value)); $("#volume").value = e.target.value; invoke("set_volume", { level: Number(e.target.value) / 100 }); });
   $("#setNorm").addEventListener("change", e => { SETTINGS.setSetting("normalizeDefault", e.target.checked); normalize = e.target.checked; invoke("set_agc", { on: normalize }).catch(() => {}); });
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); });
@@ -2082,6 +2418,28 @@ function openSettings() {
   $("#setLimit").addEventListener("change", e => SETTINGS.setSetting("searchLimit", Number(e.target.value)));
   $("#setPrefLocal").addEventListener("change", e => SETTINGS.setSetting("preferLocal", e.target.checked));
   $("#setAutoSave").addEventListener("change", e => SETTINGS.setSetting("autoSaveImports", e.target.checked));
+  $("#setResume").addEventListener("change", e => { SETTINGS.setSetting("resumePlayback", e.target.checked); if (e.target.checked) savePlayback(); else storeSave("playback", ""); });
+  $("#setResumeDl").addEventListener("change", e => { SETTINGS.setSetting("resumeDownloads", e.target.checked); if (e.target.checked) saveDlQueue(); else storeSave("dlqueue", ""); });
+  $("#setHist").addEventListener("change", e => {
+    const v = Math.max(0, Math.min(1000, Math.round(Number(e.target.value) || 0)));
+    e.target.value = v; SETTINGS.setSetting("historyLimit", v);
+    if (!v) { history2 = []; saveHistory(); } else if (history2.length > v) { history2.length = v; saveHistory(); }
+    applyUiPrefs();
+  });
+  $("#setRpcDelay").addEventListener("change", e => SETTINGS.setSetting("rpcDelay", Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0)))));
+  $("#setRpcPause").addEventListener("change", e => SETTINGS.setSetting("rpcPauseClear", Math.max(0, Math.min(3600, Math.round(Number(e.target.value) || 0)))));
+  $("#setCompactTop").addEventListener("change", e => { SETTINGS.setSetting("compactTopbar", e.target.checked); document.body.classList.toggle("compact-top", e.target.checked); });
+  $("#setTopPad").addEventListener("input", e => { SETTINGS.setSetting("topbarPad", Number(e.target.value)); document.documentElement.style.setProperty("--topbar-pad", `${e.target.value}px`); });
+  $("#setThumbSize").addEventListener("input", e => { SETTINGS.setSetting("thumbSize", Number(e.target.value)); document.documentElement.style.setProperty("--thumb-size", `${e.target.value}px`); });
+  $("#setThumbImg").addEventListener("change", e => { SETTINGS.setSetting("sliderImage", e.target.value.trim()); applyThumbImage(S()); });
+  $("#setThumbPick").addEventListener("click", async () => {
+    try {
+      const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Choose a slider image", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"] }] } });
+      if (p) { SETTINGS.setSetting("sliderImage", p); $("#setThumbImg").value = p; applyThumbImage(S()); }
+    } catch (e) { console.error("[thumb pick]", e); }
+  });
+  $("#setThumbClear").addEventListener("click", () => { SETTINGS.setSetting("sliderImage", ""); $("#setThumbImg").value = ""; applyThumbImage(S()); });
+  initVersionSwitcher();
   $("#setDlDir").addEventListener("change", e => SETTINGS.setSetting("downloadDir", e.target.value.trim()));
   $("#setDlPick").addEventListener("click", async () => {
     if (!IS_NATIVE) { flash("Folder picker needs the native app"); return; }
@@ -2378,7 +2736,7 @@ function renderFollowList() {
 // ─── Wire up ───
 async function init() {
   hydrateIcons();
-  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock()]);
+  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory()]);
   await loadLibrary();
   if (enrichLibrary()) saveLibrary();
   const relinked = relinkPlaylists(); // heal playlist paths after moved/re-added music
@@ -2397,6 +2755,7 @@ async function init() {
   $("#manualBtn").addEventListener("click", addManual);
   $("#rescanBtn").addEventListener("click", rescanAll);
   $("#navLibrary").addEventListener("click", showLibrary);
+  $("#navHistory").addEventListener("click", showHistory);
 
   $("#playBtn").addEventListener("click", togglePlay);
   $("#nextBtn").addEventListener("click", next);
@@ -2447,7 +2806,15 @@ async function init() {
   });
   $("#search").addEventListener("keydown", e => { if (e.key === "Enter") searchOnline(e.target.value.trim()); });
 
-  $("#importBtn").addEventListener("click", openImport);
+  $("#importBtn").addEventListener("click", openImportPick);
+  $("#pickClose").addEventListener("click", () => $("#pickModal").hidden = true);
+  $("#pickModal").addEventListener("click", e => { if (e.target.id === "pickModal") $("#pickModal").hidden = true; });
+  $("#pickYt").addEventListener("click", () => { $("#pickModal").hidden = true; openImport(); });
+  $("#pickSp").addEventListener("click", () => { $("#pickModal").hidden = true; openExtImport(); });
+  $("#extClose").addEventListener("click", () => { if (!_extBusy) $("#extModal").hidden = true; });
+  $("#extModal").addEventListener("click", e => { if (e.target.id === "extModal" && !_extBusy) $("#extModal").hidden = true; });
+  $("#extGo").addEventListener("click", runExtImport);
+  $("#extCancel").addEventListener("click", () => { _extCancel = true; extStatus("Stopping…"); });
   $("#importClose").addEventListener("click", () => $("#importModal").hidden = true);
   $("#importModal").addEventListener("click", e => { if (e.target.id === "importModal") $("#importModal").hidden = true; });
   $("#impFetch").addEventListener("click", impFetch);
@@ -2492,6 +2859,7 @@ async function init() {
   $("#settingsModal").addEventListener("click", e => { if (e.target.id === "settingsModal") $("#settingsModal").hidden = true; });
 
   window.addEventListener("blur", () => document.body.classList.add("win-blur"));
+  window.addEventListener("beforeunload", savePlayback); // best-effort save on close
   window.addEventListener("focus", () => document.body.classList.remove("win-blur"));
 
   // Never show the WebView's native right-click menu (Reload etc.) — custom
@@ -2514,7 +2882,10 @@ async function init() {
   listenDlEvents();
   startPolling();
   startProgressLoop();
+  initSmoothScroll();
   showLibrary();
+  await restorePlayback();   // restore last track (paused) where we left off
+  resumeDownloads();         // re-queue downloads that hadn't finished
 
   wireSetup();
   if (IS_NATIVE && !S().setupDone) openSetup();

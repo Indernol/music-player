@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
+mod importer;
 mod library;
 mod mpris;
 mod rpc;
@@ -189,6 +190,84 @@ async fn self_update(app: tauri::AppHandle) -> Result<String, String> {
     Ok("built".into())
 }
 
+#[derive(serde::Serialize)]
+struct VersionEntry {
+    version: String,
+    hash: String,
+    date: String,
+    current: bool,
+}
+
+/// List the version commits in the local git history (any branch) so the user
+/// can switch (downgrade or re-upgrade) between built versions.
+#[tauri::command]
+async fn list_versions() -> Result<Vec<VersionEntry>, String> {
+    let dir = source_dir()?;
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(args)
+            .output()
+    };
+    let out = git(&["log", "--all", "--date-order", "--pretty=%H\x1f%cs\x1f%s", "-n", "120"])
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err("not a git checkout (version switching needs the source repo)".into());
+    }
+    let head = git(&["rev-parse", "HEAD"])
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut seen = std::collections::HashSet::new();
+    let mut list = Vec::new();
+    for line in text.lines() {
+        let mut it = line.splitn(3, '\x1f');
+        let hash = it.next().unwrap_or("").to_string();
+        let date = it.next().unwrap_or("").to_string();
+        let subj = it.next().unwrap_or("");
+        let ver = subj.split_whitespace().next().unwrap_or("");
+        // Only "vX…" commit subjects; keep the newest occurrence of each version.
+        if !ver.starts_with('v') || !ver[1..].starts_with(|c: char| c.is_ascii_digit()) {
+            continue;
+        }
+        if !seen.insert(ver.to_string()) {
+            continue;
+        }
+        let current = !hash.is_empty() && hash == head;
+        list.push(VersionEntry { version: ver.to_string(), hash, date, current });
+    }
+    Ok(list)
+}
+
+/// Check out a version commit and rebuild into it, then the UI restarts.
+/// Refuses if the working tree is dirty (would clobber local edits).
+#[tauri::command]
+async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, String> {
+    let dir = source_dir()?;
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(args)
+            .output()
+    };
+    let status = git(&["status", "--porcelain"]).map_err(|e| e.to_string())?;
+    if !String::from_utf8_lossy(&status.stdout).trim().is_empty() {
+        return Err("The local source has uncommitted changes — can't switch versions safely.".into());
+    }
+    let co = git(&["-c", "advice.detachedHead=false", "checkout", &rev]).map_err(|e| e.to_string())?;
+    if !co.status.success() {
+        return Err(format!(
+            "git checkout failed: {}",
+            String::from_utf8_lossy(&co.stderr).trim()
+        ));
+    }
+    // Rebuild at the newly checked-out version (reuses the self-update build).
+    self_update(app).await
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -216,7 +295,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             scan, scan_diff, play, preload, pause, resume, stop, set_volume, set_agc, seek, status,
-            source_version, self_update, restart_app,
+            source_version, self_update, restart_app, list_versions, switch_version,
             play_stream, preload_stream, prefetch_stream,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
             youtube::yt_playlist_preview,
@@ -227,7 +306,8 @@ fn main() {
             mpris::media_update, mpris::media_playback,
             library::cover, library::read_image, library::delete_file, library::open_path,
             store::store_load, store::store_save,
-            rpc::rpc_update, rpc::rpc_clear
+            rpc::rpc_update, rpc::rpc_clear,
+            importer::import_spotify
         ])
         .run(tauri::generate_context!())
         .expect("error while running Music Player");
