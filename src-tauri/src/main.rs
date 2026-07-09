@@ -226,19 +226,34 @@ fn do_build(app: &tauri::AppHandle) -> Result<String, String> {
 /// reflects GitHub, not whatever happens to be checked out locally.
 #[tauri::command]
 async fn source_version() -> Result<String, String> {
-    let dir = source_dir()?;
-    let _ = git_out(
-        &dir,
-        &["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=10", "fetch", "origin", "--tags", "--quiet"],
-    );
-    let txt = git_out(&dir, &["show", "origin/main:src-tauri/tauri.conf.json"])
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .or_else(|| std::fs::read_to_string(dir.join("tauri.conf.json")).ok())
-        .ok_or("cannot read version")?;
-    let v: serde_json::Value = serde_json::from_str(&txt).map_err(|e| e.to_string())?;
-    v["version"].as_str().map(str::to_string).ok_or_else(|| "no version field".into())
+    if let Ok(dir) = source_dir() {
+        let _ = git_out(
+            &dir,
+            &["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=10", "fetch", "origin", "--tags", "--quiet"],
+        );
+        let txt = git_out(&dir, &["show", "origin/main:src-tauri/tauri.conf.json"])
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .or_else(|| std::fs::read_to_string(dir.join("tauri.conf.json")).ok())
+            .ok_or("cannot read version")?;
+        let v: serde_json::Value = serde_json::from_str(&txt).map_err(|e| e.to_string())?;
+        return v["version"].as_str().map(str::to_string).ok_or_else(|| "no version field".into());
+    }
+
+    let resp = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .get("https://api.github.com/repos/Indernol/music-player/releases/latest")
+        .set("User-Agent", "MusicPlayer")
+        .call()
+        .map_err(|e| e.to_string())?;
+    let text = resp.into_string().map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    v["tag_name"]
+        .as_str()
+        .map(|s| s.trim_start_matches('v').to_string())
+        .ok_or_else(|| "no tag_name in release".into())
 }
 
 /// Relaunch the app process — used right after a build replaced the binary.
@@ -251,11 +266,21 @@ fn restart_app(app: tauri::AppHandle) {
 /// then rebuild. (The app's source tree is only ever a clean checkout.)
 #[tauri::command]
 async fn self_update(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = source_dir()?;
-    let _ = git_out(&dir, &["fetch", "origin", "--tags", "--quiet"]);
-    // Best-effort: if origin/main isn't available (offline), just build what's here.
-    let _ = git_out(&dir, &["checkout", "-B", "main", "origin/main"]);
-    do_build(&app)
+    if let Ok(dir) = source_dir() {
+        let _ = git_out(&dir, &["fetch", "origin", "--tags", "--quiet"]);
+        let _ = git_out(&dir, &["checkout", "-B", "main", "origin/main"]);
+        return do_build(&app);
+    }
+
+    let url = "https://github.com/Indernol/music-player/releases/latest";
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd").args(["/C", "start", url]).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(url).spawn();
+
+    Err("Opened the download page in your browser. Please run the new installer to update.".into())
 }
 
 #[derive(serde::Serialize)]
