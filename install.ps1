@@ -65,8 +65,8 @@ function Install-Tools {
     if (-not (Test-Path $ffmpegExe)) {
         Say "Downloading ffmpeg..."
         $ffmpegZip = Join-Path $tmp.FullName "ffmpeg.zip"
-        # Download a standard Windows build of ffmpeg
-        Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $ffmpegZip
+        # Download a standard Windows build of ffmpeg from GitHub (faster and more reliable than gyan.dev in PowerShell)
+        Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $ffmpegZip
         Say "Extracting ffmpeg..."
         Expand-Archive -Path $ffmpegZip -DestinationPath $tmp.FullName -Force
         $extractedFfmpeg = Get-ChildItem -Path $tmp.FullName -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
