@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MusicPlayer",
-  "version": "0.14.5",
-  "identifier": "com.forclaude.musicplayer",
+  "version": "0.14.6",
+  "identifier": "com.indernol.musicplayer",
   "build": {
     "frontendDist": "../src"
   },

@@ -1,8 +1,7 @@
-//! YouTube integration via the yt-dlp CLI — same approach as the desktop
-//! play_yt_audio.sh script: flat-playlist extraction for search/playlists and
-//! the android+web player client to dodge bot checks. Stream URLs are resolved
-//! on demand and cached (they expire server-side), so a track the user already
-//! looked at starts instantly.
+//! YouTube integration via the yt-dlp CLI — flat-playlist extraction for
+//! search/playlists and multi-client rotation to dodge bot checks. Stream URLs
+//! are resolved on demand and cached (they expire server-side), so a track the
+//! user already looked at starts instantly.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -57,10 +56,10 @@ pub struct YtCfg {
 }
 
 /// Append yt-dlp failures to a persistent log so real error causes can be
-/// inspected after the fact (~/.local/share/com.forclaude.musicplayer/yt.log).
+/// inspected after the fact (~/.local/share/com.indernol.musicplayer/yt.log).
 pub fn dbg_log(msg: &str) {
     if let Ok(home) = std::env::var("HOME") {
-        let dir = format!("{home}/.local/share/com.forclaude.musicplayer");
+        let dir = format!("{home}/.local/share/com.indernol.musicplayer");
         let _ = std::fs::create_dir_all(&dir);
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -90,7 +89,7 @@ fn check_bin(path: &str) -> Result<String, String> {
 
 /// Candidate locations: PATH, ~/.local/bin, any "<dir>/bin/yt-dlp" under
 /// Desktop (follows symlinks to external drives), any "<drive>/<dir>/bin/yt-dlp"
-/// on removable media (host path and its /run/host view inside the distrobox),
+/// on removable media (host path and its /run/host view inside a container),
 /// then linuxbrew. This survives the user renaming folders on the drive.
 fn scan_bins() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_default();

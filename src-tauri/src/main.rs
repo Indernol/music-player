@@ -135,10 +135,10 @@ fn source_dir() -> Result<std::path::PathBuf, String> {
     }
 }
 
-const DEV_BOX: &str = "mp-dev"; // distrobox holding git + the Rust toolchain
+const DEV_BOX: &str = "mp-dev"; // container holding git + the Rust toolchain
 
 fn dev_user() -> String {
-    std::env::var("USER").unwrap_or_else(|_| "indernol".into())
+    std::env::var("USER").unwrap_or_else(|_| "user".into())
 }
 
 /// Best-effort: make sure the dev container is running before we exec into it.
@@ -147,7 +147,7 @@ fn ensure_devbox() {
 }
 
 /// Run git in the source repo. Immutable/atomic hosts (Bazzite/Silverblue) have
-/// no git on the host — the dev tools live in the mp-dev distrobox — so if the
+/// no git on the host — the dev tools live in the dev container — so if the
 /// host git isn't found, run git INSIDE that container (the repo path is shared).
 fn git_out(dir: &std::path::Path, args: &[&str]) -> std::io::Result<std::process::Output> {
     match std::process::Command::new("git").arg("-C").arg(dir).args(args).output() {
@@ -164,7 +164,7 @@ fn git_out(dir: &std::path::Path, args: &[&str]) -> std::io::Result<std::process
 }
 
 /// The build command. Prefer `cargo` on PATH (app launched inside the toolchain
-/// env); otherwise build inside the `mp-dev` distrobox where the Rust toolchain
+/// env); otherwise build inside the dev container where the Rust toolchain
 /// lives — so the in-app Update / downgrade work even when the app runs on a
 /// host that has no cargo. `touch tauri.conf.json` forces Tauri to re-embed the
 /// frontend (its build script doesn't watch src/).

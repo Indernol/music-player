@@ -1,7 +1,14 @@
 # Google OAuth2 — read-only metadata sync (design)
 
 Goal: mirror the user's YouTube Music **playlist and like *names*** into the app as
-organizational reference. **No stream access, ever** (see `COMPLIANCE.md`).
+organizational reference.
+
+> **Note (2026-07)**: The original version of this doc referenced a "no yt-dlp"
+> compliance stance (`COMPLIANCE.md`). That stance was reversed by the project
+> owner — the app now fully supports yt-dlp-based search, streaming and downloads.
+> This OAuth sync feature remains useful as a *metadata* bridge: it lets the user
+> see their YouTube Music library (playlists, liked songs) inside the app and map
+> them to local or streamable tracks, without manually re-searching everything.
 
 ## Scope
 
@@ -12,7 +19,7 @@ https://www.googleapis.com/auth/youtube.readonly
 ```
 
 This grants reading playlists/subscriptions metadata via the **YouTube Data API v3**.
-It does **not** grant stream URLs (the API never exposes them — that's the whole point).
+It does **not** grant stream URLs (the API never exposes them).
 
 ## Flow (native desktop → loopback)
 
@@ -37,9 +44,9 @@ Desktop apps use the **loopback IP redirect** flow (no client secret shipped in 
 - New Rust module `src-tauri/src/sync.rs` (not created yet — roadmap item #4).
 - Exposes commands: `oauth_begin()`, `oauth_status()`, `sync_playlists() -> Vec<RemotePlaylist>`.
 - The frontend shows remote playlists as read-only reference; the user maps them to
-  **local** tracks manually or via title/artist matching. No remote track is ever streamed.
+  **local** tracks manually or via title/artist matching.
 
 ## Explicitly out of scope
 
-- No `videos.list` → stream resolution.
-- No `yt-dlp` / lavalink / any stream extractor (see `COMPLIANCE.md`).
+- No direct playback through the YouTube Data API (it doesn't provide stream URLs).
+- Streaming is handled separately by the yt-dlp pipeline (`youtube.rs` / `stream.rs`).

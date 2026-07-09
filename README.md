@@ -1,7 +1,6 @@
 # 🎵 Music Player
 
 A **native, local-first** desktop music player (Tauri + Rust audio engine).
-Independent project — lives next to `moonbot-src/` but shares nothing with it.
 
 ## Install
 
@@ -15,11 +14,16 @@ curl -fsSL https://raw.githubusercontent.com/Indernol/music-player/main/install.
 ```
 
 It picks the `.deb`/`.rpm` for your package manager, or falls back to the
-portable AppImage. Pin a version with `MP_VERSION=v0.9.2`; for a private repo set
-`GITHUB_TOKEN`.
+portable AppImage. Pin a version with `MP_VERSION=v0.9.2`.
 
-**Windows:** run the `*-setup.exe` from the release, or once the manifests in
-[`winget/`](winget/) are published: `winget install Indernol.MusicPlayer`.
+**Windows (PowerShell), one line:**
+
+```powershell
+irm https://raw.githubusercontent.com/Indernol/music-player/main/install.ps1 | iex
+```
+
+Or download and run the `*-setup.exe` from the release page. Once the manifests
+in [`winget/`](winget/) are published: `winget install Indernol.MusicPlayer`.
 
 > `yt-dlp` and `ffmpeg` are fetched automatically on first use (Linux). On
 > Windows, install them and put them on `PATH`.
@@ -71,32 +75,35 @@ music-player/
 ├── src/                    Frontend (static, no bundler — uses window.__TAURI__)
 │   ├── index.html          Layout: library · playlists · player bar
 │   ├── main.js             IPC to the Rust core + UI wiring (browser-mock fallback)
-│   ├── playlists.js        Playlist CRUD (localStorage in this scaffold)
+│   ├── playlists.js        Playlist CRUD helpers
+│   ├── settings.js         Settings defaults, themes and accent colors
+│   ├── store.js            Tauri IPC wrapper with localStorage fallback
 │   └── style.css
 ├── src-tauri/              Native core (Rust)
 │   ├── src/
-│   │   ├── main.rs         Tauri app + command handlers
+│   │   ├── main.rs         Tauri app, command handlers, self-update + version switching
 │   │   ├── audio.rs        Audio engine: dedicated thread + mpsc + rodio Sink (epoch-tagged)
 │   │   ├── stream.rs       HTTP range-request Read+Seek source (instant streaming)
 │   │   ├── youtube.rs      yt-dlp bridge: search, playlists, URL resolve+cache, downloads
 │   │   ├── mpris.rs        MPRIS D-Bus media controls (souvlaki) → desktop widgets
-│   │   └── library.rs      Filesystem scan + tag reading (lofty)
-│   ├── examples/
-│   │   ├── stream_test.rs  Headless check: decode a remote URL through HttpStream
-│   │   └── local_test.rs   Headless check: local decode + seek (rodio 0.21 path)
+│   │   ├── rpc.rs          Discord Rich Presence (IPC, auto-reconnect)
+│   │   ├── library.rs      Filesystem scan + tag reading (lofty)
+│   │   ├── store.rs        Generic JSON key-value persistence (atomic writes)
+│   │   └── importer.rs     Spotify playlist/album import (public embed scraping)
 │   ├── Cargo.toml
 │   ├── build.rs
 │   └── tauri.conf.json
 └── docs/
-    ├── COMPLIANCE.md       The hard boundary (no stream extraction) + why
-    └── oauth-sync.md       Google OAuth2 read-only metadata sync design
+    └── oauth-sync.md       Google OAuth2 read-only metadata sync design (roadmap #4)
 ```
 
 Module boundaries (each folder = one responsibility):
 - **audio** — decode + output only. No knowledge of the library or UI.
 - **library** — filesystem + tags only. Returns plain `Track` structs.
+- **youtube** — yt-dlp orchestration: search, resolve, download, cache.
+- **stream** — HTTP range-request adapter for remote audio.
 - **frontend** — rendering + user intent. Talks to the core via `invoke(...)`.
-- **sync** (docs, not yet wired) — read-only metadata bridge, isolated from playback.
+- **sync** (docs only, not yet wired) — read-only metadata bridge, isolated from playback.
 
 ## Prerequisites
 
@@ -112,11 +119,11 @@ Module boundaries (each folder = one responsibility):
 (mutable, rootless, no host password, shares your `$HOME` and display):
 
 ```bash
-distrobox create --name mp-dev --image registry.fedoraproject.org/fedora:41 --yes
-distrobox enter mp-dev -- sudo dnf install -y \
+distrobox create --name dev --image registry.fedoraproject.org/fedora:41 --yes
+distrobox enter dev -- sudo dnf install -y \
   webkit2gtk4.1-devel openssl-devel curl wget file librsvg2-devel \
   libappindicator-gtk3-devel alsa-lib-devel gcc gcc-c++ nodejs
-distrobox enter mp-dev -- sudo dnf group install -y "c-development"
+distrobox enter dev -- sudo dnf group install -y "c-development"
 ```
 
 Rust lives in `~/.cargo` (shared home), so it's available inside the container too.
@@ -126,19 +133,17 @@ Rust lives in `~/.cargo` (shared home), so it's available inside the container t
 ```bash
 npm install          # installs @tauri-apps/cli (host is fine)
 
-# Inside the dev container:
-distrobox enter mp-dev -- bash -lc 'source ~/.cargo/env; \
-  cd ~/Desktop/"for claude"/music-player/src-tauri && cargo build'
+# Inside the dev container (or directly if you have the toolchain on the host):
+cd music-player/src-tauri && cargo build
 
 # Launch the native window (embeds the static frontend — no dev server needed):
-distrobox enter mp-dev -- \
-  "$HOME/Desktop/for claude/music-player/src-tauri/target/debug/music-player"
+./src-tauri/target/debug/music-player
 ```
 
 For hot-reload development instead of a one-off binary:
-`distrobox enter mp-dev -- bash -lc 'source ~/.cargo/env; cd ~/Desktop/"for claude"/music-player && npm run dev'`.
+`npm run dev` (or inside the container: `distrobox enter dev -- bash -lc 'source ~/.cargo/env; cd ~/music-player && npm run dev'`).
 
-> ✅ **Verified** (2026-07): builds clean inside a Fedora 41 distrobox (rodio 0.21 /
+> ✅ **Verified** (2026-07): builds clean inside a Fedora 41 container (rodio 0.21 /
 > lofty 0.21 / tauri 2.11), `cargo build` → exit 0. Streaming pipeline verified
 > headlessly: a real YouTube m4a decoded over HTTP ranges (`cargo run --example
 > stream_test -- <url>`) and local mp3 decode + seek (`--example local_test`).
@@ -156,14 +161,12 @@ For hot-reload development instead of a one-off binary:
    sequential `Sink` doesn't provide.
 4. Google OAuth2 read-only metadata sync (`docs/oauth-sync.md`) — needs a
    user-provided Google Cloud Client ID.
-5. Optional official YouTube IFrame provider (separate, opt-in — see COMPLIANCE).
+5. Optional official YouTube IFrame provider (separate, opt-in).
 
 ## Versioning / GitHub
 
-Standard private-repo workflow for a desktop app (releases + CI) — **not** MoonBot's
-VPS `tar → integrity → pm2` pipeline, which is bot-server-specific. The repo is
-initialized locally; create the private remote with:
+Standard workflow for a desktop app (releases + CI). Create the remote with:
 
 ```bash
-gh repo create music-player --private --source=. --remote=origin --push
+gh repo create music-player --source=. --remote=origin --push
 ```

@@ -1,7 +1,7 @@
 name: Release
 
 # Build the Linux and Windows bundles and attach them to a GitHub Release.
-# Trigger by pushing a tag like `v0.9.2`, or run manually.
+# Trigger by pushing a tag like `v0.14.5`, or run manually.
 on:
   push:
     tags:
@@ -17,7 +17,7 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-22.04 # Linux: .deb, .rpm, .AppImage
-          - platform: windows-latest # Windows: NSIS .exe + .msi
+          - platform: windows-latest # Windows: NSIS .exe
     runs-on: ${{ matrix.platform }}
 
     steps:
@@ -52,21 +52,30 @@ jobs:
           workspaces: src-tauri
 
       - name: Build the app and publish the release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Music Player ${{ github.ref_name }}"
           releaseBody: |
-            Automated build.
+            ## Install
 
-            **Linux:** download the `.AppImage` (works on any distro — `chmod +x` then run),
-            or the `.deb` / `.rpm` for your package manager. Or run the one-line installer:
-            `curl -fsSL https://raw.githubusercontent.com/Indernol/music-player/main/install.sh | bash`
+            ### Linux
+            One-line installer (picks the right package for your distro):
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/Indernol/music-player/main/install.sh | bash
+            ```
+            Or download manually: `.AppImage` (any distro), `.deb` (Debian/Ubuntu), `.rpm` (Fedora/RHEL).
 
-            **Windows:** run the `*-setup.exe` installer (or `winget install Indernol.MusicPlayer` once published).
+            ### Windows
+            One-line installer (PowerShell):
+            ```powershell
+            irm https://raw.githubusercontent.com/Indernol/music-player/main/install.ps1 | iex
+            ```
+            Or download and run the `*-setup.exe` installer below.
 
-            yt-dlp and ffmpeg are fetched automatically on first use (Linux); on Windows put them on PATH.
+            > `yt-dlp` and `ffmpeg` are fetched automatically on first use (Linux).
+            > On Windows, install them and add to PATH.
           releaseDraft: false
           prerelease: false

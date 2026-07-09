@@ -1,5 +1,5 @@
 //! Desktop media integration — MPRIS over D-Bus on Linux (via souvlaki, pure-Rust
-//! zbus backend, so no libdbus needed inside the distrobox). This is what makes
+//! zbus backend, so no libdbus needed inside a container). This is what makes
 //! KDE/GNOME media widgets, playerctl and media keys see the current track.
 //! Commands push state from the frontend; widget/media-key actions come back as
 //! "media" Tauri events the frontend listens to.

@@ -17,3 +17,6 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# Private dev notes — never push to GitHub
+CLAUDE.md

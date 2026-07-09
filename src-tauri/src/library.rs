@@ -91,8 +91,8 @@ pub async fn delete_file(path: String) -> Result<(), String> {
 
 /// Reveal a path in the host file manager. For a file we open its containing
 /// folder (so it works for both source folders and individual tracks). The app
-/// runs inside a distrobox container whose `xdg-open` forwards to the host; if
-/// that isn't wired, fall back to `distrobox-host-exec xdg-open`.
+/// may run inside a container whose `xdg-open` forwards to the host; if that
+/// isn't wired, fall back to `distrobox-host-exec xdg-open`.
 #[tauri::command]
 pub fn open_path(path: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
