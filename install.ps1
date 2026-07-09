@@ -20,6 +20,73 @@ if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" 
 function Say($msg)  { Write-Host ":: $msg" -ForegroundColor Magenta }
 function Die($msg)  { Write-Host "error: $msg" -ForegroundColor Red; exit 1 }
 
+# --- Prerequisites ---
+
+function Install-VCRedist {
+    $regPath = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+    if (-not (Test-Path $regPath)) {
+        Say "Installing Visual C++ Redistributable..."
+        $vcUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        $vcExe = Join-Path $tmp.FullName "vc_redist.x64.exe"
+        Invoke-WebRequest -Uri $vcUrl -OutFile $vcExe
+        Start-Process -FilePath $vcExe -ArgumentList "/install /quiet /norestart" -Wait
+    } else {
+        Say "Visual C++ Redistributable is already installed."
+    }
+}
+
+function Install-WebView2 {
+    $regPath1 = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    $regPath2 = "HKCU:\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    if (-not (Test-Path $regPath1) -and -not (Test-Path $regPath2)) {
+        Say "Installing WebView2 Runtime..."
+        $wvUrl = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+        $wvExe = Join-Path $tmp.FullName "MicrosoftEdgeWebview2Setup.exe"
+        Invoke-WebRequest -Uri $wvUrl -OutFile $wvExe
+        Start-Process -FilePath $wvExe -ArgumentList "/silent /install" -Wait
+    } else {
+        Say "WebView2 Runtime is already installed."
+    }
+}
+
+function Install-Tools {
+    $binDir = Join-Path $env:LOCALAPPDATA "$app\bin"
+    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+    
+    # yt-dlp
+    $ytdlpExe = Join-Path $binDir "yt-dlp.exe"
+    if (-not (Test-Path $ytdlpExe)) {
+        Say "Downloading yt-dlp..."
+        Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile $ytdlpExe
+    }
+    
+    # ffmpeg
+    $ffmpegExe = Join-Path $binDir "ffmpeg.exe"
+    if (-not (Test-Path $ffmpegExe)) {
+        Say "Downloading ffmpeg..."
+        $ffmpegZip = Join-Path $tmp.FullName "ffmpeg.zip"
+        # Download a standard Windows build of ffmpeg
+        Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $ffmpegZip
+        Say "Extracting ffmpeg..."
+        Expand-Archive -Path $ffmpegZip -DestinationPath $tmp.FullName -Force
+        $extractedFfmpeg = Get-ChildItem -Path $tmp.FullName -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+        if ($extractedFfmpeg) {
+            Copy-Item -Path $extractedFfmpeg.FullName -Destination $ffmpegExe -Force
+            $extractedFfprobe = Get-ChildItem -Path $tmp.FullName -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+            if ($extractedFfprobe) {
+                Copy-Item -Path $extractedFfprobe.FullName -Destination (Join-Path $binDir "ffprobe.exe") -Force
+            }
+        }
+    }
+    
+    # Add binDir to User PATH
+    $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+    if ($userPath -notlike "*$binDir*") {
+        [Environment]::SetEnvironmentVariable('PATH', "$userPath;$binDir", 'User')
+        Say "Added $binDir to your PATH."
+    }
+}
+
 # --- pick the release ---
 if ($env:MP_VERSION) {
     $relUrl = "$api/tags/$env:MP_VERSION"
@@ -40,6 +107,10 @@ if (-not $assets) { Die "No downloadable assets in this release — build one fi
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "mp-install-$(Get-Random)") -Force
 
 try {
+    Install-VCRedist
+    Install-WebView2
+    Install-Tools
+
     if ($env:MP_PORTABLE -eq '1') {
         # --- Portable zip mode ---
         $zipUrl = $assets | Where-Object { $_ -match '\.zip$' -and $_ -match 'windows' } | Select-Object -First 1
