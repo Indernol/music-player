@@ -95,7 +95,12 @@ export async function loadSettings() {
 
 export function getSettings() { return _s; }
 
+let _saveTimer = null;
 export function setSetting(key, value) {
+  if (_s[key] === value) return;
   _s[key] = value;
-  storeSave("settings", JSON.stringify(_s));
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    storeSave("settings", JSON.stringify(_s));
+  }, 100);
 }

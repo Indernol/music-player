@@ -8,6 +8,17 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
+
+#[allow(unused_mut)]
+fn sys_cmd(prog: &str) -> Command {
+    let mut cmd = Command::new(prog);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
@@ -77,7 +88,7 @@ pub fn dbg_log(msg: &str) {
 }
 
 fn check_bin(path: &str) -> Result<String, String> {
-    let out = Command::new(path)
+    let out = sys_cmd(path)
         .arg("--version")
         .output()
         .map_err(|e| e.to_string())?;
@@ -213,7 +224,7 @@ fn install_ffmpeg() -> Result<String, String> {
     }
     let _ = std::fs::remove_dir_all(&ex);
     std::fs::create_dir_all(&ex).map_err(|e| e.to_string())?;
-    let ok = Command::new("tar")
+    let ok = sys_cmd("tar")
         .arg("-xJf")
         .arg(&tmp)
         .arg("-C")
@@ -382,7 +393,7 @@ pub async fn yt_install(cfg: State<'_, YtCfg>) -> Result<String, String> {
 }
 
 fn run_ytdlp_raw(bin: &str, args: &[&str], cookies: Option<&str>) -> Result<String, String> {
-    let mut cmd = Command::new(bin);
+    let mut cmd = sys_cmd(bin);
     cmd.args(args);
     if let Some(c) = cookies {
         cmd.arg("--cookies-from-browser").arg(c);
@@ -889,7 +900,8 @@ fn download_attempt(
     cookies: Option<&str>,
     client: Option<&str>,
 ) -> Result<String, String> {
-    let mut cmd = Command::new(bin);
+    let mut cmd = sys_cmd(bin);
+    cmd.arg("--no-playlist");
     if let Some(c) = client {
         cmd.arg("--extractor-args").arg(c);
     }
