@@ -53,7 +53,7 @@ pub struct PlaybackStatus {
 // ignored instead of being misread as a gapless track transition.
 pub struct AudioController {
     tx: Mutex<Sender<AudioCmd>>,
-    sink: Arc<Mutex<(u64, Option<Sink>)>>,
+    sink: Arc<Mutex<(u64, Option<Arc<Sink>>)>>,
     next_epoch: AtomicU64,
     agc: Arc<AtomicBool>,
     // Master volume survives hard starts: every fresh Sink is created at 1.0 by
@@ -110,7 +110,7 @@ fn append_url(sink: &Sink, url: &str, gain: f32, agc: bool) {
 impl AudioController {
     pub fn new() -> Self {
         let (tx, rx) = channel::<AudioCmd>();
-        let sink: Arc<Mutex<(u64, Option<Sink>)>> = Arc::new(Mutex::new((0, None)));
+        let sink: Arc<Mutex<(u64, Option<Arc<Sink>>)>> = Arc::new(Mutex::new((0, None)));
         let sink_t = sink.clone();
         let agc = Arc::new(AtomicBool::new(true));
         let agc_t = agc.clone();
@@ -126,37 +126,39 @@ impl AudioController {
                     return;
                 }
             };
-            *sink_t.lock().unwrap() = (0, Some(Sink::connect_new(stream.mixer())));
+            *sink_t.lock().unwrap() = (0, Some(Arc::new(Sink::connect_new(stream.mixer()))));
 
             while let Ok(cmd) = rx.recv() {
                 let agc_on = agc_t.load(Ordering::Relaxed);
                 match cmd {
                     AudioCmd::Play(path, gain, epoch) => {
-                        let new_sink = Sink::connect_new(stream.mixer());
+                        let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
                         new_sink.set_volume(*vol_t.lock().unwrap());
                         append_track(&new_sink, &path, gain, agc_on);
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
                     }
                     AudioCmd::Preload(path, gain) => {
-                        if let (_, Some(s)) = &*sink_t.lock().unwrap() {
-                            append_track(s, &path, gain, agc_on);
+                        let s = sink_t.lock().unwrap().1.clone();
+                        if let Some(s) = s {
+                            append_track(&s, &path, gain, agc_on);
                         }
                     }
                     AudioCmd::PlayUrl(url, gain, epoch) => {
-                        let new_sink = Sink::connect_new(stream.mixer());
+                        let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
                         new_sink.set_volume(*vol_t.lock().unwrap());
                         append_url(&new_sink, &url, gain, agc_on);
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
                     }
                     AudioCmd::PreloadUrl(url, gain) => {
-                        if let (_, Some(s)) = &*sink_t.lock().unwrap() {
-                            append_url(s, &url, gain, agc_on);
+                        let s = sink_t.lock().unwrap().1.clone();
+                        if let Some(s) = s {
+                            append_url(&s, &url, gain, agc_on);
                         }
                     }
                     AudioCmd::Clear(epoch) => {
-                        let s = Sink::connect_new(stream.mixer());
+                        let s = Arc::new(Sink::connect_new(stream.mixer()));
                         s.set_volume(*vol_t.lock().unwrap());
                         *sink_t.lock().unwrap() = (epoch, Some(s));
                     }
@@ -188,7 +190,7 @@ impl AudioController {
         self.next_epoch.fetch_add(1, Ordering::Relaxed) + 1
     }
     fn with_sink<R>(&self, f: impl FnOnce(&Sink) -> R) -> Option<R> {
-        self.sink.lock().unwrap().1.as_ref().map(f)
+        self.sink.lock().unwrap().1.as_ref().map(|s| f(&**s))
     }
 
     pub fn play(&self, path: String, gain: f32) -> u64 {

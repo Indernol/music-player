@@ -4,6 +4,8 @@
 //! Commands push state from the frontend; widget/media-key actions come back as
 //! "media" Tauri events the frontend listens to.
 
+#![allow(unused_variables, dead_code, unused_imports)]
+
 #[cfg(unix)]
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
