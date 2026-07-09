@@ -1,5 +1,5 @@
 // Prevents an extra console window on Windows in release.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
 mod importer;
@@ -332,6 +332,13 @@ async fn switch_version(app: tauri::AppHandle, rev: String) -> Result<String, St
 }
 
 fn main() {
+    // FORCE-LOG IMMEDIATELY TO PROVE THE APP STARTED
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        let dir = std::path::PathBuf::from(local).join("com.indernol.musicplayer");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join("startup.log"), "APP STARTED IN MAIN\n");
+    }
+
     std::panic::set_hook(Box::new(|info| {
         let dir = if let Ok(local) = std::env::var("LOCALAPPDATA") {
             std::path::PathBuf::from(local).join("com.indernol.musicplayer")
