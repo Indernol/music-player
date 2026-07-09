@@ -4,6 +4,7 @@
 //! Commands push state from the frontend; widget/media-key actions come back as
 //! "media" Tauri events the frontend listens to.
 
+#[cfg(unix)]
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
     SeekDirection,
@@ -11,6 +12,9 @@ use souvlaki::{
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
+
+#[cfg(not(unix))]
+pub struct MediaControls;
 
 #[derive(Default)]
 pub struct MediaState(pub Mutex<Option<MediaControls>>);
@@ -21,6 +25,12 @@ pub fn init(app: &AppHandle, state: &MediaState) -> Result<(), String> {
     ensure(app, state)
 }
 
+#[cfg(not(unix))]
+fn ensure(_app: &AppHandle, _state: &MediaState) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(unix)]
 fn ensure(app: &AppHandle, state: &MediaState) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|_| "media lock poisoned")?;
     if guard.is_some() {
@@ -76,6 +86,7 @@ pub fn media_update(
     duration_secs: f64,
 ) -> Result<(), String> {
     ensure(&app, &state)?;
+    #[cfg(unix)]
     if let Some(c) = state.0.lock().map_err(|_| "media lock")?.as_mut() {
         c.set_metadata(MediaMetadata {
             title: Some(&title),
@@ -97,6 +108,7 @@ pub fn media_playback(
     position_secs: f64,
 ) -> Result<(), String> {
     ensure(&app, &state)?;
+    #[cfg(unix)]
     if let Some(c) = state.0.lock().map_err(|_| "media lock")?.as_mut() {
         let progress = Some(MediaPosition(Duration::from_secs_f64(position_secs.max(0.0))));
         let pb = if playing {

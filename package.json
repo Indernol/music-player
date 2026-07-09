@@ -1,6 +1,6 @@
 {
   "name": "music-player",
-  "version": "0.14.9",
+  "version": "0.14.10",
   "private": true,
   "description": "Native local-first music player (Tauri + Rust).",
   "scripts": {

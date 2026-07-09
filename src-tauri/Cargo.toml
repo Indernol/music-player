@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.14.9"
+version = "0.14.10"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -38,8 +38,7 @@ base64 = "0.22"
 [target.'cfg(unix)'.dependencies]
 souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }
 
-[target.'cfg(not(unix))'.dependencies]
-souvlaki = "0.8"
+
 
 [profile.release]
 opt-level = 3
