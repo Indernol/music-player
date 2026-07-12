@@ -2496,6 +2496,7 @@ function openSettings() {
     </section>
     <section class="set-pane" data-pane="youtube">
     <div class="set-group"><div class="set-title">YouTube</div>
+      <div class="set-hint" style="margin-bottom:10px">Search, streaming and downloads work out of the box through a <b>built-in engine</b> — no setup needed. yt-dlp below is an <b>optional</b> desktop booster (used first when present); on Android the built-in engine is always used.</div>
       <div class="set-row"><label>yt-dlp binary</label>
         <span class="dir-pick">
           <input type="text" id="setYtPath" class="text-in" placeholder="auto-detect" value="${esc(s.ytdlpPath)}">

@@ -38,8 +38,8 @@ pub struct YtState {
 /// Live download processes, so the frontend can cancel them.
 #[derive(Default)]
 pub struct DlState {
-    procs: Mutex<HashMap<String, Arc<Mutex<Child>>>>,
-    canceled: Mutex<HashSet<String>>,
+    pub procs: Mutex<HashMap<String, Arc<Mutex<Child>>>>,
+    pub canceled: Mutex<HashSet<String>>,
 }
 
 #[derive(Serialize)]
@@ -475,18 +475,27 @@ pub async fn yt_search(
     let off = offset.unwrap_or(0).min(900);
     // Pagination: ask the search "playlist" only for the requested slice —
     // yt-dlp walks results lazily, so page 1 stays as cheap as before.
-    let total = off + n;
-    let target = format!("ytsearch{total}:{q}");
-    let range = format!("{}:{}", off + 1, total);
-    let out = run_ytdlp(
-        &cfg,
-        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
-    )?;
-    Ok(out
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| track_from_json(&v))
-        .collect())
+    if crate::ytnative::forced() {
+        return crate::ytnative::search(q, n, off).await;
+    }
+    let attempt = (|| -> Result<Vec<OnlineTrack>, String> {
+        let total = off + n;
+        let target = format!("ytsearch{total}:{q}");
+        let range = format!("{}:{}", off + 1, total);
+        let out = run_ytdlp(
+            &cfg,
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
+        )?;
+        Ok(out
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| track_from_json(&v))
+            .collect())
+    })();
+    match attempt {
+        Ok(v) => Ok(v),
+        Err(e) => crate::ytnative::search(q, n, off).await.map_err(|ne| format!("{e} | {ne}")),
+    }
 }
 
 /// First few track titles of a playlist — cheap preview for search hits.
@@ -497,16 +506,25 @@ pub async fn yt_playlist_preview(
     count: Option<u32>,
 ) -> Result<Vec<String>, String> {
     let n = count.unwrap_or(3).clamp(1, 6);
-    let range = format!("1:{n}");
-    let out = run_ytdlp(
-        &cfg,
-        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, url.trim()],
-    )?;
-    Ok(out
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| v["title"].as_str().map(str::to_string))
-        .collect())
+    if crate::ytnative::forced() {
+        return crate::ytnative::playlist_preview(&url, n).await;
+    }
+    let attempt = (|| -> Result<Vec<String>, String> {
+        let range = format!("1:{n}");
+        let out = run_ytdlp(
+            &cfg,
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, url.trim()],
+        )?;
+        Ok(out
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| v["title"].as_str().map(str::to_string))
+            .collect())
+    })();
+    match attempt {
+        Ok(v) => Ok(v),
+        Err(e) => crate::ytnative::playlist_preview(&url, n).await.map_err(|ne| format!("{e} | {ne}")),
+    }
 }
 
 #[derive(Serialize)]
@@ -542,34 +560,43 @@ pub async fn yt_search_playlists(
     }
     let n = limit.unwrap_or(15).clamp(1, 100);
     let off = offset.unwrap_or(0).min(900);
-    let page = format!(
-        "https://www.youtube.com/results?search_query={}&sp=EgIQAw%3D%3D",
-        url_encode(q)
-    );
-    let range = format!("{}:{}", off + 1, off + n);
-    let out = run_ytdlp(
-        &cfg,
-        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &page],
-    )?;
-    Ok(out
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| {
-            let url = v["url"].as_str()?.to_string();
-            if !url.contains("list=") {
-                return None;
-            }
-            Some(PlaylistHit {
-                title: v["title"].as_str().unwrap_or("Untitled playlist").to_string(),
-                author: v["uploader"]
-                    .as_str()
-                    .or_else(|| v["channel"].as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                url,
+    if crate::ytnative::forced() {
+        return crate::ytnative::search_playlists(q, n, off).await;
+    }
+    let attempt = (|| -> Result<Vec<PlaylistHit>, String> {
+        let page = format!(
+            "https://www.youtube.com/results?search_query={}&sp=EgIQAw%3D%3D",
+            url_encode(q)
+        );
+        let range = format!("{}:{}", off + 1, off + n);
+        let out = run_ytdlp(
+            &cfg,
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &page],
+        )?;
+        Ok(out
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| {
+                let url = v["url"].as_str()?.to_string();
+                if !url.contains("list=") {
+                    return None;
+                }
+                Some(PlaylistHit {
+                    title: v["title"].as_str().unwrap_or("Untitled playlist").to_string(),
+                    author: v["uploader"]
+                        .as_str()
+                        .or_else(|| v["channel"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    url,
+                })
             })
-        })
-        .collect())
+            .collect())
+    })();
+    match attempt {
+        Ok(v) => Ok(v),
+        Err(e) => crate::ytnative::search_playlists(q, n, off).await.map_err(|ne| format!("{e} | {ne}")),
+    }
 }
 
 #[derive(Serialize)]
@@ -604,33 +631,42 @@ pub async fn yt_channel(cfg: State<'_, YtCfg>, query: String) -> Result<Option<C
     if q.is_empty() {
         return Ok(None);
     }
-    let page = format!(
-        "https://www.youtube.com/results?search_query={}&sp=EgIQAg%3D%3D",
-        url_encode(q)
-    );
-    let out = run_ytdlp(
-        &cfg,
-        &["--flat-playlist", "-j", "--no-warnings", "-I", "1:3", &page],
-    )?;
-    Ok(out
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .find_map(|v| {
-            let url = v["url"].as_str()?.to_string();
-            if !is_channel_url(&url) {
-                return None;
-            }
-            Some(Channel {
-                title: v["channel"]
-                    .as_str()
-                    .or_else(|| v["title"].as_str())
-                    .or_else(|| v["uploader"].as_str())
-                    .unwrap_or("Channel")
-                    .to_string(),
-                url,
-                thumbnail: best_thumb(&v),
-            })
-        }))
+    if crate::ytnative::forced() {
+        return crate::ytnative::channel_search(q).await;
+    }
+    let attempt = (|| -> Result<Option<Channel>, String> {
+        let page = format!(
+            "https://www.youtube.com/results?search_query={}&sp=EgIQAg%3D%3D",
+            url_encode(q)
+        );
+        let out = run_ytdlp(
+            &cfg,
+            &["--flat-playlist", "-j", "--no-warnings", "-I", "1:3", &page],
+        )?;
+        Ok(out
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find_map(|v| {
+                let url = v["url"].as_str()?.to_string();
+                if !is_channel_url(&url) {
+                    return None;
+                }
+                Some(Channel {
+                    title: v["channel"]
+                        .as_str()
+                        .or_else(|| v["title"].as_str())
+                        .or_else(|| v["uploader"].as_str())
+                        .unwrap_or("Channel")
+                        .to_string(),
+                    url,
+                    thumbnail: best_thumb(&v),
+                })
+            }))
+    })();
+    match attempt {
+        Ok(v) => Ok(v),
+        Err(e) => crate::ytnative::channel_search(q).await.map_err(|ne| format!("{e} | {ne}")),
+    }
 }
 
 /// A channel's uploaded videos (its "Videos" tab), paginated.
@@ -643,17 +679,26 @@ pub async fn yt_channel_videos(
 ) -> Result<Vec<OnlineTrack>, String> {
     let n = limit.unwrap_or(20).clamp(1, 100);
     let off = offset.unwrap_or(0).min(5000);
-    let target = format!("{}/videos", url.trim().trim_end_matches('/'));
-    let range = format!("{}:{}", off + 1, off + n);
-    let out = run_ytdlp(
-        &cfg,
-        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
-    )?;
-    Ok(out
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| track_from_json(&v))
-        .collect())
+    if crate::ytnative::forced() {
+        return crate::ytnative::channel_videos(&url, n, off).await;
+    }
+    let attempt = (|| -> Result<Vec<OnlineTrack>, String> {
+        let target = format!("{}/videos", url.trim().trim_end_matches('/'));
+        let range = format!("{}:{}", off + 1, off + n);
+        let out = run_ytdlp(
+            &cfg,
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
+        )?;
+        Ok(out
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| track_from_json(&v))
+            .collect())
+    })();
+    match attempt {
+        Ok(v) => Ok(v),
+        Err(e) => crate::ytnative::channel_videos(&url, n, off).await.map_err(|ne| format!("{e} | {ne}")),
+    }
 }
 
 /// A channel's public playlists (its "Playlists" tab), paginated.
@@ -666,46 +711,64 @@ pub async fn yt_channel_playlists(
 ) -> Result<Vec<PlaylistHit>, String> {
     let n = limit.unwrap_or(15).clamp(1, 100);
     let off = offset.unwrap_or(0).min(2000);
-    let target = format!("{}/playlists", url.trim().trim_end_matches('/'));
-    let range = format!("{}:{}", off + 1, off + n);
-    let out = run_ytdlp(
-        &cfg,
-        &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
-    )?;
-    Ok(out
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| {
-            let url = v["url"].as_str()?.to_string();
-            if !url.contains("list=") {
-                return None;
-            }
-            Some(PlaylistHit {
-                title: v["title"].as_str().unwrap_or("Untitled playlist").to_string(),
-                author: v["uploader"]
-                    .as_str()
-                    .or_else(|| v["channel"].as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                url,
+    if crate::ytnative::forced() {
+        return crate::ytnative::channel_playlists(&url, n, off).await;
+    }
+    let attempt = (|| -> Result<Vec<PlaylistHit>, String> {
+        let target = format!("{}/playlists", url.trim().trim_end_matches('/'));
+        let range = format!("{}:{}", off + 1, off + n);
+        let out = run_ytdlp(
+            &cfg,
+            &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &target],
+        )?;
+        Ok(out
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| {
+                let url = v["url"].as_str()?.to_string();
+                if !url.contains("list=") {
+                    return None;
+                }
+                Some(PlaylistHit {
+                    title: v["title"].as_str().unwrap_or("Untitled playlist").to_string(),
+                    author: v["uploader"]
+                        .as_str()
+                        .or_else(|| v["channel"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    url,
+                })
             })
-        })
-        .collect())
+            .collect())
+    })();
+    match attempt {
+        Ok(v) => Ok(v),
+        Err(e) => crate::ytnative::channel_playlists(&url, n, off).await.map_err(|ne| format!("{e} | {ne}")),
+    }
 }
 
 /// Every uploaded video of a channel (capped) — feeds the "Download all" action.
 #[tauri::command]
 pub async fn yt_channel_all(cfg: State<'_, YtCfg>, url: String) -> Result<Vec<OnlineTrack>, String> {
-    let target = format!("{}/videos", url.trim().trim_end_matches('/'));
-    let out = run_ytdlp(
-        &cfg,
-        &["--flat-playlist", "-j", "--no-warnings", "-I", "1:1000", &target],
-    )?;
-    Ok(out
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| track_from_json(&v))
-        .collect())
+    if crate::ytnative::forced() {
+        return crate::ytnative::channel_all(&url).await;
+    }
+    let attempt = (|| -> Result<Vec<OnlineTrack>, String> {
+        let target = format!("{}/videos", url.trim().trim_end_matches('/'));
+        let out = run_ytdlp(
+            &cfg,
+            &["--flat-playlist", "-j", "--no-warnings", "-I", "1:1000", &target],
+        )?;
+        Ok(out
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| track_from_json(&v))
+            .collect())
+    })();
+    match attempt {
+        Ok(v) => Ok(v),
+        Err(e) => crate::ytnative::channel_all(&url).await.map_err(|ne| format!("{e} | {ne}")),
+    }
 }
 
 #[tauri::command]
@@ -714,16 +777,25 @@ pub async fn yt_playlist(cfg: State<'_, YtCfg>, url: String) -> Result<PlaylistI
     if url.is_empty() {
         return Err("empty URL".into());
     }
-    let entries = flat_extract(&cfg, &url)?;
-    let title = entries
-        .iter()
-        .find_map(|v| v["playlist_title"].as_str())
-        .unwrap_or("Imported playlist")
-        .to_string();
-    Ok(PlaylistImport {
-        title,
-        tracks: entries.iter().filter_map(track_from_json).collect(),
-    })
+    if crate::ytnative::forced() {
+        return crate::ytnative::playlist(&url).await;
+    }
+    let attempt = (|| -> Result<PlaylistImport, String> {
+        let entries = flat_extract(&cfg, &url)?;
+        let title = entries
+            .iter()
+            .find_map(|v| v["playlist_title"].as_str())
+            .unwrap_or("Imported playlist")
+            .to_string();
+        Ok(PlaylistImport {
+            title,
+            tracks: entries.iter().filter_map(track_from_json).collect(),
+        })
+    })();
+    match attempt {
+        Ok(v) => Ok(v),
+        Err(e) => crate::ytnative::playlist(&url).await.map_err(|ne| format!("{e} | {ne}")),
+    }
 }
 
 const LOCAL_EXTS: &[&str] = &["mp3", "m4a", "opus", "ogg", "flac", "wav"];
@@ -812,20 +884,34 @@ pub async fn yt_download(
         return Ok(existing);
     }
 
-    let bin = ensure_bin(&cfg)?;
-    ensure_ffmpeg(&bin); // best-effort: fetch a static ffmpeg if none is around
-    let cookies = cfg.cookies.lock().unwrap().clone();
-    let res = if cookies.is_empty() {
-        download_clients(&app, &dls, &bin, &id, &dir, None)
-    } else {
-        // A logged-in session often makes YouTube withhold every format. If the
-        // cookies attempt fails, the no-cookies attempt is the meaningful one —
-        // surface ITS error, not the misleading "format not available" cookies one.
-        match download_clients(&app, &dls, &bin, &id, &dir, Some(&cookies)) {
-            Ok(p) => Ok(p),
-            Err(e) if e == "canceled" => Err(e),
-            Err(_) => download_clients(&app, &dls, &bin, &id, &dir, None),
+    if crate::ytnative::forced() {
+        return crate::ytnative::download(app.clone(), &dls, &id, &dir).await;
+    }
+    let attempt = (|| -> Result<String, String> {
+        let bin = ensure_bin(&cfg)?;
+        ensure_ffmpeg(&bin); // best-effort: fetch a static ffmpeg if none is around
+        let cookies = cfg.cookies.lock().unwrap().clone();
+        if cookies.is_empty() {
+            download_clients(&app, &dls, &bin, &id, &dir, None)
+        } else {
+            // A logged-in session often makes YouTube withhold every format. If the
+            // cookies attempt fails, the no-cookies attempt is the meaningful one —
+            // surface ITS error, not the misleading "format not available" cookies one.
+            match download_clients(&app, &dls, &bin, &id, &dir, Some(&cookies)) {
+                Ok(p) => Ok(p),
+                Err(e) if e == "canceled" => Err(e),
+                Err(_) => download_clients(&app, &dls, &bin, &id, &dir, None),
+            }
         }
+    })();
+    let res = match attempt {
+        Err(e) if e != "canceled" => {
+            // yt-dlp broken/missing → native engine saves an m4a instead of mp3.
+            crate::ytnative::download(app.clone(), &dls, &id, &dir)
+                .await
+                .map_err(|ne| format!("{e} | {ne}"))
+        }
+        other => other,
     };
     if let Err(e) = &res {
         if e != "canceled" {
@@ -1033,6 +1119,17 @@ fn resolve_once(cfg: &YtCfg, page: &str, client: Option<&str>) -> Result<String,
 /// audio-only formats often vanish for one client and are back seconds later),
 /// so try several player clients — each attempt is a fresh dice roll, and the
 /// format chain ends with itag-18-style full mp4 which the engine can decode.
+/// Fresh cached stream URL, if any (shared by both backends).
+pub fn cached_url(state: &YtState, id: &str) -> Option<String> {
+    let cache = state.cache.lock().unwrap();
+    cache.get(id).and_then(|(at, url)| (at.elapsed() < RESOLVE_TTL).then(|| url.clone()))
+}
+
+/// Store a stream URL in the shared cache (native backend path).
+pub fn cache_url(state: &YtState, id: &str, url: String) {
+    state.cache.lock().unwrap().insert(id.to_string(), (Instant::now(), url));
+}
+
 pub fn resolve(state: &YtState, cfg: &YtCfg, id: &str) -> Result<String, String> {
     if let Some((at, url)) = state.cache.lock().unwrap().get(id) {
         if at.elapsed() < RESOLVE_TTL {

@@ -32,15 +32,40 @@ pub struct HttpStream {
     shared: Arc<(Mutex<Shared>, Condvar)>,
 }
 
-fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
+/// googlevideo stream URLs are bound to the IP that resolved them (`ip=` query
+/// param). Fetching a v6-bound URL over IPv4 — or vice versa — returns 403/302,
+/// and std's resolver ordering means ureq may pick either family. So: pin DNS
+/// answers to the same address family as the URL's own `ip=` parameter.
+fn url_wants_ipv6(url: &str) -> Option<bool> {
+    let q = url.split_once('?')?.1;
+    for kv in q.split('&') {
+        if let Some(v) = kv.strip_prefix("ip=") {
+            return Some(v.contains(':') || v.contains("%3A") || v.contains("%3a"));
+        }
+    }
+    None
+}
+
+/// HTTP agent for fetching a media URL — family-pinned when the URL demands it.
+/// Also used by the native downloader (ytnative.rs).
+pub(crate) fn media_agent(url: &str) -> ureq::Agent {
+    let b = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
-        .timeout_read(Duration::from_secs(15))
-        .build()
+        .timeout_read(Duration::from_secs(15));
+    let b = match url_wants_ipv6(url) {
+        Some(want_v6) => b.resolver(move |netloc: &str| -> io::Result<Vec<std::net::SocketAddr>> {
+            use std::net::ToSocketAddrs;
+            let all: Vec<_> = netloc.to_socket_addrs()?.collect();
+            let picked: Vec<_> = all.iter().copied().filter(|a| a.is_ipv6() == want_v6).collect();
+            Ok(if picked.is_empty() { all } else { picked })
+        }),
+        None => b,
+    };
+    b.build()
 }
 
 fn connect(url: &str, pos: u64) -> Result<(Box<dyn Read + Send>, Option<u64>), String> {
-    let resp = agent()
+    let resp = media_agent(url)
         .get(url)
         .set("Range", &format!("bytes={pos}-"))
         .call()

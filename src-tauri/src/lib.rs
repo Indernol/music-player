@@ -8,7 +8,8 @@ mod mpris;
 mod rpc;
 mod store;
 mod stream;
-mod youtube;
+pub mod youtube;
+pub mod ytnative;
 
 use audio::AudioController;
 use library::Track;
@@ -80,6 +81,29 @@ fn status(state: State<AppState>) -> audio::PlaybackStatus {
 
 // Streaming commands are async so yt-dlp resolution never blocks the UI thread.
 
+/// Stream URL via whichever backend works: cache → yt-dlp (desktop) → native
+/// rustypipe engine (mandatory on Android, fallback elsewhere).
+async fn resolve_stream_url(
+    yt: &youtube::YtState,
+    cfg: &youtube::YtCfg,
+    id: &str,
+) -> Result<String, String> {
+    if let Some(u) = youtube::cached_url(yt, id) {
+        return Ok(u);
+    }
+    let res = if ytnative::forced() {
+        ytnative::stream_url(id).await
+    } else {
+        match youtube::resolve(yt, cfg, id) {
+            Ok(u) => Ok(u),
+            Err(e) => ytnative::stream_url(id).await.map_err(|ne| format!("{e} | {ne}")),
+        }
+    };
+    let url = res?;
+    youtube::cache_url(yt, id, url.clone());
+    Ok(url)
+}
+
 #[tauri::command]
 async fn play_stream(
     id: String,
@@ -88,7 +112,7 @@ async fn play_stream(
     yt: State<'_, youtube::YtState>,
     cfg: State<'_, youtube::YtCfg>,
 ) -> Result<u64, String> {
-    let url = youtube::resolve(&yt, &cfg, &id)?;
+    let url = resolve_stream_url(&yt, &cfg, &id).await?;
     Ok(state.audio.play_url(url, gain))
 }
 
@@ -100,7 +124,7 @@ async fn preload_stream(
     yt: State<'_, youtube::YtState>,
     cfg: State<'_, youtube::YtCfg>,
 ) -> Result<(), String> {
-    let url = youtube::resolve(&yt, &cfg, &id)?;
+    let url = resolve_stream_url(&yt, &cfg, &id).await?;
     state.audio.preload_url(url, gain);
     Ok(())
 }
@@ -113,7 +137,7 @@ async fn prefetch_stream(
     yt: State<'_, youtube::YtState>,
     cfg: State<'_, youtube::YtCfg>,
 ) -> Result<(), String> {
-    youtube::resolve(&yt, &cfg, &id).map(|_| ())
+    resolve_stream_url(&yt, &cfg, &id).await.map(|_| ())
 }
 
 // ─── Self-update: the binary is built from the local source tree (the GitHub
@@ -408,6 +432,12 @@ pub fn run() {
         .manage(youtube::DlState::default())
         .manage(mpris::MediaState::default())
         .setup(|app| {
+            // Native YouTube engine cache (client versions, visitor data).
+            ytnative::init_storage(
+                app.path()
+                    .app_data_dir()
+                    .unwrap_or_else(|_| std::env::temp_dir().join("musicplayer")),
+            );
             // Register on D-Bus right away so desktop media widgets see the player.
             let handle = app.handle();
             if let Err(e) = mpris::init(handle, &app.state::<mpris::MediaState>()) {
