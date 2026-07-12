@@ -864,13 +864,19 @@ async function runExtImport() {
   const raw = $("#extInput").value.trim();
   if (!raw) { extStatus("Paste a Spotify link or a song list first.", true); return; }
   _extBusy = true; _extCancel = false;
-  $("#extGo").disabled = true; $("#extCancel").hidden = false;
-  let name = $("#extName").value.trim();
-  let jobs = []; // { q, dur } — dur (secs) picks the best YouTube hit when known
+  const name0 = $("#extName").value.trim();
+  const dl = $("#extDl").checked;
   const sp = raw.match(/(?:https?:\/\/[^\s]*open\.spotify\.com\/[^\s]+|spotify:(?:playlist|album|track):[A-Za-z0-9]+)/);
+  // Everything below runs in the background (Activity drawer): close the modal
+  // right away so the user can keep using the app while tracks are matched.
+  $("#extModal").hidden = true;
+  flash("Import running in the background — watch the Activity badge");
+  const tid = taskStart("Playlist import", { detail: sp ? "reading Spotify…" : "reading list…", pct: 0, cancel: () => { _extCancel = true; } });
+
+  let name = name0;
+  let jobs = []; // { q, dur } — dur (secs) picks the best YouTube hit when known
   try {
     if (sp) {
-      extStatus("Reading the Spotify playlist…");
       const imp = await invoke("import_spotify", { url: sp[0] });
       if (!name) name = imp.name;
       jobs = (imp.tracks || [])
@@ -880,16 +886,14 @@ async function runExtImport() {
       // Pasted list: one song per line (drop stray URLs / blank lines).
       jobs = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^https?:\/\//.test(l)).map(q => ({ q, dur: 0 }));
     }
-  } catch (e) { extStatus(String(e), true); extDone(); return; }
-  if (!jobs.length) { extStatus("Nothing to import.", true); extDone(); return; }
+  } catch (e) { taskEnd(tid, { status: "error", detail: String(e) }); extDone(); return; }
+  if (!jobs.length) { taskEnd(tid, { status: "error", detail: "nothing to import" }); extDone(); return; }
 
-  $("#extBar").hidden = false;
   const resolved = [], missed = [];
   for (let i = 0; i < jobs.length; i++) {
     if (_extCancel) break;
     const { q, dur } = jobs[i];
-    extStatus(`Matching ${i + 1}/${jobs.length} on YouTube — “${q}”`);
-    $("#extBarFill").style.width = `${Math.round((i / jobs.length) * 100)}%`;
+    taskUpdate(tid, { detail: `${i + 1}/${jobs.length} — ${q}`, pct: (i / jobs.length) * 100 });
     try {
       // Take the top few hits and prefer the one whose duration matches the
       // Spotify track — kills most "live version / sped up / 10h loop" misses.
@@ -904,16 +908,18 @@ async function runExtImport() {
       if (hit) resolved.push(onlineFromResult(hit)); else missed.push(q);
     } catch { missed.push(q); }
   }
-  $("#extBarFill").style.width = "100%";
-  if (!resolved.length) { extStatus("Couldn't match any track on YouTube.", true); extDone(); return; }
+  if (!resolved.length) { taskEnd(tid, { status: "error", detail: "no track matched on YouTube" }); extDone(); return; }
 
   resolved.forEach(t => onlineIndex.set(t.path, t));
   const pl = PL.createPlaylist(name || "Imported playlist");
   resolved.forEach(t => PL.addToPlaylist(pl.id, t.path));
-  saveOnline(); renderPlaylists(); openPlaylist(pl.id);
-  const dl = $("#extDl").checked;
+  saveOnline(); renderPlaylists();
   if (dl) downloadTracks(resolved.map(t => t.path));
-  $("#extModal").hidden = true; extDone();
+  extDone();
+  taskEnd(tid, {
+    detail: `${resolved.length} imported${missed.length ? ` · ${missed.length} not found` : ""}${_extCancel ? " (stopped)" : ""} — click to open`,
+    onClick: () => openPlaylist(pl.id),
+  });
   flash(`Imported ${resolved.length} track${resolved.length === 1 ? "" : "s"}${missed.length ? ` · ${missed.length} not found` : ""}${_extCancel ? " (stopped)" : ""}${dl ? " · downloading…" : ""}`);
 }
 
@@ -1061,45 +1067,65 @@ function importChannelPlaylist(url) {
 }
 async function downloadArtistAll() {
   if (!ytArtist) return;
-  flash("Fetching the full track list…");
+  const tid = taskStart(`Listing ${ytArtist.title}`, { detail: "fetching the full track list…" });
   let all;
   try { all = await invoke("yt_channel_all", { url: ytArtist.url }); }
-  catch (e) { flash(`Could not list tracks: ${e}`); return; }
-  if (!all?.length) { flash("No videos found on this channel"); return; }
+  catch (e) { taskEnd(tid, { status: "error", detail: String(e) }); flash(`Could not list tracks: ${e}`); return; }
+  if (!all?.length) { taskEnd(tid, { status: "error", detail: "no videos found" }); flash("No videos found on this channel"); return; }
+  taskEnd(tid, { detail: `${all.length} tracks listed`, ttl: 4000 });
   if (!await askConfirm(`Download everything from ${ytArtist.title}?`, `${all.length} track${all.length === 1 ? "" : "s"} will be queued as mp3 (already-downloaded ones are skipped).`, `Download ${all.length}`)) return;
   const tracks = all.map(onlineFromResult);
   tracks.forEach(t => onlineIndex.set(t.path, t));
   saveOnline();
   downloadTracks(tracks.map(t => t.path));
 }
+let _searchSeq = 0;
 async function searchOnline(q, page = 0) {
   if (!q) return;
   if (!IS_NATIVE) { flash("YouTube search needs the native app"); return; }
+  const seq = ++_searchSeq; // newest search wins; stale responses are dropped
   onlineQuery = q;
   ytPage = Math.max(0, page);
   if (ytPage === 0) { ytArtist = null; ytArtistMode = "videos"; ytArtistPls = []; }
   active = { type: "online", id: q };
   markActive();
   selected.clear();
-  setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}” — page ${ytPage + 1}…` });
+  setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}” — page ${ytPage + 1}… (you can keep browsing)` });
   $("#listHead").style.display = "none";
   $("#trackList").classList.remove("yt-grid");
-  $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.radio}</div>Searching YouTube…</div>`;
+  $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.radio}</div>Searching YouTube… Feel free to browse — the result lands in the Activity badge.</div>`;
+  const tid = taskStart(`Search “${q}”`, { detail: `page ${ytPage + 1}` });
   try {
     const limit = Number(S().searchLimit) || 20;
     const res = await invoke("yt_search", { query: q, limit, offset: ytPage * limit });
+    if (seq !== _searchSeq) { taskDrop(tid); return; } // superseded by a newer search
     ytHasMore = Array.isArray(res) && res.length >= limit;
     onlineResults = (res || []).map(onlineFromResult);
     onlineResults.forEach(t => onlineIndex.set(t.path, t));
-    renderOnlineResults();
+    // Don't clobber wherever the user navigated meanwhile: render only if the
+    // online view is still current, otherwise park the result in Activity.
+    if (active.type === "online" && active.id === q) {
+      renderOnlineResults();
+      taskEnd(tid, { detail: `${onlineResults.length} results`, ttl: 5000 });
+    } else {
+      taskEnd(tid, {
+        detail: `${onlineResults.length} results — click to view`,
+        onClick: () => { onlineQuery = q; active = { type: "online", id: q }; renderOnlineResults(); },
+      });
+      flash(`Search “${q}” ready — see the Activity badge`);
+    }
   } catch (e) {
-    setViewHead({ icon: IC.globe, title: "YouTube", subtitle: "Search failed" });
-    $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.alert}</div>${esc(String(e))}</div>`;
+    if (seq !== _searchSeq) { taskDrop(tid); return; }
+    taskEnd(tid, { status: "error", detail: String(e) });
+    if (active.type === "online" && active.id === q) {
+      setViewHead({ icon: IC.globe, title: "YouTube", subtitle: "Search failed" });
+      $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.alert}</div>${esc(String(e))}</div>`;
+    }
   }
   // Resolve the artist card in the background (first page only).
   if (ytPage === 0) {
     invoke("yt_channel", { query: q }).then(ch => {
-      if (ch && active.type === "online" && onlineQuery === q) { ytArtist = ch; if (ytArtistMode === "videos") renderOnlineResults(); }
+      if (ch && seq === _searchSeq && active.type === "online" && onlineQuery === q) { ytArtist = ch; if (ytArtistMode === "videos") renderOnlineResults(); }
     }).catch(() => {});
   }
 }
@@ -1180,12 +1206,14 @@ async function impFetch() {
   const url = $("#impUrl").value.trim();
   if (!url) return;
   if (!IS_NATIVE) { flash("Playlist import needs the native app"); return; }
-  $("#impStatus").textContent = "Fetching tracks…"; $("#impList").innerHTML = ""; $("#impFoot").hidden = true;
+  $("#impStatus").textContent = "Fetching tracks… (you can close this window — it'll be in the Activity badge)";
+  $("#impList").innerHTML = ""; $("#impFoot").hidden = true;
   const btn = $("#impFetch"); btn.disabled = true;
+  const tid = taskStart("Fetching playlist", { detail: url.length > 60 ? url.slice(0, 57) + "…" : url });
   try {
     const res = await invoke("yt_playlist", { url });
     impTracks = (res.tracks || []).map(onlineFromResult);
-    if (!impTracks.length) { $("#impStatus").textContent = "No tracks found at this URL."; return; }
+    if (!impTracks.length) { $("#impStatus").textContent = "No tracks found at this URL."; taskEnd(tid, { status: "error", detail: "no tracks found" }); return; }
     // Register metadata for everything fetched: this also repairs the display
     // of already-downloaded files from this playlist (title/artist/artwork).
     impTracks.forEach(t => onlineIndex.set(t.path, t));
@@ -1206,7 +1234,17 @@ async function impFetch() {
     $("#impFollow").checked = follows.some(f => f.url === url && f.enabled !== false);
     $("#impFoot").hidden = false;
     updateImpCount();
-  } catch (e) { $("#impStatus").textContent = `Import failed: ${e}`; }
+    // Modal closed while fetching → park the ready picker in Activity.
+    if ($("#importModal").hidden) {
+      taskEnd(tid, {
+        detail: `“${res.title}” — ${impTracks.length} tracks ready — click to pick`,
+        onClick: () => { $("#importModal").hidden = false; },
+      });
+      flash(`Playlist “${res.title}” ready — see the Activity badge`);
+    } else {
+      taskEnd(tid, { detail: `${impTracks.length} tracks`, ttl: 4000 });
+    }
+  } catch (e) { $("#impStatus").textContent = `Import failed: ${e}`; taskEnd(tid, { status: "error", detail: String(e) }); }
   finally { btn.disabled = false; }
 }
 function updateImpCount() {
@@ -1297,6 +1335,51 @@ async function resumeDownloads() {
   if (paths.length) { downloadTracks(paths); flash(`Resuming ${paths.length} download${paths.length === 1 ? "" : "s"}…`); }
 }
 
+// ─── Background tasks (search, imports, refreshes) ─────────────────────────
+// Same UX as downloads: anything long-running lives in the Activity drawer
+// (badge in the bottom bar), never holds the UI hostage, cancellable when the
+// underlying work can stop. Rows reuse the .dl-row look.
+const bgTasks = new Map(); // id → { label, detail, status: run|done|error, pct, cancel, onClick }
+let _taskSeq = 0;
+function taskStart(label, opts = {}) {
+  const id = `task-${++_taskSeq}`;
+  bgTasks.set(id, { label, detail: opts.detail || "", status: "run", pct: opts.pct ?? null, cancel: opts.cancel || null, onClick: null });
+  dlRender();
+  return id;
+}
+// Progress ticks patch the open row in place — no full drawer re-render.
+function taskUpdate(id, patch) {
+  const t = bgTasks.get(id);
+  if (!t) return;
+  Object.assign(t, patch);
+  const row = $("#dlList")?.querySelector(`[data-task="${id}"]`);
+  if (!row) return;
+  row.querySelector(".dl-name").textContent = t.detail ? `${t.label} — ${t.detail}` : t.label;
+  if (t.pct != null) {
+    const i = row.querySelector(".dl-prog i"); if (i) i.style.width = `${t.pct}%`;
+    const p = row.querySelector(".dl-pct"); if (p) p.textContent = `${Math.round(t.pct)}%`;
+  }
+}
+function taskDrop(id) { if (bgTasks.delete(id)) dlRender(); }
+function taskEnd(id, { status = "done", detail = "", onClick = null, ttl = 12000 } = {}) {
+  const t = bgTasks.get(id);
+  if (!t) return;
+  Object.assign(t, { status, detail, pct: status === "done" ? 100 : t.pct, cancel: null, onClick });
+  dlRender();
+  // Clickable results stick around longer so they can actually be clicked.
+  setTimeout(() => { if (bgTasks.get(id) === t && t.status !== "run") taskDrop(id); }, onClick ? ttl * 5 : ttl);
+}
+function taskRow(id, t) {
+  const st = t.status === "run" ? "active" : t.status;
+  return `<div class="dl-row task-row ${st} ${t.onClick ? "clickable" : ""}" data-task="${id}" title="${esc(t.detail || t.label)}">
+      <span class="dl-ico">${t.status === "run" ? IC.radio : t.status === "done" ? IC.check : IC.alert}</span>
+      <span class="dl-name">${esc(t.detail ? `${t.label} — ${t.detail}` : t.label)}</span>
+      <span class="dl-prog"><i style="width:${t.status === "done" ? 100 : (t.pct ?? (t.status === "run" ? 0 : 100))}%"></i></span>
+      <span class="dl-pct">${t.status === "run" ? (t.pct != null ? Math.round(t.pct) + "%" : "…") : t.status === "done" ? "done" : "failed"}</span>
+      ${t.cancel ? `<button class="dl-x" data-tskx="${id}" title="Cancel">${IC.x}</button>` : ""}
+    </div>`;
+}
+
 function dlRow(d) {
   return `
     <div class="dl-row ${d.status}" data-path="${esc(d.path)}" title="${esc(d.err || d.title)}">
@@ -1311,32 +1394,40 @@ let dlOpen = false; // drawer is opt-in: nothing pops up on its own
 function dlRender() {
   saveDlQueue(); // persist the pending set whenever it changes
   const bar = $("#dlBar"), tog = $("#dlToggle");
-  if (!dlQueue.length) { bar.hidden = true; tog.hidden = true; dlOpen = false; return; }
+  if (!dlQueue.length && !bgTasks.size) { bar.hidden = true; tog.hidden = true; dlOpen = false; return; }
   const n = { done: 0, error: 0, canceled: 0, queued: 0, active: 0 };
   for (const d of dlQueue) n[d.status]++;
-  const busy = n.queued + n.active > 0;
+  const tRun = [...bgTasks.values()].filter(t => t.status === "run").length;
+  const busy = n.queued + n.active > 0 || tRun > 0;
   // Discreet badge at the edge — the panel only opens when the user clicks it.
   tog.hidden = false;
   tog.classList.toggle("busy", busy);
-  $("#dlBadge").textContent = `${n.done}/${dlQueue.length}${busy ? "" : " ✓"}`;
-  tog.title = `Downloads — ${n.done}/${dlQueue.length} saved` +
+  $("#dlBadge").textContent = dlQueue.length
+    ? `${n.done}/${dlQueue.length}${busy ? "" : " ✓"}`
+    : (tRun ? `${tRun}⋯` : "✓");
+  tog.title = (dlQueue.length ? `Downloads — ${n.done}/${dlQueue.length} saved` : "Activity") +
+    (tRun ? ` · ${tRun} task${tRun === 1 ? "" : "s"} running` : "") +
     (n.error ? ` · ${n.error} failed` : "") + (dlNotice ? ` · ${dlNotice}` : "") + " (click to open)";
   bar.hidden = !dlOpen;
   if (!dlOpen) return;
   $("#dlTitle").textContent =
-    (busy ? `Downloading… ${n.done}/${dlQueue.length}` : `Downloads — ${n.done}/${dlQueue.length} saved`) +
-    (n.error ? ` · ${n.error} failed` : "") + (n.canceled ? ` · ${n.canceled} canceled` : "") +
-    (dlNotice ? ` · ${dlNotice}` : "");
-  $("#dlAction").textContent = busy ? "Stop all" : "Clear";
+    (bgTasks.size ? `Activity${tRun ? ` — ${tRun} running` : ""}${dlQueue.length ? " · " : ""}` : "") +
+    (dlQueue.length
+      ? (busy && n.queued + n.active > 0 ? `Downloading… ${n.done}/${dlQueue.length}` : `Downloads — ${n.done}/${dlQueue.length} saved`) +
+        (n.error ? ` · ${n.error} failed` : "") + (n.canceled ? ` · ${n.canceled} canceled` : "") +
+        (dlNotice ? ` · ${dlNotice}` : "")
+      : "");
+  $("#dlAction").textContent = n.queued + n.active > 0 ? "Stop all" : "Clear"; // tasks cancel via their own ✕
   // Only rate-limit failures + canceled are retriable; final refusals
   // (copyright/private/geo…) stay out — retrying them can't succeed.
   const retriable = dlQueue.filter(d => d.status === "canceled" || (d.status === "error" && !d.permanent)).length;
-  $("#dlRetry").hidden = busy || !retriable;
+  const dlBusy = n.queued + n.active > 0;
+  $("#dlRetry").hidden = dlBusy || !retriable;
   if (retriable) $("#dlRetry").textContent = `Retry ${retriable}`;
   // Blocked/skipped tracks (copyright/private/geo… or wrongly-blocked while
   // downloads were broken) can be force-retried — unblocks + requeues them.
   const blocked = dlQueue.filter(d => d.status === "error" && d.permanent).length;
-  $("#dlRetryBlocked").hidden = busy || !blocked;
+  $("#dlRetryBlocked").hidden = dlBusy || !blocked;
   if (blocked) $("#dlRetryBlocked").textContent = `Retry blocked ${blocked}`;
 
   // Windowed render: active + next queued + recent finished — never 1000+ rows.
@@ -1344,6 +1435,7 @@ function dlRender() {
   const queued = dlQueue.filter(d => d.status === "queued");
   const finished = dlQueue.filter(d => !["queued", "active"].includes(d.status));
   const parts = [
+    ...[...bgTasks.entries()].map(([id, t]) => taskRow(id, t)),
     ...active.map(dlRow),
     ...queued.slice(0, 12).map(dlRow),
     queued.length > 12 ? `<div class="dl-more">… ${queued.length - 12} more queued</div>` : "",
@@ -1351,6 +1443,18 @@ function dlRender() {
     finished.length > 8 ? `<div class="dl-more">… ${finished.length - 8} more finished</div>` : "",
   ];
   $("#dlList").innerHTML = parts.join("");
+  $("#dlList").querySelectorAll("[data-tskx]").forEach(b => b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const t = bgTasks.get(b.dataset.tskx);
+    if (t?.cancel) { try { t.cancel(); } catch {} taskUpdate(b.dataset.tskx, { detail: "canceling…" }); }
+  }));
+  $("#dlList").querySelectorAll(".task-row.clickable").forEach(el => el.addEventListener("click", () => {
+    const t = bgTasks.get(el.dataset.task);
+    if (!t?.onClick) return;
+    bgTasks.delete(el.dataset.task);
+    dlOpen = false; dlRender();
+    t.onClick();
+  }));
   $("#dlList").querySelectorAll("[data-dlx]").forEach(b => b.addEventListener("click", () => dlCancel(b.dataset.dlx)));
   $("#dlList").querySelectorAll(".dl-row[data-path]").forEach(el => el.addEventListener("contextmenu", e => { e.preventDefault(); openDlCtx(e.clientX, e.clientY, el.dataset.path); }));
 }
@@ -1374,7 +1478,12 @@ function dlStop() {
     const act = dlQueue.find(d => d.status === "active");
     if (act) invoke("yt_cancel", { id: act.id }).catch(() => {});
     dlRender();
-  } else { dlQueue.length = 0; dlRender(); }
+  } else {
+    // Clear: drop finished downloads AND finished background tasks.
+    dlQueue.length = 0;
+    for (const [id, t] of bgTasks) if (t.status !== "run") bgTasks.delete(id);
+    dlRender();
+  }
 }
 // Right-click actions on a download row.
 function openDlCtx(x, y, path) {
@@ -2095,11 +2204,18 @@ async function addSource(path) {
 }
 async function rescanAll() {
   if (!folders.length) { flash("No sources to refresh"); return; }
-  flash("Refreshing library…");
+  const list = [...folders];
+  const tid = taskStart("Refreshing library", { detail: `${list.length} folder${list.length === 1 ? "" : "s"}`, pct: 0 });
   let total = 0;
-  for (const f of [...folders]) total += await diffFolder(f);
+  for (let i = 0; i < list.length; i++) {
+    taskUpdate(tid, { detail: baseName(list[i]), pct: (i / list.length) * 100 });
+    total += await diffFolder(list[i]);
+  }
   await saveLibrary(); renderSources();
-  if (active.type === "source") openSource(active.id); else showLibrary();
+  // Refresh the view only if the user is still looking at the library/source.
+  if (active.type === "source") openSource(active.id);
+  else if (active.type === "library") showLibrary();
+  taskEnd(tid, { detail: total ? `${total} new song${total === 1 ? "" : "s"}` : "up to date", ttl: 6000 });
   flash(total ? `${total} new song${total === 1 ? "" : "s"} found` : "Library up to date");
 }
 async function pickFolder() {

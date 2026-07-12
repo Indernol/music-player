@@ -801,6 +801,11 @@ body.win-blur .dl-toggle.busy::before { animation-play-state: paused; }
 .dl-row.done .dl-ico { color: #34d399; }
 .dl-row.error .dl-ico { color: #f59e0b; }
 .dl-row.canceled { opacity: .55; }
+/* Background-task rows share the download look; clickable ones open a result. */
+.task-row.active .dl-ico { color: var(--accent-2); }
+.task-row.clickable { cursor: pointer; border-radius: 7px; }
+.task-row.clickable:hover { background: var(--bg-3); }
+.task-row.error .dl-pct { color: #f87171; }
 .dl-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tx-1); }
 .dl-prog { flex: 0 0 140px; height: 5px; border-radius: 3px; background: var(--bg-3); overflow: hidden; }
 .dl-prog i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 3px; transition: width .25s; }
