@@ -76,6 +76,26 @@ export function replacePath(oldPath, newPath) {
   _persist();
 }
 
+// Bulk path-prefix rewrite (source folder canonicalized/renamed): one pass over
+// every playlist, entries that collide after the rewrite are dropped.
+export function rewritePrefix(oldPrefix, newPrefix) {
+  if (!oldPrefix || oldPrefix === newPrefix) return 0;
+  const oldDir = oldPrefix.endsWith("/") ? oldPrefix : oldPrefix + "/";
+  let changed = 0;
+  for (const pl of _cache) {
+    const seen = new Set();
+    const out = [];
+    for (const p of pl.paths) {
+      let np = p;
+      if (p === oldPrefix || p.startsWith(oldDir)) { np = newPrefix + p.slice(oldPrefix.length); changed++; }
+      if (!seen.has(np)) { seen.add(np); out.push(np); }
+    }
+    pl.paths = out;
+  }
+  if (changed) _persist();
+  return changed;
+}
+
 export function reorderPlaylist(id, fromIdx, toIdx) {
   const pl = _cache.find(p => p.id === id);
   if (!pl) return;

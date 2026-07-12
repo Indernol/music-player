@@ -170,7 +170,15 @@ function refreshView() { if (active.type === "source") openSource(active.id); el
 const onlineIndex = new Map(); // "yt:<id>" -> track
 function isOnline(p) { return String(p || "").startsWith("yt:"); }
 function ytId(p) { return String(p).slice(3); }
-function onlineFromResult(r) { return { path: "yt:" + r.id, title: r.title, artist: r.artist, album: "YouTube", duration_secs: r.duration_secs, gain: 1, thumbnail: r.thumbnail }; }
+function onlineFromResult(r) { return { path: "yt:" + r.id, title: r.title, artist: r.artist, album: "YouTube", duration_secs: r.duration_secs, gain: 1, thumbnail: r.thumbnail, views: r.views || 0 }; }
+function fmtViews(n) {
+  n = Number(n) || 0;
+  if (!n) return "";
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1).replace(/\.0$/, "")}B views`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M views`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}K views`;
+  return `${n} views`;
+}
 async function saveOnline() {
   // Persist the whole index (capped): it also restores title/artist/artwork of
   // downloaded mp3 files that have no embedded tags (see enrichLibrary).
@@ -210,9 +218,7 @@ async function restorePlayback() {
   updateNowPlaying(t, queue[curIndex]);   // show metadata (this resets the seek bar)
   playing = false; setPlayIcon(false);
   wallStart(_resumePos); wallPause();      // freeze the wall clock at the saved spot
-  const sk = $("#seek"), max = Number(sk.max) || 1;
-  sk.value = _resumePos; sk.style.setProperty("--fill", `${Math.min(100, (_resumePos / max) * 100).toFixed(2)}%`);
-  $("#curTime").textContent = fmtDur(_resumePos); _lastTimeTxt = fmtDur(_resumePos);
+  renderSeek(_resumePos);
   updatePlayingRow();
 }
 
@@ -363,6 +369,7 @@ function renderTracks(list, presorted = false) {
   list = view;
   updateCount();
   const host = $("#trackList");
+  host.classList.remove("yt-grid"); // leave mini-YouTube card mode
   $("#listHead").style.display = list.length ? "" : "none";
   if (!list.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.music}</div>Nothing here yet.</div>`; return; }
   const nowPath = curIndex >= 0 ? queue[curIndex] : null;
@@ -387,6 +394,8 @@ function renderTracks(list, presorted = false) {
 function wireTrackList() {
   const host = $("#trackList");
   host.addEventListener("click", (e) => {
+    const playBtn = e.target.closest("[data-play]");
+    if (playBtn) { e.stopPropagation(); playFrom(Number(playBtn.dataset.play)); return; }
     const more = e.target.closest("[data-more]");
     if (more) {
       e.stopPropagation();
@@ -661,11 +670,15 @@ function openSource(folder) {
 // (async command), so refreshing 1000+ known files is near-instant and the UI
 // never freezes.
 async function diffFolder(folder) {
-  const known = library.filter(t => inFolder(t, folder)).map(t => t.path);
+  // Pass the WHOLE library as "known": if the folder spelling ever drifts from
+  // the stored track paths (symlink alias), a folder-scoped set would come back
+  // empty and every file would return as "new" — doubling the library.
+  const known = library.map(t => t.path);
   const diff = await invoke("scan_diff", { paths: [folder], known }).catch(e => { console.error("[scan]", e); return null; });
   if (!diff) return 0;
   const present = new Set(diff.present || []);
-  const fresh = diff.new_tracks || [];
+  const have = new Set(known);
+  const fresh = (diff.new_tracks || []).filter(t => !have.has(t.path)); // belt & braces
   // Keep tracks outside this folder + this folder's tracks that still exist, add new.
   library = library.filter(t => !inFolder(t, folder) || present.has(t.path)).concat(fresh);
   return fresh.length;
@@ -853,32 +866,43 @@ async function runExtImport() {
   _extBusy = true; _extCancel = false;
   $("#extGo").disabled = true; $("#extCancel").hidden = false;
   let name = $("#extName").value.trim();
-  let queries = [];
+  let jobs = []; // { q, dur } — dur (secs) picks the best YouTube hit when known
   const sp = raw.match(/(?:https?:\/\/[^\s]*open\.spotify\.com\/[^\s]+|spotify:(?:playlist|album|track):[A-Za-z0-9]+)/);
   try {
     if (sp) {
       extStatus("Reading the Spotify playlist…");
       const imp = await invoke("import_spotify", { url: sp[0] });
       if (!name) name = imp.name;
-      queries = (imp.tracks || []).map(t => `${t.artist} ${t.title}`.trim()).filter(Boolean);
+      jobs = (imp.tracks || [])
+        .map(t => ({ q: `${t.artist} ${t.title}`.trim(), dur: Number(t.duration_secs) || 0 }))
+        .filter(j => j.q);
     } else {
       // Pasted list: one song per line (drop stray URLs / blank lines).
-      queries = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^https?:\/\//.test(l));
+      jobs = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^https?:\/\//.test(l)).map(q => ({ q, dur: 0 }));
     }
   } catch (e) { extStatus(String(e), true); extDone(); return; }
-  if (!queries.length) { extStatus("Nothing to import.", true); extDone(); return; }
+  if (!jobs.length) { extStatus("Nothing to import.", true); extDone(); return; }
 
   $("#extBar").hidden = false;
   const resolved = [], missed = [];
-  for (let i = 0; i < queries.length; i++) {
+  for (let i = 0; i < jobs.length; i++) {
     if (_extCancel) break;
-    extStatus(`Matching ${i + 1}/${queries.length} on YouTube — “${queries[i]}”`);
-    $("#extBarFill").style.width = `${Math.round((i / queries.length) * 100)}%`;
+    const { q, dur } = jobs[i];
+    extStatus(`Matching ${i + 1}/${jobs.length} on YouTube — “${q}”`);
+    $("#extBarFill").style.width = `${Math.round((i / jobs.length) * 100)}%`;
     try {
-      const res = await invoke("yt_search", { query: queries[i], limit: 1, offset: 0 });
-      const hit = Array.isArray(res) && res[0];
-      if (hit) resolved.push(onlineFromResult(hit)); else missed.push(queries[i]);
-    } catch { missed.push(queries[i]); }
+      // Take the top few hits and prefer the one whose duration matches the
+      // Spotify track — kills most "live version / sped up / 10h loop" misses.
+      const res = await invoke("yt_search", { query: q, limit: dur ? 3 : 1, offset: 0 });
+      const hits = Array.isArray(res) ? res : [];
+      let hit = hits[0];
+      if (dur && hits.length > 1) {
+        const scored = hits.map(h => ({ h, d: Math.abs((Number(h.duration_secs) || 0) - dur) }));
+        scored.sort((a, b) => a.d - b.d);
+        if (scored[0].d <= 15) hit = scored[0].h; // close-enough duration wins
+      }
+      if (hit) resolved.push(onlineFromResult(hit)); else missed.push(q);
+    } catch { missed.push(q); }
   }
   $("#extBarFill").style.width = "100%";
   if (!resolved.length) { extStatus("Couldn't match any track on YouTube.", true); extDone(); return; }
@@ -921,6 +945,10 @@ function renderOnlineResults() {
         (ytFilter !== "all" ? ` (filter: ${ytFilter})` : "") +
         (owned.length ? ` · ${owned.length} already in your library` : ""),
     actions: plMode ? "" :
+      `<div class="yt-viewtog">
+        <button id="ytGridBtn" class="btn-line sm ${(S().ytView || "grid") === "grid" ? "ac-on" : ""}" title="Card view (mini YouTube)">▦</button>
+        <button id="ytListBtn" class="btn-line sm ${(S().ytView || "grid") === "list" ? "ac-on" : ""}" title="List view">≡</button>
+      </div>` +
       `<select id="ytFilter" class="sel sm-sel">
         <option value="all" ${ytFilter === "all" ? "selected" : ""}>All results</option>
         <option value="title" ${ytFilter === "title" ? "selected" : ""}>Title contains</option>
@@ -932,8 +960,12 @@ function renderOnlineResults() {
   $("#ytFilter")?.addEventListener("change", e => { ytFilter = e.target.value; renderOnlineResults(); });
   $("#ytPrev")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage - 1));
   $("#ytNext")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage + 1));
+  $("#ytGridBtn")?.addEventListener("click", () => { SETTINGS.setSetting("ytView", "grid"); renderOnlineResults(); });
+  $("#ytListBtn")?.addEventListener("click", () => { SETTINGS.setSetting("ytView", "list"); renderOnlineResults(); });
   if (plMode) {
     renderArtistPlaylists();
+  } else if ((S().ytView || "grid") === "grid") {
+    renderYtGrid(sortTracks([...fresh]), sortTracks([...owned]));
   } else {
     renderTracks([...sortTracks([...fresh]), ...sortTracks([...owned])], true);
     if (owned.length) {
@@ -944,6 +976,39 @@ function renderOnlineResults() {
     }
   }
   injectArtistCard();
+}
+// Mini-YouTube card grid: 16:9 thumbnail + duration badge + channel + views,
+// hover ▶ plays instantly. Cards keep the .track class + data-path/data-idx so
+// the existing delegation (select, double-click, context menu) works untouched.
+function renderYtGrid(fresh, owned) {
+  view = [...fresh, ...owned];
+  updateCount();
+  const host = $("#trackList");
+  $("#listHead").style.display = "none";
+  host.classList.add("yt-grid");
+  if (!view.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.music}</div>No results.</div>`; return; }
+  const nowPath = curIndex >= 0 ? queue[curIndex] : null;
+  const card = (t, i, own) => {
+    const vs = fmtViews(t.views);
+    return `<div class="track yt-card ${nowPath === t.path ? "playing" : ""} ${own ? "owned" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
+      <div class="yc-thumb"${t.thumbnail ? ` style="background-image:url('${esc(t.thumbnail)}')"` : ""}>
+        <span class="yc-dur">${fmtDur(t.duration_secs)}</span>
+        ${own ? `<span class="yc-own" title="Already in your library">${IC.check}</span>` : ""}
+        <button class="yc-play" data-play="${i}" title="Play now">${IC.play}</button>
+      </div>
+      <div class="yc-meta">
+        <div class="yc-title" title="${esc(t.title)}">${esc(t.title)}</div>
+        <div class="yc-sub">${esc(t.artist)}${vs ? ` · ${vs}` : ""}</div>
+      </div>
+      <button class="more yc-more" title="More" data-more="${i}">⋯</button>
+    </div>`;
+  };
+  host.innerHTML =
+    fresh.map((t, i) => card(t, i, false)).join("") +
+    (owned.length
+      ? `<div class="list-sep">${IC.check} Already in your library</div>` + owned.map((t, i) => card(t, fresh.length + i, true)).join("")
+      : "");
+  updatePlayingRow();
 }
 // The channel header (avatar, name, mode toggle, "Download all"), pinned above
 // the results on page 1 once yt_channel resolves.
@@ -967,6 +1032,7 @@ function injectArtistCard() {
 }
 function renderArtistPlaylists() {
   const host = $("#trackList");
+  host.classList.remove("yt-grid");
   $("#listHead").style.display = "none";
   host.innerHTML = ytArtistPls.length
     ? ytArtistPls.map((p, i) => `<div class="ac-pl" data-acpl="${i}" title="${esc(p.url)}"><span class="ac-pl-t">${esc(p.title)}</span><span class="ac-pl-a">${esc(p.author || "")}</span></div>`).join("")
@@ -1017,6 +1083,7 @@ async function searchOnline(q, page = 0) {
   selected.clear();
   setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}” — page ${ytPage + 1}…` });
   $("#listHead").style.display = "none";
+  $("#trackList").classList.remove("yt-grid");
   $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.radio}</div>Searching YouTube…</div>`;
   try {
     const limit = Number(S().searchLimit) || 20;
@@ -1663,7 +1730,16 @@ async function togglePlay() {
     return;
   }
   const cur = trackByPath(queue[curIndex]);
-  if (playing) { await invoke("pause"); playing = false; wallPause(); setPlayIcon(false); savePlayback(); rpcPause(cur); }
+  if (playing) {
+    await invoke("pause"); playing = false; wallPause(); setPlayIcon(false); savePlayback(); rpcPause(cur);
+    // Snap the frozen wall clock onto the engine's REAL position (they drift
+    // during stream connects) so the bar shows the true paused spot instead of
+    // jumping when playback resumes.
+    try {
+      const st = await invoke("status");
+      if (st && (st.epoch || 0) === curEpoch && st.position > 0 && Math.abs(st.position - wallPos()) > 0.4) { wallSeek(st.position); renderSeek(st.position); }
+    } catch {}
+  }
   else { await invoke("resume"); playing = true; wallResume(); setPlayIcon(true); rpcResume(cur); }
   updatePlayingRow(); mediaPlayback();
 }
@@ -1674,19 +1750,25 @@ async function prev() {
   else if (curIndex > 0) await hardPlay(curIndex - 1);
   else { await invoke("seek", { secs: 0 }); wallSeek(0); }
 }
-// Smooth 60fps progress bar (fill % + time), gated so it costs nothing when
-// paused, hidden or unfocused.
-let _lastTimeTxt = "";
+// Smooth 60fps progress bar (fill % + time). Runs paused too — the wall clock
+// is frozen then, so the writes below no-op via the value guard, but external
+// position changes (seek from the media widget, engine re-sync on pause) still
+// repaint the bar instead of leaving a stale fill behind the thumb.
+let _lastTimeTxt = "", _lastSeekVal = -1;
+function renderSeek(p) {
+  const el = $("#seek");
+  el.value = p;
+  const max = Number(el.max) || 1;
+  el.style.setProperty("--fill", `${Math.min(100, (p / max) * 100).toFixed(2)}%`);
+  const txt = fmtDur(p);
+  if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
+  _lastSeekVal = p;
+}
 function startProgressLoop() {
   const loop = () => {
-    if (playing && !seeking && curIndex >= 0 && !document.hidden) {
-      const el = $("#seek");
+    if (!seeking && curIndex >= 0 && !document.hidden) {
       const p = wallPos();
-      el.value = p;
-      const max = Number(el.max) || 1;
-      el.style.setProperty("--fill", `${Math.min(100, (p / max) * 100).toFixed(2)}%`);
-      const txt = fmtDur(p);
-      if (txt !== _lastTimeTxt) { _lastTimeTxt = txt; $("#curTime").textContent = txt; }
+      if (Math.abs(p - _lastSeekVal) > 0.05) renderSeek(p);
     }
     requestAnimationFrame(loop);
   };
@@ -1886,14 +1968,14 @@ function listenMediaEvents() {
     if (msg.startsWith("position:")) {
       const s = Math.max(0, Number(msg.slice(9)) || 0);
       await invoke("seek", { secs: s }); wallSeek(s);
-      $("#seek").value = s; $("#curTime").textContent = fmtDur(s); mediaPlayback();
+      renderSeek(s); mediaPlayback();
       return;
     }
     if (msg.startsWith("seekby:")) {
       const d = Number(msg.slice(7)) || 0;
       const s = Math.max(0, wallPos() + d);
       await invoke("seek", { secs: s }); wallSeek(s);
-      $("#seek").value = s; $("#curTime").textContent = fmtDur(s); mediaPlayback();
+      renderSeek(s); mediaPlayback();
     }
   }).catch(e => console.error("[mpris listen]", e));
 }
@@ -1949,11 +2031,15 @@ function rpcPause(t) {
   clearTimeout(_rpcDelayTimer);
   const secs = Math.max(0, Number(S().rpcPauseClear) || 0);
   if (secs <= 0) { _rpcClearTimers(); clearRPC(); return; } // remove presence at once
-  updateRPC(t, false); // show "Paused" for a while…
+  // Push the paused state RIGHT NOW: without this the last "playing" activity
+  // (with live timestamps) stays up and Discord's counter keeps running.
+  updateRPC(t, false);
   clearTimeout(_rpcPauseTimer);
   _rpcPauseTimer = setTimeout(() => { if (!playing) clearRPC(); }, secs * 1000); // …then remove it
 }
-function rpcStop(t) { _rpcClearTimers(); updateRPC(t, false); }
+// Playback fully stopped (queue drained / explicit stop): remove the presence —
+// a stale "Paused — <last track>" card lingering forever is worse than nothing.
+function rpcStop() { _rpcClearTimers(); clearRPC(); }
 
 // ─── Library (persisted) ───
 async function saveLibrary() { enrichLibrary(); await storeSave("library", JSON.stringify({ folders, tracks: library })); }
@@ -1961,8 +2047,41 @@ async function loadLibrary() {
   const raw = await storeLoad("library");
   if (raw) { try { const d = JSON.parse(raw); folders = Array.isArray(d.folders) ? d.folders : []; library = Array.isArray(d.tracks) ? d.tracks : []; } catch {} }
 }
+// Heal path aliasing: the SAME folder reached through two spellings (symlinked
+// /home vs /var/home on atomic distros, pickers returning the realpath) gives
+// two path strings per file — every track shows up twice. Canonicalize the
+// sources, rewrite track + playlist paths under renamed prefixes, then drop
+// exact duplicates. Runs at startup; a clean library is a fast no-op.
+async function normalizeLibraryPaths() {
+  if (!IS_NATIVE || !folders.length) return;
+  let changed = false;
+  for (let i = 0; i < folders.length; i++) {
+    const f = folders[i];
+    let c = f;
+    try { c = await invoke("canon_path", { path: f }); } catch {}
+    if (c === f) continue;
+    const dir = f.endsWith("/") ? f : f + "/";
+    for (const t of library) if (t.path === f || t.path.startsWith(dir)) t.path = c + t.path.slice(f.length);
+    PL.rewritePrefix(f, c);
+    folders[i] = c;
+    changed = true;
+  }
+  folders = [...new Set(folders)];
+  const byP = new Map();
+  for (const t of library) {
+    const prev = byP.get(t.path);
+    if (!prev) byP.set(t.path, t);
+    else if (!prev.thumbnail && t.thumbnail) byP.set(t.path, t); // keep the richer entry
+  }
+  if (byP.size !== library.length) { library = [...byP.values()]; changed = true; }
+  if (changed) { await saveLibrary(); console.warn("[library] paths normalized / duplicates removed"); }
+}
 async function addSource(path) {
   if (!path) return;
+  // Folder pickers can return an alias of an already-added source (symlinked
+  // /home vs /var/home): canonicalize before comparing, or the same folder
+  // gets scanned twice under two spellings and every track doubles.
+  if (IS_NATIVE) { try { path = await invoke("canon_path", { path }); } catch {} }
   flash(`Scanning ${baseName(path)}…`);
   const tracks = await invoke("scan", { paths: [path] });
   const found = Array.isArray(tracks) ? tracks : [];
@@ -2021,6 +2140,8 @@ async function applyTheme() {
   root.setProperty("--r", `${s.radius ?? 12}px`);
   root.setProperty("--topbar-pad", `${s.topbarPad ?? 13}px`);
   root.setProperty("--thumb-size", `${s.thumbSize ?? 12}px`);
+  root.setProperty("--side-w", `${s.sideW ?? 268}px`);
+  root.setProperty("--np-w", `${s.npW ?? 330}px`);
   document.body.classList.toggle("compact-top", !!s.compactTopbar);
   // Custom slider-thumb image (the "pink dot"). Resolved to a data URL for local
   // paths, like the wallpaper, and applied as a CSS var used by every range thumb.
@@ -2733,11 +2854,61 @@ function renderFollowList() {
   }));
 }
 
+// ─── Resizable panels (sidebar / Now-playing) ───────────────────────────────
+// Pointer-drag the handles; the width lives in a CSS var and persists as a
+// setting. Double-click a handle to reset that panel to its default width.
+function wireResizer(handle, { min, max, def, setting, cssVar, widthFrom }) {
+  const el = $(handle);
+  if (!el) return;
+  const root = document.documentElement.style;
+  let raf = 0, lastW = 0;
+  el.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+    document.body.classList.add("rs-dragging");
+    const move = (ev) => {
+      const w = Math.round(Math.min(max, Math.max(min, widthFrom(ev))));
+      if (w === lastW) return;
+      lastW = w;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => root.setProperty(cssVar, `${w}px`));
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      el.classList.remove("dragging");
+      document.body.classList.remove("rs-dragging");
+      if (lastW) SETTINGS.setSetting(setting, lastW);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  });
+  el.addEventListener("dblclick", () => {
+    root.setProperty(cssVar, `${def}px`);
+    SETTINGS.setSetting(setting, def);
+    flash("Panel width reset");
+  });
+}
+function initResizers() {
+  wireResizer("#sideResize", {
+    min: 190, max: 480, def: 268, setting: "sideW", cssVar: "--side-w",
+    widthFrom: (ev) => ev.clientX - 8, // .app left padding
+  });
+  wireResizer("#npResize", {
+    min: 250, max: 560, def: 330, setting: "npW", cssVar: "--np-w",
+    widthFrom: (ev) => window.innerWidth - 10 - ev.clientX, // drawer is right-anchored (right: 10px)
+  });
+}
+
 // ─── Wire up ───
 async function init() {
   hydrateIcons();
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory()]);
   await loadLibrary();
+  await normalizeLibraryPaths();      // heal /home vs /var/home aliases + drop duplicates
   if (enrichLibrary()) saveLibrary();
   const relinked = relinkPlaylists(); // heal playlist paths after moved/re-added music
   if (relinked) flash(`Relinked ${relinked} moved track${relinked === 1 ? "" : "s"}`);
@@ -2751,6 +2922,7 @@ async function init() {
   }
 
   wireTrackList();
+  initResizers();
   $("#pickBtn").addEventListener("click", pickFolder);
   $("#manualBtn").addEventListener("click", addManual);
   $("#rescanBtn").addEventListener("click", rescanAll);
@@ -2776,7 +2948,13 @@ async function init() {
   });
 
   $("#seek").addEventListener("input", () => { seeking = true; $("#curTime").textContent = fmtDur(Number($("#seek").value)); });
-  $("#seek").addEventListener("change", async () => { const s = Number($("#seek").value); await invoke("seek", { secs: s }); wallSeek(s); seeking = false; mediaPlayback(); updateRPC(trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex]), playing); });
+  $("#seek").addEventListener("change", async () => {
+    const s = Number($("#seek").value); await invoke("seek", { secs: s }); wallSeek(s); seeking = false; renderSeek(s); mediaPlayback();
+    // Refresh the presence only if one is (or should be) shown: while playing,
+    // or while the temporary "Paused" card is still up. Never resurrect a
+    // presence that rpcPause/rpcStop already cleared.
+    if (playing || _rpcPauseTimer) updateRPC(trackByPath(effectivePath(queue[curIndex]) || "") || trackByPath(queue[curIndex]), playing);
+  });
 
   $("#search").addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();

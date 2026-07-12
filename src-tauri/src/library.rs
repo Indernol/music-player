@@ -44,11 +44,32 @@ fn parse_db_gain(s: &str) -> Option<f32> {
 
 const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "m4a", "aac"];
 
+/// Canonical form of a path: symlinks resolved (e.g. Fedora atomic's
+/// /home/user → /var/home/user), Windows' `\\?\` verbatim prefix stripped.
+/// The SAME folder picked through two different spellings used to produce two
+/// distinct path strings for every file — doubling the whole library.
+pub fn canon(path: &str) -> String {
+    match std::fs::canonicalize(path) {
+        Ok(p) => {
+            let s = p.to_string_lossy().into_owned();
+            s.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(s)
+        }
+        Err(_) => path.to_string(),
+    }
+}
+
+/// Frontend helper: canonicalize one path (folder pickers may return aliases).
+#[tauri::command]
+pub fn canon_path(path: String) -> String {
+    canon(&path)
+}
+
 /// Recursively scan the given root folders for supported audio files.
 pub fn scan_library(roots: &[String]) -> Vec<Track> {
     let mut tracks = Vec::new();
     for root in roots {
-        for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
+        let root = canon(root);
+        for entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) {
             if !entry.file_type().is_file() {
                 continue;
             }
@@ -161,7 +182,8 @@ pub fn scan_diff(roots: &[String], known: &HashSet<String>) -> ScanDiff {
     let mut new_tracks = Vec::new();
     let mut present = Vec::new();
     for root in roots {
-        for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
+        let root = canon(root);
+        for entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) {
             if !entry.file_type().is_file() {
                 continue;
             }

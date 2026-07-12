@@ -49,6 +49,9 @@ pub struct OnlineTrack {
     pub artist: String,
     pub duration_secs: u64,
     pub thumbnail: String,
+    /// View count when the flat-playlist entry carries one (search results do,
+    /// some playlist dumps don't) — powers the mini-YouTube result cards.
+    pub views: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -441,6 +444,7 @@ fn track_from_json(v: &Value) -> Option<OnlineTrack> {
             .unwrap_or("Unknown Artist")
             .to_string(),
         duration_secs: v["duration"].as_f64().unwrap_or(0.0) as u64,
+        views: v["view_count"].as_u64(),
         id,
         thumbnail,
     })

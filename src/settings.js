@@ -73,6 +73,9 @@ const DEFAULTS = {
   collPlaylists: false,  // Playlists section collapsed
   npDocked: false,       // Up-next panel docked as a side column
   uiNpOpen: false,       // Up-next panel open (restored at launch)
+  sideW: 268,            // sidebar width (px) — drag the handle on its right edge
+  npW: 330,              // Now-playing panel width (px) — drag its left edge
+  ytView: "grid",        // YouTube results: grid (mini-YouTube cards) | list
   bgImage: "",           // custom background: URL or local file path
   bgBlur: 18,            // px of blur on the background image
   bgDim: 45,             // % darkening of the background image

@@ -93,7 +93,10 @@ pub fn rpc_update(
 
     if let Some((_, client)) = guard.as_mut() {
         let details = if title.is_empty() { "Idle".to_string() } else { title };
-        let state_line = if artist.is_empty() { "—".to_string() } else { artist };
+        // Paused: make the state unambiguous — Discord has no native "paused"
+        // rendering, and with no timestamps attached the elapsed counter stops.
+        let base_state = if artist.is_empty() { "—".to_string() } else { artist };
+        let state_line = if playing { base_state } else { format!("⏸ Paused — {base_state}") };
         let status = if playing { "Playing" } else { "Paused" };
         // "Listening to …" with the track's artwork — the http(s) thumbnail URL
         // is accepted directly as an asset by modern Discord clients / arRPC.
@@ -137,9 +140,17 @@ pub fn rpc_update(
 #[tauri::command]
 pub fn rpc_clear(state: State<RpcState>) {
     if let Ok(mut guard) = state.0.lock() {
-        if let Some((_, mut client)) = guard.take() {
-            let _ = client.clear_activity();
-            let _ = client.close();
+        // Keep the connection alive: closing the socket right after the clear
+        // frame can race the client (arRPC/Vesktop) into keeping the presence
+        // visible, and the next update would needlessly re-handshake anyway.
+        if let Some((_, client)) = guard.as_mut() {
+            if client.clear_activity().is_ok() {
+                return;
+            }
+        }
+        // Clear failed → connection is dead; drop it so the next update reconnects.
+        if let Some((_, mut dead)) = guard.take() {
+            let _ = dead.close();
         }
     }
 }

@@ -424,6 +424,7 @@ fn main() {
             youtube::yt_config, youtube::yt_install, youtube::detect_browsers,
             mpris::media_update, mpris::media_playback,
             library::cover, library::read_image, library::delete_file, library::open_path,
+            library::canon_path,
             store::store_load, store::store_save,
             rpc::rpc_update, rpc::rpc_clear,
             importer::import_spotify
