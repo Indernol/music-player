@@ -823,3 +823,25 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
 
 /* Destructive context-menu entries */
 .ctx-item.ctx-danger:hover { background: #c0392b; color: #fff; }
+
+/* ─── Small screens / Android: single column, sidebar as an overlay ─── */
+.side-toggle { display: none; font-size: 16px; }
+@media (max-width: 700px) {
+  .side-toggle { display: inline-grid; place-items: center; }
+  .app { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  body.side-open .sidebar {
+    display: flex; position: fixed; top: 8px; left: 8px; bottom: 126px;
+    width: min(300px, 84vw); z-index: 95;
+    border: 1px solid var(--bd-2); box-shadow: 18px 0 44px rgba(0, 0, 0, .55);
+  }
+  #sideResize { display: none; }
+  .track, .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 52px 28px; }
+  .track .album, .list-head .lh-album { display: none; }
+  .count { display: none; }
+  .player-main { grid-template-columns: auto 1fr auto; gap: 8px; }
+  .volume input#volume { width: 64px; }
+  body.np-docked.np-open .app { margin-right: 0; }
+  .np-drawer { width: min(var(--np-w, 330px), 96vw); }
+  .tracklist.yt-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+}

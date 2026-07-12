@@ -772,8 +772,12 @@ fn resolve_download_dir(dir: &str) -> Result<String, String> {
     } else {
         dir.to_string()
     };
+    // Canonicalize (symlinks resolved) so downloaded-file paths always share the
+    // library's canonical spelling — a downloadDir that is an alias of a source
+    // folder (e.g. ~/Desktop/music → ~/Data/music symlink) used to re-import
+    // every file under the second spelling and double the whole library.
     if std::fs::create_dir_all(&resolved).is_ok() {
-        return Ok(resolved);
+        return Ok(crate::library::canon(&resolved));
     }
     // The configured folder can't be created — typically it lived on a drive that
     // has been unplugged, leaving a root-owned empty mountpoint ("permission
@@ -782,7 +786,7 @@ fn resolve_download_dir(dir: &str) -> Result<String, String> {
     if resolved != default {
         dbg_log(&format!("download dir '{resolved}' unavailable; using '{default}'"));
         std::fs::create_dir_all(&default).map_err(|e| format!("cannot create {default}: {e}"))?;
-        return Ok(default);
+        return Ok(crate::library::canon(&default));
     }
     Err(format!("cannot create {resolved}"))
 }

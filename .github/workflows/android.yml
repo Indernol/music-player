@@ -1,0 +1,69 @@
+# Android APK build (Tauri 2 mobile). Runs on demand (Actions → android → Run
+# workflow) and on every v* tag. Produces a debug-signed APK (installable
+# directly — enable "install from unknown sources") for arm64 phones, uploaded
+# as a workflow artifact and attached to the release when triggered by a tag.
+name: android
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+env:
+  NDK_VERSION: 26.1.10909125
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the APK to the release on tag builds
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK + platform
+        run: sdkmanager "ndk;${NDK_VERSION}" "platforms;android-34" "build-tools;34.0.0"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Init Android project
+        run: |
+          export NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+          npx tauri android init --ci
+
+      - name: Add audio/storage permissions to the manifest
+        run: |
+          M=src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          # Library scanning needs media-audio read access (scoped storage).
+          sed -i 's#<uses-permission android:name="android.permission.INTERNET" */>#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />#' "$M"
+          grep -n "uses-permission" "$M"
+
+      - name: Build APK (arm64, debug-signed)
+        run: |
+          export NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+          npx tauri android build --apk --debug --target aarch64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MusicPlayer-android-arm64-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+      - name: Attach APK to the release (tag builds)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/gen/android/app/build/outputs/apk/**/*.apk

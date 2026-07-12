@@ -670,6 +670,11 @@ function openSource(folder) {
 // (async command), so refreshing 1000+ known files is near-instant and the UI
 // never freezes.
 async function diffFolder(folder) {
+  // Canonicalize the folder FIRST: rescans can be called with an alias (e.g. a
+  // downloadDir that is a symlink twin of a source folder) — without this the
+  // prune filter below compares the wrong prefix and freshly scanned files
+  // come back under a second spelling.
+  if (IS_NATIVE) { try { folder = await invoke("canon_path", { path: folder }); } catch {} }
   // Pass the WHOLE library as "known": if the folder spelling ever drifts from
   // the stored track paths (symlink alias), a folder-scoped set would come back
   // empty and every file would return as "new" — doubling the library.
@@ -2151,7 +2156,17 @@ function rpcPause(t) {
 function rpcStop() { _rpcClearTimers(); clearRPC(); }
 
 // ─── Library (persisted) ───
-async function saveLibrary() { enrichLibrary(); await storeSave("library", JSON.stringify({ folders, tracks: library })); }
+async function saveLibrary() {
+  // Last-line guard: never persist two entries for the same path, whatever
+  // code path inserted them (keep the first = richest after enrich).
+  if (library.length) {
+    const m = new Map();
+    for (const t of library) if (!m.has(t.path)) m.set(t.path, t);
+    if (m.size !== library.length) { console.warn(`[library] dropped ${library.length - m.size} duplicate entries`); library = [...m.values()]; }
+  }
+  enrichLibrary();
+  await storeSave("library", JSON.stringify({ folders, tracks: library }));
+}
 async function loadLibrary() {
   const raw = await storeLoad("library");
   if (raw) { try { const d = JSON.parse(raw); folders = Array.isArray(d.folders) ? d.folders : []; library = Array.isArray(d.tracks) ? d.tracks : []; } catch {} }
@@ -3039,6 +3054,11 @@ async function init() {
 
   wireTrackList();
   initResizers();
+  // Small screens (Android/narrow windows): the sidebar is an overlay behind ☰.
+  $("#sideToggle").addEventListener("click", () => document.body.classList.toggle("side-open"));
+  $(".sidebar").addEventListener("click", (e) => {
+    if (window.innerWidth <= 700 && e.target.closest(".nav-item, .pl-row, .src-row")) document.body.classList.remove("side-open");
+  });
   $("#pickBtn").addEventListener("click", pickFolder);
   $("#manualBtn").addEventListener("click", addManual);
   $("#rescanBtn").addEventListener("click", rescanAll);
