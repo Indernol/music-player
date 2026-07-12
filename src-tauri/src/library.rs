@@ -49,12 +49,39 @@ const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "m4a", "aac"]
 /// The SAME folder picked through two different spellings used to produce two
 /// distinct path strings for every file — doubling the whole library.
 pub fn canon(path: &str) -> String {
-    match std::fs::canonicalize(path) {
+    #[allow(unused_mut)]
+    let mut s = match std::fs::canonicalize(path) {
         Ok(p) => {
             let s = p.to_string_lossy().into_owned();
             s.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(s)
         }
         Err(_) => path.to_string(),
+    };
+    // Distrobox/Fedora-atomic quirk: inside the dev container /home and
+    // /var/home are two BIND MOUNTS of the same directory (no symlink for
+    // canonicalize to resolve), so both spellings survive as "canonical" and
+    // every file can still exist under two paths — exactly what doubled the
+    // library. When both really are one filesystem object, fold onto /var/home.
+    // NB: compare at /home/<user> level — inside the container the /home and
+    // /var/home ROOTS are distinct overlay dirs even when the user dirs are
+    // the very same mount (observed: /home 133:777264 vs /var/home 133:783629,
+    // but /home/user == /var/home/user == 63:257).
+    #[cfg(unix)]
+    if let Some(rest) = s.strip_prefix("/home/") {
+        let user = rest.split('/').next().unwrap_or("");
+        if !user.is_empty() && same_file(&format!("/home/{user}"), &format!("/var/home/{user}")) {
+            s = format!("/var/home/{rest}");
+        }
+    }
+    s
+}
+
+#[cfg(unix)]
+fn same_file(a: &str, b: &str) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+        _ => false,
     }
 }
 
@@ -62,6 +89,12 @@ pub fn canon(path: &str) -> String {
 #[tauri::command]
 pub fn canon_path(path: String) -> String {
     canon(&path)
+}
+
+/// Batch canonicalization — one IPC call for the whole library at startup.
+#[tauri::command]
+pub fn canon_paths(paths: Vec<String>) -> Vec<String> {
+    paths.iter().map(|p| canon(p)).collect()
 }
 
 /// Recursively scan the given root folders for supported audio files.

@@ -96,6 +96,25 @@ export function rewritePrefix(oldPrefix, newPrefix) {
   return changed;
 }
 
+// Bulk path replacement (startup migration): map of oldPath → newPath applied
+// in one pass over every playlist, one persist, collisions de-duplicated.
+export function replaceMany(map) {
+  if (!map || !map.size) return 0;
+  let changed = 0;
+  for (const pl of _cache) {
+    const seen = new Set();
+    const out = [];
+    for (const p of pl.paths) {
+      const np = map.get(p) || p;
+      if (np !== p) changed++;
+      if (!seen.has(np)) { seen.add(np); out.push(np); }
+    }
+    pl.paths = out;
+  }
+  if (changed) _persist();
+  return changed;
+}
+
 export function reorderPlaylist(id, fromIdx, toIdx) {
   const pl = _cache.find(p => p.id === id);
   if (!pl) return;

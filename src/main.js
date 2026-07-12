@@ -2171,33 +2171,47 @@ async function loadLibrary() {
   const raw = await storeLoad("library");
   if (raw) { try { const d = JSON.parse(raw); folders = Array.isArray(d.folders) ? d.folders : []; library = Array.isArray(d.tracks) ? d.tracks : []; } catch {} }
 }
-// Heal path aliasing: the SAME folder reached through two spellings (symlinked
-// /home vs /var/home on atomic distros, pickers returning the realpath) gives
-// two path strings per file — every track shows up twice. Canonicalize the
-// sources, rewrite track + playlist paths under renamed prefixes, then drop
-// exact duplicates. Runs at startup; a clean library is a fast no-op.
+// Heal path aliasing: the SAME file reached through two spellings gives two
+// entries — every track shows up twice. Sources of aliases seen in the wild:
+// symlinked folders (~/Desktop/music → ~/Data/music), /home vs /var/home
+// (symlink on the host, two BIND MOUNTS inside the distrobox container — which
+// plain prefix rewriting missed), pickers returning realpaths. So: canonicalize
+// EVERY track path (one batch IPC call — the backend folds bind-mount aliases
+// too), remap playlists in bulk, then drop the duplicates that collapse.
+// Runs at every startup; a clean library is a fast no-op.
 async function normalizeLibraryPaths() {
-  if (!IS_NATIVE || !folders.length) return;
+  if (!IS_NATIVE || !library.length) return;
   let changed = false;
   for (let i = 0; i < folders.length; i++) {
-    const f = folders[i];
-    let c = f;
-    try { c = await invoke("canon_path", { path: f }); } catch {}
-    if (c === f) continue;
-    const dir = f.endsWith("/") ? f : f + "/";
-    for (const t of library) if (t.path === f || t.path.startsWith(dir)) t.path = c + t.path.slice(f.length);
-    PL.rewritePrefix(f, c);
-    folders[i] = c;
-    changed = true;
+    try {
+      const c = await invoke("canon_path", { path: folders[i] });
+      if (c && c !== folders[i]) { folders[i] = c; changed = true; }
+    } catch {}
   }
-  folders = [...new Set(folders)];
+  const nf = [...new Set(folders)];
+  if (nf.length !== folders.length) { folders = nf; changed = true; }
+  try {
+    const canon = await invoke("canon_paths", { paths: library.map(t => t.path) });
+    if (Array.isArray(canon) && canon.length === library.length) {
+      const remap = new Map();
+      for (let i = 0; i < library.length; i++) {
+        const np = canon[i];
+        if (np && np !== library[i].path) { remap.set(library[i].path, np); library[i].path = np; changed = true; }
+      }
+      if (remap.size) PL.replaceMany(remap);
+    }
+  } catch (e) { console.error("[canon]", e); }
   const byP = new Map();
   for (const t of library) {
     const prev = byP.get(t.path);
     if (!prev) byP.set(t.path, t);
     else if (!prev.thumbnail && t.thumbnail) byP.set(t.path, t); // keep the richer entry
   }
-  if (byP.size !== library.length) { library = [...byP.values()]; changed = true; }
+  if (byP.size !== library.length) {
+    flash(`Library cleaned — ${library.length - byP.size} duplicate entr${library.length - byP.size === 1 ? "y" : "ies"} merged`);
+    library = [...byP.values()];
+    changed = true;
+  }
   if (changed) { await saveLibrary(); console.warn("[library] paths normalized / duplicates removed"); }
 }
 async function addSource(path) {
