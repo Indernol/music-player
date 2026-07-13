@@ -109,7 +109,38 @@ fn append_url(sink: &Sink, url: &str, gain: f32, agc: bool, err: &Arc<Mutex<Opti
             .map_err(|e| e.to_string())
     }) {
         Ok(dec) => append_source(sink, dec, gain, agc),
-        Err(e) => { let msg = format!("can't play this stream: {e}"); eprintln!("[audio] {msg}"); *err.lock().unwrap() = Some(msg); }
+        Err(e) => {
+            // Strip the (huge, noisy) URL from the error — ureq embeds the full
+            // googlevideo link, which otherwise floods the UI toast.
+            let clean = strip_url(&e.to_string());
+            let msg = format!("can't play this stream: {clean}");
+            eprintln!("[audio] {msg}");
+            *err.lock().unwrap() = Some(msg);
+        }
+    }
+}
+
+/// Remove any http(s) URL from a message so error toasts stay readable.
+fn strip_url(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if s[i..].starts_with("http://") || s[i..].starts_with("https://") {
+            out.push_str("<stream>");
+            // Skip to the next whitespace.
+            while let Some(&(_, nc)) = chars.peek() {
+                if nc.is_whitespace() { break; }
+                chars.next();
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    let t = out.trim().to_string();
+    if t.chars().count() > 160 {
+        format!("{}…", t.chars().take(160).collect::<String>())
+    } else {
+        t
     }
 }
 

@@ -349,7 +349,10 @@ function wireDialogs() {
 function flash(msg) {
   let el = $("#toast");
   if (!el) { el = document.createElement("div"); el.id = "toast"; el.className = "toast"; document.body.appendChild(el); }
-  el.textContent = msg; el.classList.add("show");
+  // Hard cap so a stray long string (e.g. a stream URL) can never blow up the UI.
+  const s = String(msg);
+  el.textContent = s.length > 200 ? s.slice(0, 200) + "…" : s;
+  el.classList.add("show");
   clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 1800);
 }
 
@@ -1943,7 +1946,9 @@ async function dlPump() {
 
   // Health check before churning through the queue: if yt-dlp itself is
   // broken/missing, fail the whole batch at once with the real reason.
-  try { await ytConfigPush(); }
+  // Skipped on Android — there's no yt-dlp there (the built-in engine downloads),
+  // and the yt-dlp probe threw "no HOME directory", failing every download.
+  try { if (!IS_ANDROID) await ytConfigPush(); }
   catch (e) {
     for (const d of dlQueue) if (d.status === "queued") { d.status = "error"; d.err = String(e); }
     dlRunning = false; dlRender();

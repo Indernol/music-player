@@ -438,7 +438,7 @@ body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,
 .swatch.on { border-color: var(--tx-1); box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px currentColor; }
 
 /* ─── Toast ─── */
-.toast { position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--bg-3); color: var(--tx-1); border: 1px solid var(--bd-2); padding: 9px 16px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 140; }
+.toast { position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--bg-3); color: var(--tx-1); border: 1px solid var(--bd-2); padding: 9px 16px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 140; max-width: min(88vw, 460px); overflow-wrap: anywhere; word-break: break-word; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 .mock-banner { background: rgba(245,158,11,.12); color: #f59e0b; border: 1px solid rgba(245,158,11,.3); border-radius: 8px; padding: 8px 12px; margin: 10px 12px; font-size: 12px; }
