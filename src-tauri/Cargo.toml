@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.21.4"
+version = "0.21.5"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -55,12 +55,17 @@ rustypipe = { version = "0.11", default-features = false, features = ["rustls-tl
 [target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
 souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }
 
-# Android: rquickjs-sys (rustypipe's QuickJS engine for YouTube's JS cipher
-# challenges) ships no pregenerated bindings for aarch64-linux-android — force
-# its bindgen feature so bindings are generated at build time (the Android CI
-# provides libclang + NDK sysroot via BINDGEN_EXTRA_CLANG_ARGS).
+# Android-only deps:
+# - rquickjs-sys (rustypipe's QuickJS for YouTube's JS cipher) ships no
+#   aarch64-linux-android bindings → force bindgen (CI provides libclang + NDK).
+# - tao + ndk-context: cpal's AAudio backend reads the Android context from the
+#   global ndk_context, but Tauri/tao keep their OWN context store and never
+#   populate it (→ "no output device", no sound). We copy tao's context across
+#   at startup (src/lib.rs init_android_ndk_context).
 [target.'cfg(target_os = "android")'.dependencies]
 rquickjs-sys = { version = "0.9", features = ["bindgen"] }
+tao = "0.35"
+ndk-context = "0.1"
 
 # Desktop-only plugins (no-op or unsupported on mobile).
 # "Launch at login": Linux .desktop in ~/.config/autostart, Windows run-key,

@@ -135,7 +135,10 @@ impl AudioController {
             // stream mid-playback) so silent failures during playback surface too.
             let stream = {
                 let mut got = None;
-                for attempt in 0..8 {
+                // Keep trying for ~30s: on Android the device can't open until
+                // setup() has bridged the Android context into ndk_context, and
+                // this thread starts BEFORE setup runs.
+                for attempt in 0..60 {
                     let cb_err = err_t.clone();
                     let res = OutputStreamBuilder::from_default_device().and_then(|b| {
                         b.with_error_callback(move |e| {
@@ -149,9 +152,9 @@ impl AudioController {
                         Ok(v) => { got = Some(v); break; }
                         Err(e) => {
                             let msg = format!("no audio output device: {e}");
-                            eprintln!("[audio] {msg} (attempt {attempt})");
+                            if attempt % 4 == 0 { eprintln!("[audio] {msg} (attempt {attempt})"); }
                             *err_t.lock().unwrap() = Some(msg);
-                            thread::sleep(std::time::Duration::from_millis(400));
+                            thread::sleep(std::time::Duration::from_millis(500));
                         }
                     }
                 }

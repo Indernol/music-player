@@ -94,6 +94,29 @@ fn audio_info(state: State<AppState>) -> String {
     state.audio.info()
 }
 
+/// cpal's Android (AAudio) backend reads the JavaVM + Activity from the global
+/// `ndk_context`, but Tauri/tao keep their own context store and never fill it,
+/// so cpal can't open any audio device. Copy tao's context across — the fix
+/// that makes sound work on Android. Retries briefly in case the Activity's
+/// context isn't registered yet when setup runs.
+#[cfg(target_os = "android")]
+fn init_android_ndk_context() {
+    use tao::platform::android::prelude::*;
+    for _ in 0..40 {
+        if let Some(ctx) = main_android_context() {
+            if !ctx.java_vm.is_null() && !ctx.context_jobject.is_null() {
+                unsafe {
+                    ndk_context::initialize_android_context(ctx.java_vm, ctx.context_jobject);
+                }
+                eprintln!("[android] ndk_context initialized for audio");
+                return;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    eprintln!("[android] could not obtain the Android context for audio");
+}
+
 // Streaming commands are async so yt-dlp resolution never blocks the UI thread.
 
 /// Stream URL via whichever backend works: cache → yt-dlp (desktop) → native
@@ -533,6 +556,10 @@ pub fn run() {
         .manage(share::ShareState::default())
         .manage(gdrive::GDriveState::default())
         .setup(|app| {
+            // Android: bridge tao's Android context into ndk_context so cpal's
+            // AAudio backend can open the audio device (otherwise: no sound).
+            #[cfg(target_os = "android")]
+            init_android_ndk_context();
             // Native YouTube engine cache (client versions, visitor data).
             ytnative::init_storage(
                 app.path()
