@@ -889,23 +889,40 @@ fn resolve_download_dir(dir: &str) -> Result<String, String> {
     } else {
         dir.to_string()
     };
-    // Canonicalize (symlinks resolved) so downloaded-file paths always share the
-    // library's canonical spelling — a downloadDir that is an alias of a source
-    // folder (e.g. ~/Desktop/music → ~/Data/music symlink) used to re-import
-    // every file under the second spelling and double the whole library.
-    if std::fs::create_dir_all(&resolved).is_ok() {
+    // A dir is only usable if we can actually WRITE there — on Android the
+    // shared Music folder needs All-Files-Access, which the user may not have
+    // granted yet, and create_dir_all can even succeed while writes fail.
+    if writable(&resolved) {
         return Ok(crate::library::canon(&resolved));
     }
-    // The configured folder can't be created — typically it lived on a drive that
-    // has been unplugged, leaving a root-owned empty mountpoint ("permission
-    // denied"). Fall back to the default location instead of failing every
-    // download; a re-plugged drive works again automatically next time.
-    if resolved != default {
-        dbg_log(&format!("download dir '{resolved}' unavailable; using '{default}'"));
-        std::fs::create_dir_all(&default).map_err(|e| format!("cannot create {default}: {e}"))?;
+    // Fall back to the default location…
+    if resolved != default && writable(&default) {
+        dbg_log(&format!("download dir '{resolved}' not writable; using '{default}'"));
         return Ok(crate::library::canon(&default));
     }
-    Err(format!("cannot create {resolved}"))
+    // …and on Android, always land somewhere writable: the app's own external
+    // files dir needs NO permission, so downloads work even without All-Files.
+    #[cfg(target_os = "android")]
+    {
+        let appdir = "/storage/emulated/0/Android/data/com.indernol.musicplayer/files/Music".to_string();
+        if writable(&appdir) {
+            dbg_log(&format!("using app storage '{appdir}' (no All-Files-Access)"));
+            return Ok(crate::library::canon(&appdir));
+        }
+    }
+    Err(format!("cannot write to a download folder (grant All-Files-Access, or pick a writable folder). Tried: {resolved}"))
+}
+
+/// True if we can create `dir` and write a file into it.
+fn writable(dir: &str) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = format!("{dir}/.mp_write_test");
+    match std::fs::write(&probe, b"") {
+        Ok(_) => { let _ = std::fs::remove_file(&probe); true }
+        Err(_) => false,
+    }
 }
 
 /// Download a video's audio as mp3 into `dir` (empty = ~/Music/MusicPlayer),

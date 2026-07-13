@@ -398,16 +398,23 @@ body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
 .set-pane { display: none; flex-direction: column; gap: 12px; }
 .set-pane.on { display: flex; }
 @media (max-width: 640px) {
-  .modal.settings { width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  /* Fill the whole viewport with inset:0 instead of width:100vw + grid
+     centering — a centered item that's even 1px wider than the viewport gets
+     its LEFT edge clipped and unreachable (the bug that cut "YOUTUBE"→"UTUBE").
+     inset:0 pins all four edges so there is no horizontal overflow at all. */
+  .modal.settings { position: fixed; inset: 0; width: auto; max-width: none; height: auto; max-height: none; border-radius: 0; overflow: hidden; }
   .modal.settings .modal-head { padding-top: calc(12px + var(--safe-top)); }
-  .modal.settings .modal-body { flex-direction: column; }
+  .modal.settings .modal-body { flex-direction: column; min-width: 0; overflow-x: hidden; }
   .set-nav { flex: 0 0 auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--bd); }
-  .set-tab { width: auto; white-space: nowrap; }
+  .set-tab { width: auto; white-space: nowrap; flex: 0 0 auto; }
   .set-tab.on { box-shadow: inset 0 -2px 0 var(--accent); }
-  .set-panes { padding-bottom: calc(18px + var(--safe-bottom)); }
+  .set-panes { padding-bottom: calc(18px + var(--safe-bottom)); min-width: 0; overflow-x: hidden; }
+  .set-pane, .set-group { min-width: 0; max-width: 100%; }
   /* Long rows (label + wide control) stack so nothing gets clipped on a phone. */
-  .set-row { flex-wrap: wrap; }
-  .text-in, .sel.wide { width: 100%; }
+  .set-row { flex-wrap: wrap; min-width: 0; }
+  .set-row label { min-width: 0; }
+  .text-in, .num-in, .sel.wide, .dir-pick { max-width: 100%; }
+  .text-in { width: 100%; }
   /* Full-screen modals on mobile: give them safe-area breathing room. */
   .modal-backdrop { padding: 0; }
   .modal { max-height: 100dvh; }

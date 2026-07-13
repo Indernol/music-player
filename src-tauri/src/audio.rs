@@ -59,6 +59,9 @@ pub struct AudioController {
     // Master volume survives hard starts: every fresh Sink is created at 1.0 by
     // rodio, which silently reset playback to FULL volume on each track switch.
     vol: Arc<Mutex<f32>>,
+    // Last "silent failure" (no audio device, or a track/stream that couldn't
+    // decode) so the frontend can actually tell the user why there's no sound.
+    last_err: Arc<Mutex<Option<String>>>,
 }
 
 fn append_source<S>(sink: &Sink, src: S, gain: f32, agc: bool)
@@ -73,7 +76,7 @@ where
     }
 }
 
-fn append_track(sink: &Sink, path: &str, gain: f32, agc: bool) {
+fn append_track(sink: &Sink, path: &str, gain: f32, agc: bool, err: &Arc<Mutex<Option<String>>>) {
     // rodio 0.21 defaults to is_seekable=false; opt back in so Sink::try_seek works.
     match File::open(path).map_err(|e| e.to_string()).and_then(|f| {
         let len = f.metadata().map(|m| m.len()).ok();
@@ -86,11 +89,11 @@ fn append_track(sink: &Sink, path: &str, gain: f32, agc: bool) {
         b.build().map_err(|e| e.to_string())
     }) {
         Ok(dec) => append_source(sink, dec, gain, agc),
-        Err(e) => eprintln!("[audio] cannot load {path}: {e}"),
+        Err(e) => { let msg = format!("can't play this file: {e}"); eprintln!("[audio] {msg}"); *err.lock().unwrap() = Some(msg); }
     }
 }
 
-fn append_url(sink: &Sink, url: &str, gain: f32, agc: bool) {
+fn append_url(sink: &Sink, url: &str, gain: f32, agc: bool, err: &Arc<Mutex<Option<String>>>) {
     // byte_len is mandatory here: symphonia's isomp4 demuxer refuses to probe
     // YouTube's moov-after-mdat m4a files without knowing the total size.
     match HttpStream::open(url.to_string()).and_then(|s| {
@@ -103,7 +106,7 @@ fn append_url(sink: &Sink, url: &str, gain: f32, agc: bool) {
             .map_err(|e| e.to_string())
     }) {
         Ok(dec) => append_source(sink, dec, gain, agc),
-        Err(e) => eprintln!("[audio] cannot stream: {e}"),
+        Err(e) => { let msg = format!("can't play this stream: {e}"); eprintln!("[audio] {msg}"); *err.lock().unwrap() = Some(msg); }
     }
 }
 
@@ -116,14 +119,29 @@ impl AudioController {
         let agc_t = agc.clone();
         let vol: Arc<Mutex<f32>> = Arc::new(Mutex::new(0.8));
         let vol_t = vol.clone();
+        let last_err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let err_t = last_err.clone();
 
         thread::spawn(move || {
-            // The OutputStream must stay alive for the whole thread.
-            let stream = match OutputStreamBuilder::open_default_stream() {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("[audio] no output device available: {e}");
-                    return;
+            // The OutputStream must stay alive for the whole thread. The audio
+            // system can be briefly unavailable at cold start (esp. Android),
+            // so retry a few times before giving up loudly.
+            let stream = {
+                let mut got = None;
+                for attempt in 0..8 {
+                    match OutputStreamBuilder::open_default_stream() {
+                        Ok(v) => { got = Some(v); break; }
+                        Err(e) => {
+                            let msg = format!("no audio output device: {e}");
+                            eprintln!("[audio] {msg} (attempt {attempt})");
+                            *err_t.lock().unwrap() = Some(msg);
+                            thread::sleep(std::time::Duration::from_millis(400));
+                        }
+                    }
+                }
+                match got {
+                    Some(v) => { *err_t.lock().unwrap() = None; v }
+                    None => return, // give up — status/audio_error() reports why
                 }
             };
             *sink_t.lock().unwrap() = (0, Some(Arc::new(Sink::connect_new(stream.mixer()))));
@@ -134,27 +152,27 @@ impl AudioController {
                     AudioCmd::Play(path, gain, epoch) => {
                         let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
                         new_sink.set_volume(*vol_t.lock().unwrap());
-                        append_track(&new_sink, &path, gain, agc_on);
+                        append_track(&new_sink, &path, gain, agc_on, &err_t);
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
                     }
                     AudioCmd::Preload(path, gain) => {
                         let s = sink_t.lock().unwrap().1.clone();
                         if let Some(s) = s {
-                            append_track(&s, &path, gain, agc_on);
+                            append_track(&s, &path, gain, agc_on, &err_t);
                         }
                     }
                     AudioCmd::PlayUrl(url, gain, epoch) => {
                         let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
                         new_sink.set_volume(*vol_t.lock().unwrap());
-                        append_url(&new_sink, &url, gain, agc_on);
+                        append_url(&new_sink, &url, gain, agc_on, &err_t);
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
                     }
                     AudioCmd::PreloadUrl(url, gain) => {
                         let s = sink_t.lock().unwrap().1.clone();
                         if let Some(s) = s {
-                            append_url(&s, &url, gain, agc_on);
+                            append_url(&s, &url, gain, agc_on, &err_t);
                         }
                     }
                     AudioCmd::Clear(epoch) => {
@@ -172,7 +190,14 @@ impl AudioController {
             next_epoch: AtomicU64::new(0),
             agc,
             vol,
+            last_err,
         }
+    }
+
+    /// The last silent playback failure (empty if none) — the frontend shows it
+    /// so "no sound" isn't a mystery. Reading it clears it.
+    pub fn take_error(&self) -> Option<String> {
+        self.last_err.lock().unwrap().take()
     }
 
     /// Toggle automatic loudness normalization (applies to the NEXT queued

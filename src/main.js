@@ -1935,9 +1935,11 @@ function downloadTracks(paths) {
   dlRender();
   if (!dlRunning) dlPump();
 }
+let _dlErrShown = false;
 async function dlPump() {
   dlRunning = true;
   dlStopAll = false;
+  _dlErrShown = false;
 
   // Health check before churning through the queue: if yt-dlp itself is
   // broken/missing, fail the whole batch at once with the real reason.
@@ -2007,6 +2009,9 @@ async function dlPump() {
         d.status = "error"; d.permanent = true; d.err = msg;
         dlBlock[d.id] = msg; saveDlBlock();
         console.error("[download final]", d.id, msg);
+        // Surface the reason once (permission / storage errors are otherwise
+        // buried in the downloads panel — the #1 "downloads don't work" cause).
+        if (!_dlErrShown) { _dlErrShown = true; flash(`Download failed: ${msg.slice(0, 120)}`); }
       }
     }
     dlRender();
@@ -2273,8 +2278,15 @@ function startProgressLoop() {
 }
 
 let _posTick = 0;
+let _lastAudioErr = "";
 function startPolling() {
   setInterval(async () => {
+    // Surface silent audio failures (no output device, undecodable stream) so
+    // "no sound" isn't a mystery — the #1 Android symptom.
+    try {
+      const ae = await invoke("audio_error");
+      if (ae && ae !== _lastAudioErr) { _lastAudioErr = ae; flash("Audio: " + ae); console.error("[audio]", ae); }
+    } catch {}
     // Paused or idle: nothing can change on its own — poll nothing (CPU).
     if (curIndex < 0 || !playing) return;
     if (++_posTick % 4 === 0) mediaPlayback(); // ~1.2s: keep the desktop widget's position fresh
@@ -2884,15 +2896,15 @@ function openSettings() {
     </section>
     <section class="set-pane" data-pane="youtube">
     <div class="set-group"><div class="set-title">YouTube</div>
-      <div class="set-hint" style="margin-bottom:10px">Search, streaming and downloads work out of the box through a <b>built-in engine</b> — no setup needed. yt-dlp below is an <b>optional</b> desktop booster (used first when present); on Android the built-in engine is always used.</div>
-      <div class="set-row"><label>yt-dlp binary</label>
+      <div class="set-hint" style="margin-bottom:10px">Search, streaming and downloads work out of the box through a <b>built-in engine</b> — no setup needed.${IS_ANDROID ? "" : " yt-dlp below is an <b>optional</b> desktop booster (used first when present)."}</div>
+      ${IS_ANDROID ? "" : `<div class="set-row"><label>yt-dlp binary</label>
         <span class="dir-pick">
           <input type="text" id="setYtPath" class="text-in" placeholder="auto-detect" value="${esc(s.ytdlpPath)}">
           <button id="setYtPick" class="btn-line sm" title="Pick the binary">${ic(IC.folder)}</button>
           <button id="setYtTest" class="btn-line sm" title="Test">Test</button>
           <button id="setYtInstall" class="btn-line sm" title="Download yt-dlp automatically">${ic(IC.upload)}Install</button>
         </span></div>
-      <div class="set-hint" id="setYtStatus">Empty = auto-detect (PATH, Desktop folders, external drives, linuxbrew). Missing? Click <b>Install</b> to download it.</div>
+      <div class="set-hint" id="setYtStatus">Empty = auto-detect (PATH, Desktop folders, external drives, linuxbrew). Missing? Click <b>Install</b> to download it.</div>`}
       ${IS_ANDROID
         ? `<div class="set-hint">⚠️ <b>Account risk:</b> using your logged-in YouTube session for downloads is more traceable and often makes YouTube <b>block</b> extraction. The built-in engine works without it — browser cookies are a desktop-only option, so they're disabled here.</div>`
         : `<div class="set-row"><label>Cookies from browser</label>
