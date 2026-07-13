@@ -78,8 +78,14 @@ jobs:
           import androidx.core.view.WindowInsetsCompat
 
           class MainActivity : TauriActivity() {
+            // Registers this Activity's JavaVM + Context into ndk_context so
+            // cpal's AAudio backend can open the audio device (no sound without
+            // it). Implemented in Rust (src/lib.rs, JNI symbol matches).
+            private external fun initNdkContext()
+
             override fun onCreate(savedInstanceState: Bundle?) {
               super.onCreate(savedInstanceState)
+              try { initNdkContext() } catch (e: Throwable) { android.util.Log.e("MusicPlayer", "initNdkContext failed", e) }
               // Edge-to-edge: draw the web content behind the status / nav bars so
               // the app is truly fullscreen; the CSS uses safe-area insets to keep
               // controls clear of them. Transparent bars over the dark UI.

@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.21.5"
+version = "0.21.6"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -58,13 +58,13 @@ souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] 
 # Android-only deps:
 # - rquickjs-sys (rustypipe's QuickJS for YouTube's JS cipher) ships no
 #   aarch64-linux-android bindings → force bindgen (CI provides libclang + NDK).
-# - tao + ndk-context: cpal's AAudio backend reads the Android context from the
-#   global ndk_context, but Tauri/tao keep their OWN context store and never
-#   populate it (→ "no output device", no sound). We copy tao's context across
-#   at startup (src/lib.rs init_android_ndk_context).
+# - jni + ndk-context: cpal's AAudio backend reads the Android context from the
+#   global ndk_context, which nothing in the Tauri stack populates (→ "no output
+#   device", no sound). MainActivity.onCreate calls a JNI fn (src/lib.rs) that
+#   registers the Activity's JavaVM + context into ndk_context so audio opens.
 [target.'cfg(target_os = "android")'.dependencies]
 rquickjs-sys = { version = "0.9", features = ["bindgen"] }
-tao = "0.35"
+jni = "0.21"
 ndk-context = "0.1"
 
 # Desktop-only plugins (no-op or unsupported on mobile).

@@ -89,32 +89,53 @@ fn audio_error(state: State<AppState>) -> Option<String> {
 }
 
 /// Opened audio-output device config ("48000 Hz · 2 ch · F32"), "" if none.
+/// On Android, appends whether the ndk_context JNI bridge fired.
 #[tauri::command]
 fn audio_info(state: State<AppState>) -> String {
-    state.audio.info()
+    let base = state.audio.info();
+    #[cfg(target_os = "android")]
+    {
+        let ndk = if NDK_READY.load(std::sync::atomic::Ordering::Relaxed) { "ndk:ok" } else { "ndk:MISSING" };
+        return if base.is_empty() { format!("(no device) [{ndk}]") } else { format!("{base} [{ndk}]") };
+    }
+    #[allow(unreachable_code)]
+    base
 }
 
-/// cpal's Android (AAudio) backend reads the JavaVM + Activity from the global
-/// `ndk_context`, but Tauri/tao keep their own context store and never fill it,
-/// so cpal can't open any audio device. Copy tao's context across — the fix
-/// that makes sound work on Android. Retries briefly in case the Activity's
-/// context isn't registered yet when setup runs.
+/// Whether ndk_context now holds a non-null JavaVM (audio can open) — shown in
+/// the audio diagnostics so we can see if the JNI bridge fired.
 #[cfg(target_os = "android")]
-fn init_android_ndk_context() {
-    use tao::platform::android::prelude::*;
-    for _ in 0..40 {
-        if let Some(ctx) = main_android_context() {
-            if !ctx.java_vm.is_null() && !ctx.context_jobject.is_null() {
-                unsafe {
-                    ndk_context::initialize_android_context(ctx.java_vm, ctx.context_jobject);
-                }
-                eprintln!("[android] ndk_context initialized for audio");
-                return;
-            }
+static NDK_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// cpal's Android (AAudio) backend reads the JavaVM + Activity from the global
+/// `ndk_context`, which nothing in the Tauri stack populates → no audio device.
+/// MainActivity.onCreate calls THIS via JNI, handing us the Activity (a
+/// Context); we register its JavaVM + context into ndk_context so audio opens.
+/// The symbol name must match <package>.MainActivity.initNdkContext.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_com_indernol_musicplayer_MainActivity_initNdkContext<'local>(
+    env: jni::JNIEnv<'local>,
+    this: jni::objects::JObject<'local>,
+) {
+    use std::os::raw::c_void;
+    let vm = match env.get_java_vm() {
+        Ok(vm) => vm,
+        Err(_) => return,
+    };
+    let vm_ptr = vm.get_java_vm_pointer() as *mut c_void;
+    // Keep a global ref alive so the context pointer stays valid for the app's
+    // lifetime (cpal dereferences it on every audio-device open).
+    match env.new_global_ref(&this) {
+        Ok(gref) => {
+            let ctx_ptr = gref.as_obj().as_raw() as *mut c_void;
+            unsafe { ndk_context::initialize_android_context(vm_ptr, ctx_ptr) };
+            std::mem::forget(gref);
         }
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        Err(_) => unsafe { ndk_context::initialize_android_context(vm_ptr, std::ptr::null_mut()) },
     }
-    eprintln!("[android] could not obtain the Android context for audio");
+    NDK_READY.store(true, std::sync::atomic::Ordering::Relaxed);
+    eprintln!("[android] ndk_context registered from MainActivity");
 }
 
 // Streaming commands are async so yt-dlp resolution never blocks the UI thread.
@@ -556,10 +577,6 @@ pub fn run() {
         .manage(share::ShareState::default())
         .manage(gdrive::GDriveState::default())
         .setup(|app| {
-            // Android: bridge tao's Android context into ndk_context so cpal's
-            // AAudio backend can open the audio device (otherwise: no sound).
-            #[cfg(target_os = "android")]
-            init_android_ndk_context();
             // Native YouTube engine cache (client versions, visitor data).
             ytnative::init_storage(
                 app.path()
