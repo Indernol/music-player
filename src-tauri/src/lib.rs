@@ -88,6 +88,12 @@ fn audio_error(state: State<AppState>) -> Option<String> {
     state.audio.take_error()
 }
 
+/// Opened audio-output device config ("48000 Hz · 2 ch · F32"), "" if none.
+#[tauri::command]
+fn audio_info(state: State<AppState>) -> String {
+    state.audio.info()
+}
+
 // Streaming commands are async so yt-dlp resolution never blocks the UI thread.
 
 /// Stream URL via whichever backend works: cache → yt-dlp (desktop) → native
@@ -541,7 +547,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            scan, scan_diff, play, preload, pause, resume, stop, set_volume, set_agc, seek, status, audio_error,
+            scan, scan_diff, play, preload, pause, resume, stop, set_volume, set_agc, seek, status, audio_error, audio_info,
             source_version, self_update, restart_app, list_versions, switch_version,
             latest_release, open_url,
             share::share_start, share::share_stop, share::share_status, share::share_connect, share::share_download,

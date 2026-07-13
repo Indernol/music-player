@@ -59,9 +59,12 @@ pub struct AudioController {
     // Master volume survives hard starts: every fresh Sink is created at 1.0 by
     // rodio, which silently reset playback to FULL volume on each track switch.
     vol: Arc<Mutex<f32>>,
-    // Last "silent failure" (no audio device, or a track/stream that couldn't
-    // decode) so the frontend can actually tell the user why there's no sound.
+    // Last "silent failure" (no audio device, a track/stream that couldn't
+    // decode, or a runtime output error) so the frontend can actually tell the
+    // user why there's no sound.
     last_err: Arc<Mutex<Option<String>>>,
+    // Opened output-device config ("48000 Hz · 2 ch · F32") for diagnostics.
+    info: Arc<Mutex<String>>,
 }
 
 fn append_source<S>(sink: &Sink, src: S, gain: f32, agc: bool)
@@ -121,15 +124,28 @@ impl AudioController {
         let vol_t = vol.clone();
         let last_err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let err_t = last_err.clone();
+        let info = Arc::new(Mutex::new(String::new()));
+        let info_t = info.clone();
 
         thread::spawn(move || {
             // The OutputStream must stay alive for the whole thread. The audio
             // system can be briefly unavailable at cold start (esp. Android),
-            // so retry a few times before giving up loudly.
+            // so retry a few times before giving up loudly. A custom error
+            // callback records RUNTIME output errors (e.g. AAudio dropping the
+            // stream mid-playback) so silent failures during playback surface too.
             let stream = {
                 let mut got = None;
                 for attempt in 0..8 {
-                    match OutputStreamBuilder::open_default_stream() {
+                    let cb_err = err_t.clone();
+                    let res = OutputStreamBuilder::from_default_device().and_then(|b| {
+                        b.with_error_callback(move |e| {
+                            let m = format!("audio output error: {e}");
+                            eprintln!("[audio] {m}");
+                            *cb_err.lock().unwrap() = Some(m);
+                        })
+                        .open_stream()
+                    });
+                    match res.or_else(|_| OutputStreamBuilder::open_default_stream()) {
                         Ok(v) => { got = Some(v); break; }
                         Err(e) => {
                             let msg = format!("no audio output device: {e}");
@@ -140,7 +156,15 @@ impl AudioController {
                     }
                 }
                 match got {
-                    Some(v) => { *err_t.lock().unwrap() = None; v }
+                    Some(v) => {
+                        let c = v.config();
+                        *info_t.lock().unwrap() = format!(
+                            "{:?} · {} ch · {:?}",
+                            c.sample_rate(), c.channel_count(), c.sample_format()
+                        );
+                        *err_t.lock().unwrap() = None;
+                        v
+                    }
                     None => return, // give up — status/audio_error() reports why
                 }
             };
@@ -191,6 +215,7 @@ impl AudioController {
             agc,
             vol,
             last_err,
+            info,
         }
     }
 
@@ -198,6 +223,11 @@ impl AudioController {
     /// so "no sound" isn't a mystery. Reading it clears it.
     pub fn take_error(&self) -> Option<String> {
         self.last_err.lock().unwrap().take()
+    }
+
+    /// Opened audio-device config, or "" if none opened (device diagnostics).
+    pub fn info(&self) -> String {
+        self.info.lock().unwrap().clone()
     }
 
     /// Toggle automatic loudness normalization (applies to the NEXT queued

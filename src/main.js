@@ -3002,6 +3002,7 @@ function openSettings() {
           <button id="setUpdCheck" class="btn-line sm">Check now</button>
           <button id="updateBtn" class="btn-line sm" hidden>Update</button>
         </span></div>
+      <div class="set-hint" id="setAudioInfo">Audio output: checking…</div>
       <div class="set-hint" id="setUpdHint">${IS_ANDROID
         ? "Checks GitHub for the newest APK for Android. “Update” opens the download — install it to update. Android and desktop versions update independently."
         : "Checks GitHub for the newest release for your platform. “Update” opens the installer download."}</div>
@@ -3081,22 +3082,23 @@ function openSettings() {
   $("#setShuf").addEventListener("change", e => { SETTINGS.setSetting("shuffleDefault", e.target.checked); shuffle = e.target.checked; $("#shuffleBtn").classList.toggle("active", shuffle); if (curIndex >= 0) schedulePreload(); });
   $("#setNotify").addEventListener("change", e => SETTINGS.setSetting("notifyOnChange", e.target.checked));
   $("#setPreload").addEventListener("change", e => { SETTINGS.setSetting("preloadNext", e.target.checked); if (curIndex >= 0) schedulePreload(); });
-  const ytStatus = (msg, ok) => { const el = $("#setYtStatus"); el.textContent = msg; el.style.color = ok ? "#34d399" : (ok === false ? "#f59e0b" : ""); };
+  const ytStatus = (msg, ok) => { const el = $("#setYtStatus"); if (!el) return; el.textContent = msg; el.style.color = ok ? "#34d399" : (ok === false ? "#f59e0b" : ""); };
   const ytTest = async () => {
     ytStatus("Testing…");
     try { ytStatus(`${await ytConfigPush()}`, true); }
     catch (e) { ytStatus(`${e}`, false); }
   };
-  $("#setYtPath").addEventListener("change", e => { SETTINGS.setSetting("ytdlpPath", e.target.value.trim()); ytTest(); });
-  $("#setYtTest").addEventListener("click", ytTest);
-  $("#setYtInstall").addEventListener("click", async () => {
+  // yt-dlp controls only exist on desktop (hidden on Android) — guard every one.
+  $("#setYtPath")?.addEventListener("change", e => { SETTINGS.setSetting("ytdlpPath", e.target.value.trim()); ytTest(); });
+  $("#setYtTest")?.addEventListener("click", ytTest);
+  $("#setYtInstall")?.addEventListener("click", async () => {
     const btn = $("#setYtInstall"); btn.disabled = true;
     ytStatus("Downloading yt-dlp… (this can take a moment)");
     try { const r = await ytInstall(); $("#setYtPath").value = ""; ytStatus(`Installed: ${r}`, true); flash("yt-dlp installed"); }
     catch (e) { ytStatus(`${e}`, false); }
     finally { btn.disabled = false; }
   });
-  $("#setYtPick").addEventListener("click", async () => {
+  $("#setYtPick")?.addEventListener("click", async () => {
     try {
       const p = await T.core.invoke("plugin:dialog|open", { options: { directory: false, multiple: false, title: "Pick the yt-dlp binary" } });
       if (p) { SETTINGS.setSetting("ytdlpPath", p); $("#setYtPath").value = p; ytTest(); }
@@ -3173,6 +3175,7 @@ function openSettings() {
   renderUpdateBtn();  // reflect state already known from the startup check
   checkUpdate();      // refresh in the background while the panel is open
   currentVersion().then(v => { const el = $("#setCurVer"); if (el) el.textContent = (v ? `v${v}` : "?") + ` · ${platformName()}`; });
+  if (IS_NATIVE) invoke("audio_info").then(cfg => { const el = $("#setAudioInfo"); if (el) el.textContent = cfg ? `Audio output: ${cfg}` : "Audio output: NO DEVICE OPENED — that's why there's no sound"; }).catch(() => {});
   $("#setReset").addEventListener("click", () => { SETTINGS.resetSettings(); applySettings(); refreshView(); openSettings(); flash("Settings reset to defaults"); });
   // Live storage usage of the download folder (best-effort, async).
   if (IS_NATIVE) {
