@@ -2767,11 +2767,16 @@ function applySettings() {
 // commits from local git and, on Build, checks one out + rebuilds + restarts.
 async function initVersionSwitcher() {
   const sel = $("#setVerSel"), go = $("#setVerGo"), hint = $("#setVerHint");
-  if (!sel || !IS_NATIVE) { if (sel) sel.innerHTML = `<option value="">Needs the native app</option>`; return; }
+  const row = $("#setVerRow");
+  // Git-based version switching only makes sense with a local source tree
+  // (desktop dev). On installers / Android it's meaningless → keep it hidden.
+  if (!sel || !IS_NATIVE || IS_ANDROID) return;
   let list = [];
   try { list = await invoke("list_versions"); }
-  catch (e) { sel.innerHTML = `<option value="">Unavailable</option>`; hint.textContent = String(e); return; }
-  if (!Array.isArray(list) || !list.length) { sel.innerHTML = `<option value="">No versions found</option>`; return; }
+  catch { return; } // no source tree → leave the switcher hidden
+  if (!Array.isArray(list) || !list.length) return;
+  if (row) row.hidden = false;
+  if (hint) hint.hidden = false;
   sel.innerHTML = list.map(v => `<option value="${v.hash}" ${v.current ? "selected" : ""}>${esc(v.version)}${v.current ? " — current" : ""} · ${esc(v.date)}</option>`).join("");
   const sync = () => { const cur = list.find(v => v.hash === sel.value); go.disabled = !sel.value || (cur && cur.current); };
   sync();
@@ -2970,15 +2975,14 @@ function openSettings() {
     </div>
     </section>
     <section class="set-pane" data-pane="system">
-    <div class="set-group"><div class="set-title">Startup</div>
+    ${IS_ANDROID ? "" : `<div class="set-group"><div class="set-title">Startup</div>
       <div class="set-row"><label>Launch at login</label><input type="checkbox" id="setBoot" ${s.startOnBoot ? "checked" : ""} ${IS_NATIVE ? "" : "disabled"}></div>
       <div class="set-hint">Start Music Player automatically when you sign in. On Linux this adds a desktop entry to your autostart folder; on Windows/macOS it registers a login item.${IS_NATIVE ? "" : " <b>Needs the native app.</b>"}</div>
-    </div>
+    </div>`}
     <div class="set-group"><div class="set-title">Updates</div>
       <div class="set-row"><label>When a new version is available</label>
         <select id="setUpdMode" class="sel sm-sel wide">
-          <option value="ask" ${s.updateMode === "ask" ? "selected" : ""}>Propose it</option>
-          <option value="auto" ${s.updateMode === "auto" ? "selected" : ""}>Build automatically</option>
+          <option value="ask" ${s.updateMode === "ask" ? "selected" : ""}>Notify me</option>
           <option value="off" ${s.updateMode === "off" ? "selected" : ""}>Don't check</option>
         </select></div>
       <div class="set-row"><label>Version <b id="setCurVer">…</b></label>
@@ -2986,13 +2990,15 @@ function openSettings() {
           <button id="setUpdCheck" class="btn-line sm">Check now</button>
           <button id="updateBtn" class="btn-line sm" hidden>Update</button>
         </span></div>
-      <div class="set-hint">The app is built from the local source tree (mirrored on the private GitHub repo). “Update” rebuilds it, then click again to restart.</div>
-      <div class="set-row"><label>Switch / downgrade version</label>
+      <div class="set-hint" id="setUpdHint">${IS_ANDROID
+        ? "Checks GitHub for the newest APK for Android. “Update” opens the download — install it to update. Android and desktop versions update independently."
+        : "Checks GitHub for the newest release for your platform. “Update” opens the installer download."}</div>
+      <div class="set-row" id="setVerRow" hidden><label>Switch / downgrade version</label>
         <span class="dir-pick">
           <select id="setVerSel" class="sel sm-sel wide"><option value="">Loading versions…</option></select>
           <button id="setVerGo" class="btn-line sm" disabled>Build</button>
         </span></div>
-      <div class="set-hint" id="setVerHint">Fetches versions from GitHub, then checks one out and rebuilds before restarting. Needs a clean source tree.</div>
+      <div class="set-hint" id="setVerHint" hidden>Rebuilds a chosen version from the local source tree before restarting (desktop dev only).</div>
     </div>
     <div class="set-actions"><button id="setReset" class="btn-line">↺ Reset to defaults</button></div>
     </section>
@@ -3008,7 +3014,8 @@ function openSettings() {
   }));
   // "Launch at login": the autostart plugin owns the real OS state — reflect it
   // on open, and flip it (with rollback on failure) when the box is toggled.
-  if (IS_NATIVE) {
+  // Desktop only — the plugin isn't compiled on Android (no #setBoot there).
+  if (IS_NATIVE && $("#setBoot")) {
     T.core.invoke("plugin:autostart|is_enabled").then(on => {
       const el = $("#setBoot"); if (el) el.checked = !!on;
       if (!!on !== S().startOnBoot) SETTINGS.setSetting("startOnBoot", !!on);
@@ -3295,15 +3302,21 @@ async function checkUpdate(manual = false) {
 }
 async function runUpdate() {
   if (updateBusy || !IS_NATIVE) return;
-  // Installer / Android path: open the platform's release asset to download +
-  // install. No in-app rebuild (that only works from a dev source tree).
-  if (_releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url)) {
+  // Android / installer builds have no source tree to rebuild — always go
+  // through the GitHub release download. Fetch the release info on the fly if
+  // the earlier check didn't populate it (e.g. it errored the first time).
+  const noSourceTree = IS_ANDROID || !(await invoke("source_version").catch(() => ""));
+  if (noSourceTree) {
+    if (!_releaseInfo) { try { _releaseInfo = await invoke("latest_release"); } catch (e) { flash(`Could not find a release: ${e}`); return; } }
+    const url = _releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url);
+    if (!url) { flash("No downloadable release found for this platform"); return; }
     try {
-      await invoke("open_url", { url: _releaseInfo.asset_url || _releaseInfo.page_url });
-      flash(IS_ANDROID ? "Downloading the new APK — open it to install" : "Opening the download page…");
+      await invoke("open_url", { url });
+      flash(IS_ANDROID ? "Opening the APK download — open the file to install" : "Opening the download page…");
     } catch (e) { flash(`Could not open the download: ${e}`); }
     return;
   }
+  // Desktop dev with a source tree: rebuild in place.
   updateBusy = true; renderUpdateBtn();
   try {
     await invoke("self_update");
