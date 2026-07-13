@@ -6,6 +6,10 @@ import * as PL from "./playlists.js";
 import * as SETTINGS from "./settings.js";
 import { storeLoad, storeSave } from "./store.js";
 
+// Signals to the index.html OTA bootstrap that this frontend loaded — its
+// watchdog rolls back to the embedded build if this never runs (broken OTA).
+window.__MP_BOOTED__ = true;
+
 const T = window.__TAURI__;
 const IS_NATIVE = !!(T && T.core && typeof T.core.invoke === "function");
 const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
@@ -3182,7 +3186,7 @@ function openSettings() {
   });
   renderUpdateBtn();  // reflect state already known from the startup check
   checkUpdate();      // refresh in the background while the panel is open
-  currentVersion().then(v => { const el = $("#setCurVer"); if (el) el.textContent = (v ? `v${v}` : "?") + ` · ${platformName()}`; });
+  currentVersion().then(v => { const el = $("#setCurVer"); if (!el) return; const ota = window.__MP_OTA__; el.textContent = (ota ? `v${ota} (OTA)` : (v ? `v${v}` : "?")) + ` · ${platformName()}`; });
   if (IS_NATIVE) invoke("audio_info").then(cfg => { const el = $("#setAudioInfo"); if (el) el.textContent = cfg ? `Audio output: ${cfg}` : "Audio output: NO DEVICE OPENED — that's why there's no sound"; }).catch(() => {});
   $("#setReset").addEventListener("click", () => { SETTINGS.resetSettings(); applySettings(); refreshView(); openSettings(); flash("Settings reset to defaults"); });
   // Live storage usage of the download folder (best-effort, async).
@@ -3275,9 +3279,9 @@ function renderUpdateBtn() {
   if (!btn) return;
   btn.disabled = updateBusy;
   const isDownload = _releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url);
-  if (updateBusy) { btn.hidden = false; btn.textContent = "Building update…"; }
+  if (updateBusy) { btn.hidden = false; btn.textContent = _otaMode ? "Updating…" : "Building update…"; }
   else if (updateReady) { btn.hidden = false; btn.textContent = `v${availableVersion} ready — restart`; }
-  else if (availableVersion) { btn.hidden = false; btn.textContent = isDownload ? `Download v${availableVersion}` : `Update to v${availableVersion}`; }
+  else if (availableVersion) { btn.hidden = false; btn.textContent = _otaMode ? `Update to v${availableVersion} (instant)` : (isDownload ? `Download v${availableVersion}` : `Update to v${availableVersion}`); }
   else { btn.hidden = true; }
 }
 // cmp semver-ish "a.b.c" → -1 / 0 / 1
@@ -3290,9 +3294,23 @@ function verCmp(a, b) {
   return 0;
 }
 let _releaseInfo = null; // { version, asset_url, page_url, platform }
+let _otaMode = false;    // an instant (no-reinstall) frontend update is available
 async function checkUpdate(manual = false) {
   if (!IS_NATIVE) return;
   if (!manual && S().updateMode === "off") return;
+  // Prefer an over-the-air frontend update: it applies instantly, no reinstall,
+  // on every platform. Only fall back to the APK/installer path (native code
+  // changes) when no OTA is offered.
+  try {
+    const ota = await invoke("ota_check");
+    if (ota && ota.available) {
+      _otaMode = true; availableVersion = ota.version; _releaseInfo = null;
+      renderUpdateBtn();
+      if (manual) flash(`Instant update available: v${ota.current} → v${ota.version}`);
+      return;
+    }
+    _otaMode = false;
+  } catch (e) { _otaMode = false; }
   const cur = await currentVersion();
   // Desktop with a source tree keeps the in-app rebuild flow; everyone else
   // (installers, Android) checks GitHub for the newest release that ships an
@@ -3325,6 +3343,20 @@ async function checkUpdate(manual = false) {
 }
 async function runUpdate() {
   if (updateBusy || !IS_NATIVE) return;
+  // Instant OTA path: download the new frontend and reload into it — no
+  // reinstall, works everywhere. The index.html bootstrap picks it up on reload.
+  if (_otaMode) {
+    updateBusy = true; renderUpdateBtn();
+    try {
+      const v = await invoke("ota_apply");
+      flash(`Updated to v${v} — reloading…`);
+      setTimeout(() => location.reload(), 700);
+    } catch (e) {
+      updateBusy = false; renderUpdateBtn();
+      flash(`Update failed: ${e}`);
+    }
+    return;
+  }
   // Android / installer builds have no source tree to rebuild — always go
   // through the GitHub release download. Fetch the release info on the fly if
   // the earlier check didn't populate it (e.g. it errored the first time).

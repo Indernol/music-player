@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Music Player</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css" id="embCss">
 </head>
 <body>
   <div class="app">
@@ -374,6 +374,71 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
     </div>
   </div>
 
-  <script type="module" src="main.js"></script>
+  <!-- OTA bootstrap: prefer a hot-updated frontend fetched from the repo
+       (Settings → Update, CodePush-style — no reinstall), otherwise load the
+       embedded build. Any failure falls back to embedded; a watchdog rolls back
+       an OTA build that fails to come up. The embedded copy right above in this
+       <body> is the always-safe fallback, so a fresh install with no OTA folder
+       behaves exactly like a normal build. -->
+  <script>
+  (function () {
+    function embedded() {
+      var s = document.createElement("script");
+      s.type = "module"; s.src = "main.js";
+      document.body.appendChild(s);
+    }
+    function runOta(T) {
+      T.core.invoke("ota_bundle").then(function (b) {
+        if (!b || !b.entry || !b.modules || !b.modules[b.entry]) { embedded(); return; }
+        try {
+          // Ship DOM changes too: swap in the OTA markup, dropping its scripts
+          // (innerHTML never executes them anyway) so this bootstrap stays sole.
+          if (b.html) {
+            var doc = new DOMParser().parseFromString(b.html, "text/html");
+            doc.body.querySelectorAll("script").forEach(function (x) { x.remove(); });
+            document.body.innerHTML = doc.body.innerHTML;
+          }
+          if (b.css) {
+            var st = document.createElement("style"); st.id = "otaCss"; st.textContent = b.css;
+            document.head.appendChild(st);
+            var em = document.getElementById("embCss"); if (em) em.remove();
+          }
+          // Blob-URL ES modules can't resolve "./x.js" relative imports, so
+          // rewrite them to bare "mp:x.js" specifiers wired through an import map.
+          var names = Object.keys(b.modules), imap = { imports: {} }, urls = {};
+          names.forEach(function (n) {
+            var code = b.modules[n];
+            names.forEach(function (dep) {
+              code = code.split('"./' + dep + '"').join('"mp:' + dep + '"')
+                         .split("'./" + dep + "'").join("'mp:" + dep + "'");
+            });
+            urls[n] = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+            imap.imports["mp:" + n] = urls[n];
+          });
+          var im = document.createElement("script"); im.type = "importmap";
+          im.textContent = JSON.stringify(imap); document.head.appendChild(im);
+          window.__MP_OTA__ = b.version || "?";
+          // Watchdog: main.js sets __MP_BOOTED__ once it loads. If a bad OTA
+          // build never boots, wipe it and reload into the embedded build.
+          setTimeout(function () {
+            if (!window.__MP_BOOTED__) {
+              try { T.core.invoke("ota_rollback"); } catch (e) {}
+              location.reload();
+            }
+          }, 7000);
+          var s = document.createElement("script"); s.type = "module"; s.src = urls[b.entry];
+          document.body.appendChild(s);
+        } catch (e) { embedded(); }
+      }).catch(function () { embedded(); });
+    }
+    var n = 0;
+    (function wait() {
+      var T = window.__TAURI__;
+      if (T && T.core && T.core.invoke) { runOta(T); }
+      else if (n++ < 60) { setTimeout(wait, 25); }
+      else { embedded(); } // plain browser / no IPC → embedded build
+    })();
+  })();
+  </script>
 </body>
 </html>

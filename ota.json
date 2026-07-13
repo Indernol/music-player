@@ -1,0 +1,8 @@
+{
+  "version": "0.22.2",
+  "entry": "main.js",
+  "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
+  "css": "style.css",
+  "html": "index.html",
+  "notes": "OTA update system: the app now hot-updates its interface from the repo without a reinstall."
+}

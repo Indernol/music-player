@@ -10,6 +10,7 @@ mod store;
 mod stream;
 mod share;
 mod gdrive;
+mod ota;
 pub mod youtube;
 pub mod ytnative;
 
@@ -596,6 +597,7 @@ pub fn run() {
             latest_release, open_url,
             share::share_start, share::share_stop, share::share_status, share::share_connect, share::share_download,
             gdrive::gdrive_sign_in, gdrive::gdrive_sign_out, gdrive::gdrive_set_tokens, gdrive::gdrive_account, gdrive::gdrive_pull, gdrive::gdrive_push,
+            ota::ota_bundle, ota::ota_check, ota::ota_apply, ota::ota_rollback,
             play_stream, preload_stream, prefetch_stream, play_direct, preload_direct,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
             youtube::yt_playlist_preview, youtube::yt_playlist_head,
