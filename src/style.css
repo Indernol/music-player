@@ -15,10 +15,17 @@
   --r: 12px;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box; margin: 0; padding: 0;
+  /* Mobile: tapping a button used to flash a blue rectangle over its hitbox. */
+  -webkit-tap-highlight-color: transparent;
+}
 /* Native-app feel: text isn't selectable, except where you actually type. */
 html { user-select: none; -webkit-user-select: none; }
 input, textarea, [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
+/* Buttons keep their own :hover/:active styling; no default focus ring flash. */
+button { -webkit-tap-highlight-color: transparent; }
+button:focus:not(:focus-visible) { outline: none; }
 html, body { height: 100%; }
 body {
   font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
@@ -824,14 +831,49 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
 /* Destructive context-menu entries */
 .ctx-item.ctx-danger:hover { background: #c0392b; color: #fff; }
 
+/* ─── Playlist result cards + include filters ─── */
+.yt-inc { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--tx-2); cursor: pointer; padding: 4px 8px; border: 1px solid var(--bd); border-radius: var(--r-pill, 999px); }
+.yt-inc input { accent-color: var(--accent); }
+.pl-card-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 6px; }
+.pl-card-row { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 10px; }
+.pl-card { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; background: var(--bg-1); border: 1px solid transparent; cursor: pointer; transition: background .12s, transform .12s; }
+.pl-card:hover { background: var(--bg-2); transform: translateY(-2px); }
+.pc-thumb { position: relative; width: 64px; height: 48px; flex-shrink: 0; border-radius: 8px; background: var(--bg-3) center / cover no-repeat; display: grid; place-items: center; }
+.pc-badge { position: absolute; right: 3px; bottom: 3px; background: rgba(0,0,0,.72); border-radius: 5px; padding: 1px 3px; display: grid; place-items: center; }
+.pc-badge svg { width: 12px; height: 12px; color: #fff; }
+.pc-meta { min-width: 0; }
+.pc-title { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-sub { font-size: 11.5px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+
+/* ─── Playlist detail modal ─── */
+.modal.pl-detail { width: min(560px, 94vw); max-height: 86vh; }
+.pl-detail .modal-body { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.pd-head { display: flex; gap: 14px; align-items: center; }
+.pd-cover { width: 96px; height: 72px; border-radius: 10px; background: var(--bg-3) center / cover no-repeat; flex-shrink: 0; }
+.pd-headmeta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.pd-actions { display: flex; gap: 8px; align-items: center; }
+.pd-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+.pd-row { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 8px; cursor: pointer; }
+.pd-row:hover { background: var(--bg-3); }
+.pd-thumb { width: 44px; height: 32px; border-radius: 6px; background: var(--bg-3) center / cover no-repeat; flex-shrink: 0; }
+.pd-meta { min-width: 0; }
+.pd-t { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pd-s { font-size: 11.5px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pd-more { display: block; padding: 10px 6px; font-size: 12.5px; color: var(--accent-2); text-decoration: none; }
+.pd-more:hover { text-decoration: underline; }
+
 /* ─── Small screens / Android: single column, sidebar as an overlay ─── */
 .side-toggle { display: none; font-size: 16px; }
+/* Edge-to-edge: keep interactive UI clear of the status bar + home indicator. */
+.topbar { padding-top: calc(var(--topbar-pad, 13px) + env(safe-area-inset-top, 0px)); }
+.app { padding-left: calc(8px + env(safe-area-inset-left, 0px)); padding-right: calc(8px + env(safe-area-inset-right, 0px)); }
+.player { margin-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
 @media (max-width: 700px) {
   .side-toggle { display: inline-grid; place-items: center; }
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
   body.side-open .sidebar {
-    display: flex; position: fixed; top: 8px; left: 8px; bottom: 126px;
+    display: flex; position: fixed; top: calc(8px + env(safe-area-inset-top, 0px)); left: 8px; bottom: 126px;
     width: min(300px, 84vw); z-index: 95;
     border: 1px solid var(--bd-2); box-shadow: 18px 0 44px rgba(0, 0, 0, .55);
   }
@@ -843,5 +885,6 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .volume input#volume { width: 64px; }
   body.np-docked.np-open .app { margin-right: 0; }
   .np-drawer { width: min(var(--np-w, 330px), 96vw); }
-  .tracklist.yt-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .tracklist.yt-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .pl-card-grid { grid-template-columns: 1fr; }
 }

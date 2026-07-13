@@ -97,6 +97,23 @@ pub fn canon_paths(paths: Vec<String>) -> Vec<String> {
     paths.iter().map(|p| canon(p)).collect()
 }
 
+/// Total size in bytes of all audio files under a folder (recursive). Powers the
+/// storage cap in Settings — the download queue checks it before each track.
+#[tauri::command]
+pub async fn folder_size(path: String) -> u64 {
+    let mut total = 0u64;
+    for entry in WalkDir::new(&path).into_iter().filter_map(Result::ok) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if AUDIO_EXTS.contains(&ext.as_str()) {
+            total = total.saturating_add(entry.metadata().map(|m| m.len()).unwrap_or(0));
+        }
+    }
+    total
+}
+
 /// Recursively scan the given root folders for supported audio files.
 pub fn scan_library(roots: &[String]) -> Vec<Track> {
     let mut tracks = Vec::new();

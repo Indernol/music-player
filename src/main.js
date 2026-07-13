@@ -931,46 +931,52 @@ async function runExtImport() {
 }
 
 // ─── YouTube search (Enter in the search bar) ───
-let onlineResults = [];
+let onlineResults = [];   // video results
+let onlinePlaylists = []; // playlist results (shown when the Playlists filter is on)
 let onlineQuery = "";
-let ytPage = 0, ytHasMore = false, ytFilter = "all";
+let ytPage = 0, ytHasMore = false;
 // Artist/channel header card shown on the first page of a search.
 let ytArtist = null, ytArtistMode = "videos", ytArtistPls = [];
-function ytFiltered() {
-  const q = onlineQuery.toLowerCase();
-  if (ytFilter === "title") return onlineResults.filter(t => t.title.toLowerCase().includes(q));
-  if (ytFilter === "artist") return onlineResults.filter(t => t.artist.toLowerCase().includes(q));
-  return onlineResults;
-}
 function renderOnlineResults() {
   active = { type: "online", id: onlineQuery };
   markActive();
   const plMode = !!ytArtist && ytArtistMode === "playlists" && ytPage === 0;
-  const shown = plMode ? [] : ytFiltered();
+  const wantVideos = S().ytIncludeVideos !== false;
+  const wantPlaylists = S().ytIncludePlaylists !== false;
+  const shown = plMode ? [] : (wantVideos ? onlineResults : []);
   // Tracks already saved locally sink to their own section at the bottom.
   const fresh = [], owned = [];
   if (!plMode) for (const t of shown) (libraryLocalFor(ytId(t.path)) ? owned : fresh).push(t);
+  const pls = plMode ? [] : (wantPlaylists ? onlinePlaylists : []);
   setViewHead({
     icon: IC.globe, title: "YouTube",
     subtitle: plMode
       ? `Playlists of ${ytArtist.title} · ${ytArtistPls.length}`
-      : `Page ${ytPage + 1} · ${shown.length} result${shown.length === 1 ? "" : "s"} for “${onlineQuery}”` +
-        (ytFilter !== "all" ? ` (filter: ${ytFilter})` : "") +
+      : `Page ${ytPage + 1} · ${shown.length} video${shown.length === 1 ? "" : "s"}` +
+        (pls.length ? ` · ${pls.length} playlist${pls.length === 1 ? "" : "s"}` : "") +
+        ` for “${onlineQuery}”` +
         (owned.length ? ` · ${owned.length} already in your library` : ""),
     actions: plMode ? "" :
       `<div class="yt-viewtog">
         <button id="ytGridBtn" class="btn-line sm ${(S().ytView || "grid") === "grid" ? "ac-on" : ""}" title="Card view (mini YouTube)">▦</button>
         <button id="ytListBtn" class="btn-line sm ${(S().ytView || "grid") === "list" ? "ac-on" : ""}" title="List view">≡</button>
       </div>` +
-      `<select id="ytFilter" class="sel sm-sel">
-        <option value="all" ${ytFilter === "all" ? "selected" : ""}>All results</option>
-        <option value="title" ${ytFilter === "title" ? "selected" : ""}>Title contains</option>
-        <option value="artist" ${ytFilter === "artist" ? "selected" : ""}>Artist matches</option>
-      </select>` +
+      `<label class="yt-inc"><input type="checkbox" id="ytIncVid" ${wantVideos ? "checked" : ""}> Videos</label>` +
+      `<label class="yt-inc"><input type="checkbox" id="ytIncPl" ${wantPlaylists ? "checked" : ""}> Playlists</label>` +
       `<button id="ytPrev" class="btn-line sm" ${ytPage ? "" : "disabled"}>‹ Prev</button>` +
       `<button id="ytNext" class="btn-line sm" ${ytHasMore ? "" : "disabled"}>Next ›</button>`,
   });
-  $("#ytFilter")?.addEventListener("change", e => { ytFilter = e.target.value; renderOnlineResults(); });
+  $("#ytIncVid")?.addEventListener("change", e => {
+    SETTINGS.setSetting("ytIncludeVideos", e.target.checked);
+    // Fetch videos lazily if they were toggled on and we never got them.
+    if (e.target.checked && !onlineResults.length) searchOnline(onlineQuery, ytPage);
+    else renderOnlineResults();
+  });
+  $("#ytIncPl")?.addEventListener("change", e => {
+    SETTINGS.setSetting("ytIncludePlaylists", e.target.checked);
+    if (e.target.checked && !onlinePlaylists.length) searchOnline(onlineQuery, ytPage);
+    else renderOnlineResults();
+  });
   $("#ytPrev")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage - 1));
   $("#ytNext")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage + 1));
   $("#ytGridBtn")?.addEventListener("click", () => { SETTINGS.setSetting("ytView", "grid"); renderOnlineResults(); });
@@ -978,7 +984,7 @@ function renderOnlineResults() {
   if (plMode) {
     renderArtistPlaylists();
   } else if ((S().ytView || "grid") === "grid") {
-    renderYtGrid(sortTracks([...fresh]), sortTracks([...owned]));
+    renderYtGrid(sortTracks([...fresh]), sortTracks([...owned]), pls);
   } else {
     renderTracks([...sortTracks([...fresh]), ...sortTracks([...owned])], true);
     if (owned.length) {
@@ -987,19 +993,41 @@ function renderOnlineResults() {
       if (firstOwned) firstOwned.insertAdjacentHTML("beforebegin", `<div class="list-sep">${IC.check} Already in your library</div>`);
       for (let i = fresh.length; i < view.length; i++) host.querySelector(`.track[data-idx="${i}"]`)?.classList.add("owned");
     }
+    if (pls.length) prependPlaylistList(pls); // list view: playlists as rows on top
   }
   injectArtistCard();
+}
+// A row of playlist cards (thumbnail + title + author + count) shown above the
+// video results; clicking one opens the playlist detail window.
+function playlistCardHtml(p, i) {
+  const cnt = p.count ? `${p.count} track${p.count === 1 ? "" : "s"}` : "playlist";
+  return `<div class="pl-card" data-plhit="${i}" title="${esc(p.title)}">
+    <div class="pc-thumb"${p.thumbnail ? ` style="background-image:url('${esc(p.thumbnail)}')"` : ""}><span class="pc-badge">${IC.list}</span></div>
+    <div class="pc-meta"><div class="pc-title">${esc(p.title)}</div><div class="pc-sub">${esc(p.author || "YouTube")} · ${cnt}</div></div>
+  </div>`;
+}
+function wirePlaylistCards(root, pls) {
+  root.querySelectorAll("[data-plhit]").forEach(el =>
+    el.addEventListener("click", () => openPlaylistDetail(pls[Number(el.dataset.plhit)])));
+}
+function prependPlaylistList(pls) {
+  const host = $("#trackList");
+  const wrap = document.createElement("div");
+  wrap.className = "pl-card-row";
+  wrap.innerHTML = `<div class="list-sep">${IC.list} Playlists</div>` + pls.map(playlistCardHtml).join("");
+  host.insertAdjacentElement("afterbegin", wrap);
+  wirePlaylistCards(wrap, pls);
 }
 // Mini-YouTube card grid: 16:9 thumbnail + duration badge + channel + views,
 // hover ▶ plays instantly. Cards keep the .track class + data-path/data-idx so
 // the existing delegation (select, double-click, context menu) works untouched.
-function renderYtGrid(fresh, owned) {
+function renderYtGrid(fresh, owned, playlists = []) {
   view = [...fresh, ...owned];
   updateCount();
   const host = $("#trackList");
   $("#listHead").style.display = "none";
   host.classList.add("yt-grid");
-  if (!view.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.music}</div>No results.</div>`; return; }
+  if (!view.length && !playlists.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.music}</div>No results.</div>`; return; }
   const nowPath = curIndex >= 0 ? queue[curIndex] : null;
   const card = (t, i, own) => {
     const vs = fmtViews(t.views);
@@ -1016,11 +1044,16 @@ function renderYtGrid(fresh, owned) {
       <button class="more yc-more" title="More" data-more="${i}">⋯</button>
     </div>`;
   };
+  const plHtml = playlists.length
+    ? `<div class="list-sep">${IC.list} Playlists</div>` + `<div class="pl-card-grid">` + playlists.map(playlistCardHtml).join("") + `</div>`
+    : "";
   host.innerHTML =
+    plHtml +
     fresh.map((t, i) => card(t, i, false)).join("") +
     (owned.length
       ? `<div class="list-sep">${IC.check} Already in your library</div>` + owned.map((t, i) => card(t, fresh.length + i, true)).join("")
       : "");
+  if (playlists.length) wirePlaylistCards(host, playlists);
   updatePlayingRow();
 }
 // The channel header (avatar, name, mode toggle, "Download all"), pinned above
@@ -1104,10 +1137,17 @@ async function searchOnline(q, page = 0) {
   const tid = taskStart(`Search “${q}”`, { detail: `page ${ytPage + 1}` });
   try {
     const limit = Number(S().searchLimit) || 20;
-    const res = await invoke("yt_search", { query: q, limit, offset: ytPage * limit });
+    const wantVideos = S().ytIncludeVideos !== false;
+    const wantPlaylists = S().ytIncludePlaylists !== false;
+    // Fetch whichever result types the filters ask for, in parallel.
+    const [res, pls] = await Promise.all([
+      wantVideos ? invoke("yt_search", { query: q, limit, offset: ytPage * limit }) : Promise.resolve([]),
+      wantPlaylists ? invoke("yt_search_playlists", { query: q, limit: Math.min(12, limit), offset: ytPage * Math.min(12, limit) }).catch(() => []) : Promise.resolve([]),
+    ]);
     if (seq !== _searchSeq) { taskDrop(tid); return; } // superseded by a newer search
     ytHasMore = Array.isArray(res) && res.length >= limit;
     onlineResults = (res || []).map(onlineFromResult);
+    onlinePlaylists = Array.isArray(pls) ? pls : [];
     onlineResults.forEach(t => onlineIndex.set(t.path, t));
     // Don't clobber wherever the user navigated meanwhile: render only if the
     // online view is still current, otherwise park the result in Activity.
@@ -1135,6 +1175,54 @@ async function searchOnline(q, page = 0) {
       if (ch && seq === _searchSeq && active.type === "online" && onlineQuery === q) { ytArtist = ch; if (ytArtistMode === "videos") renderOnlineResults(); }
     }).catch(() => {});
   }
+}
+
+// ─── Playlist detail window ─────────────────────────────────────────────
+// A real preview (not a text blurb): the first N tracks (N = playlistPreviewCount
+// setting) with thumbnails, an "Import" button, and a link to the full playlist
+// on YouTube. Opened from a playlist search-result card.
+let _plDetail = null;
+async function openPlaylistDetail(p) {
+  if (!p) return;
+  _plDetail = p;
+  const m = $("#plDetailModal");
+  $("#plDetailTitle").textContent = p.title || "Playlist";
+  $("#plDetailSub").textContent = `${p.author || "YouTube"}${p.count ? ` · ${p.count} track${p.count === 1 ? "" : "s"}` : ""}`;
+  $("#plDetailLink").href = p.url;
+  const cover = $("#plDetailCover");
+  cover.style.backgroundImage = p.thumbnail ? `url("${p.thumbnail}")` : "";
+  const cap = Math.max(1, Math.min(200, Number(S().playlistPreviewCount) || 25));
+  $("#plDetailList").innerHTML = `<div class="nx-note">Loading first ${cap} tracks…</div>`;
+  m.hidden = false;
+  if (!IS_NATIVE) { $("#plDetailList").innerHTML = `<div class="nx-note">Preview needs the native app.</div>`; return; }
+  try {
+    const head = await invoke("yt_playlist_head", { url: p.url, count: cap });
+    const tracks = (head.tracks || []).map(onlineFromResult);
+    tracks.forEach(t => onlineIndex.set(t.path, t));
+    _plDetail.previewTracks = tracks;
+    if (!tracks.length) { $("#plDetailList").innerHTML = `<div class="nx-note">No tracks found.</div>`; return; }
+    const more = p.count && p.count > tracks.length ? p.count - tracks.length : 0;
+    $("#plDetailList").innerHTML = tracks.map(t =>
+      `<div class="pd-row" data-pdplay="${esc(t.path)}">
+        <div class="pd-thumb"${t.thumbnail ? ` style="background-image:url('${esc(t.thumbnail)}')"` : ""}></div>
+        <div class="pd-meta"><div class="pd-t">${esc(t.title)}</div><div class="pd-s">${esc(t.artist)}${t.duration_secs ? " · " + fmtDur(t.duration_secs) : ""}</div></div>
+      </div>`).join("") +
+      (more ? `<a class="pd-more" href="${esc(p.url)}" target="_blank" rel="noopener">+ ${more} more — view the full playlist on YouTube ↗</a>` : "");
+    $("#plDetailList").querySelectorAll("[data-pdplay]").forEach(el =>
+      el.addEventListener("click", () => { const t = onlineIndex.get(el.dataset.pdplay); if (t) { queue = [t.path]; playFrom(0); } }));
+  } catch (e) {
+    $("#plDetailList").innerHTML = `<div class="nx-note">Could not load: ${esc(String(e))}</div>`;
+  }
+}
+function closePlaylistDetail() { $("#plDetailModal").hidden = true; _plDetail = null; }
+async function importPlaylistDetail(save) {
+  if (!_plDetail) return;
+  const p = _plDetail;
+  closePlaylistDetail();
+  // Reuse the URL import flow (fetches the FULL playlist, respects follow/dl).
+  openImport();
+  $("#impUrl").value = p.url;
+  await impFetch();
 }
 
 // ─── Playlist import from an external URL ───
@@ -1608,6 +1696,9 @@ async function dlPump() {
 
   let dir = "", ok = 0, cooldownIdx = 0, consecTransient = 0;
   dlNotice = "";
+  // Storage cap: skip new downloads once the target folder passes the limit.
+  const capMb = Math.max(0, Number(S().storageCapMb) || 0);
+  let capHit = false;
   for (;;) {
     const d = dlQueue.find(x => x.status === "queued");
     if (!d || dlStopAll) break;
@@ -1619,9 +1710,23 @@ async function dlPump() {
       dlRender();
       continue;
     }
+    // Enforce the storage cap before spending bandwidth on a new file.
+    if (capMb && IS_NATIVE) {
+      try {
+        const dlDir = dir || S().downloadDir || (IS_ANDROID ? ANDROID_MUSIC_DIR + "/MusicPlayer" : "");
+        if (dlDir) {
+          const bytes = await invoke("folder_size", { path: dlDir });
+          if (bytes >= capMb * 1024 * 1024) {
+            capHit = true;
+            for (const x of dlQueue) if (x.status === "queued") { x.status = "error"; x.permanent = true; x.err = "storage cap reached"; }
+            break;
+          }
+        }
+      } catch {}
+    }
     d.status = "active"; d.pct = 0; dlRender();
     try {
-      const file = await invoke("yt_download", { id: d.id, dir: S().downloadDir || "" });
+      const file = await invoke("yt_download", { id: d.id, dir: S().downloadDir || "", quality: S().downloadQuality || "best" });
       d.status = "done"; d.pct = 100; ok++; cooldownIdx = 0; consecTransient = 0;
       dir = file.slice(0, file.lastIndexOf("/"));
       PL.replacePath(d.path, file); // playlists now point at the local file
@@ -1680,7 +1785,8 @@ async function dlPump() {
   renderPlaylists(); refreshView();
   dlRunning = false;
   dlRender();
-  if (ok) flash(`${ok} track${ok === 1 ? "" : "s"} saved locally`);
+  if (capHit) flash(`Storage cap reached (${capMb} MB) — remaining downloads skipped`);
+  else if (ok) flash(`${ok} track${ok === 1 ? "" : "s"} saved locally`);
 }
 
 function showLibrary() {
@@ -2507,11 +2613,17 @@ function openSettings() {
           <button id="setYtInstall" class="btn-line sm" title="Download yt-dlp automatically">${ic(IC.upload)}Install</button>
         </span></div>
       <div class="set-hint" id="setYtStatus">Empty = auto-detect (PATH, Desktop folders, external drives, linuxbrew). Missing? Click <b>Install</b> to download it.</div>
-      <div class="set-row"><label>Cookies from browser</label>
+      ${IS_ANDROID
+        ? `<div class="set-hint">⚠️ <b>Account risk:</b> using your logged-in YouTube session for downloads is more traceable and often makes YouTube <b>block</b> extraction. The built-in engine works without it — browser cookies are a desktop-only option, so they're disabled here.</div>`
+        : `<div class="set-row"><label>Cookies from browser</label>
         <select id="setCookies" class="sel sm-sel wide">${["", "firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"].map(b => `<option value="${b}" ${s.cookiesBrowser === b ? "selected" : ""}>${b || "None"}</option>`).join("")}</select></div>
-      <div class="set-hint">A logged-in YouTube session often gets blocked (“format not available”) — keep <b>None</b> unless needed. Failed calls retry without cookies automatically.</div>
+      <div class="set-hint">⚠️ A logged-in YouTube session often gets blocked (“format not available”) and is more traceable on your account — keep <b>None</b> unless you need age/member-restricted content. Failed calls retry without cookies automatically.</div>`}
       <div class="set-row"><label>Search results</label>
         <select id="setLimit" class="sel sm-sel">${[10, 20, 30, 50, 75, 100].map(n => `<option value="${n}" ${Number(s.searchLimit) === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+      <div class="set-row"><label>Show videos in search</label><input type="checkbox" id="setIncVid" ${s.ytIncludeVideos !== false ? "checked" : ""}></div>
+      <div class="set-row"><label>Show playlists in search</label><input type="checkbox" id="setIncPl" ${s.ytIncludePlaylists !== false ? "checked" : ""}></div>
+      <div class="set-hint">The main search bar returns both. You can also toggle Videos / Playlists right on the results page.</div>
+      <div class="set-row"><label>Playlist preview size <span class="set-sub">(tracks shown in the detail window · 1–200)</span></label><input type="number" id="setPlPrev" class="num-in" min="1" max="200" step="5" value="${s.playlistPreviewCount ?? 25}"></div>
       <div class="set-row"><label>Prefer local file when downloaded</label><input type="checkbox" id="setPrefLocal" ${s.preferLocal ? "checked" : ""}></div>
       <div class="set-hint">When a track has been saved locally (file named “… [id].mp3”), play the local file instead of streaming from YouTube.</div>
       <div class="set-row"><label>Unavailable tracks remembered</label><button id="setDlBlock" class="btn-line sm">Forget ${Object.keys(dlBlock).length}</button></div>
@@ -2526,9 +2638,14 @@ function openSettings() {
           <input type="text" id="setDlDir" class="text-in" placeholder="~/Music/MusicPlayer" value="${esc(s.downloadDir)}">
           <button id="setDlPick" class="btn-line sm" title="Choose a folder (any disk)">${ic(IC.folder)}</button>
         </span></div>
+      <div class="set-row"><label>Download quality</label>
+        <select id="setDlQuality" class="sel sm-sel">${[["best","Best available"],["320","320 kbps"],["256","256 kbps"],["192","192 kbps"],["128","128 kbps (smallest)"]].map(([v,l]) => `<option value="${v}" ${(s.downloadQuality||"best")===v?"selected":""}>${l}</option>`).join("")}</select></div>
+      <div class="set-hint">Applies to single tracks and whole-playlist downloads. Lower = smaller files. On desktop with yt-dlp it caps the mp3 bitrate; the built-in engine picks the closest audio stream.</div>
+      <div class="set-row"><label>Storage cap <span class="set-sub">(max MB of audio per source folder · 0 = unlimited)</span></label><input type="number" id="setStorageCap" class="num-in" min="0" max="1000000" step="500" value="${s.storageCapMb ?? 0}"></div>
+      <div class="set-hint" id="setStorageUse">When the download folder reaches this size, new downloads are skipped so it never overflows.</div>
       <div class="set-row"><label>Tick “Save locally” by default when importing</label><input type="checkbox" id="setAutoSave" ${s.autoSaveImports ? "checked" : ""}></div>
       <div class="set-row"><label>Resume unfinished downloads on launch</label><input type="checkbox" id="setResumeDl" ${s.resumeDownloads ? "checked" : ""}></div>
-      <div class="set-hint">Where “Download locally” saves mp3 files (via yt-dlp). Pick any folder on any disk with the folder picker. Empty = <b>~/Music/MusicPlayer</b>. The folder is added as a source automatically after a download.</div>
+      <div class="set-hint">Where downloads are saved. Pick any folder with the folder picker. Empty = <b>${IS_ANDROID ? "/storage/emulated/0/Music/MusicPlayer" : "~/Music/MusicPlayer"}</b>. The folder is added as a source automatically after a download.</div>
     </div>
     </section>
     <section class="set-pane" data-pane="integrations">
@@ -2674,7 +2791,7 @@ function openSettings() {
       if (p) { SETTINGS.setSetting("ytdlpPath", p); $("#setYtPath").value = p; ytTest(); }
     } catch (e) { console.error("[yt pick]", e); }
   });
-  $("#setCookies").addEventListener("change", async e => {
+  $("#setCookies")?.addEventListener("change", async e => {
     const prev = S().cookiesBrowser;
     const v = e.target.value;
     if (!v) { SETTINGS.setSetting("cookiesBrowser", ""); ytConfigPush().catch(() => {}); return; }
@@ -2682,6 +2799,11 @@ function openSettings() {
     if (chosen) { SETTINGS.setSetting("cookiesBrowser", chosen); ytConfigPush().catch(() => {}); flash(`Cookies: ${chosen}`); }
     else { e.target.value = prev.split(":")[0] || ""; }
   });
+  $("#setIncVid")?.addEventListener("change", e => SETTINGS.setSetting("ytIncludeVideos", e.target.checked));
+  $("#setIncPl")?.addEventListener("change", e => SETTINGS.setSetting("ytIncludePlaylists", e.target.checked));
+  $("#setPlPrev")?.addEventListener("change", e => SETTINGS.setSetting("playlistPreviewCount", Math.max(1, Math.min(200, Number(e.target.value) || 25))));
+  $("#setDlQuality")?.addEventListener("change", e => SETTINGS.setSetting("downloadQuality", e.target.value));
+  $("#setStorageCap")?.addEventListener("change", e => SETTINGS.setSetting("storageCapMb", Math.max(0, Number(e.target.value) || 0)));
   $("#setDlBlock").addEventListener("click", () => { dlBlock = {}; saveDlBlock(); $("#setDlBlock").textContent = "Forget 0"; flash("Unavailable-track list cleared"); });
   $("#setRerun").addEventListener("click", () => { $("#settingsModal").hidden = true; openSetup(); });
   $("#setLimit").addEventListener("change", e => SETTINGS.setSetting("searchLimit", Number(e.target.value)));
@@ -2732,6 +2854,16 @@ function openSettings() {
   checkUpdate();      // refresh in the background while the panel is open
   currentVersion().then(v => { const el = $("#setCurVer"); if (el) el.textContent = v ? `v${v}` : "?"; });
   $("#setReset").addEventListener("click", () => { SETTINGS.resetSettings(); applySettings(); refreshView(); openSettings(); flash("Settings reset to defaults"); });
+  // Live storage usage of the download folder (best-effort, async).
+  if (IS_NATIVE) {
+    const dlDir = S().downloadDir || (IS_ANDROID ? ANDROID_MUSIC_DIR + "/MusicPlayer" : "");
+    if (dlDir) invoke("folder_size", { path: dlDir }).then(bytes => {
+      const el = $("#setStorageUse"); if (!el) return;
+      const mb = bytes / (1024 * 1024);
+      const cap = Number(S().storageCapMb) || 0;
+      el.innerHTML = `Currently <b>${mb < 1024 ? mb.toFixed(0) + " MB" : (mb / 1024).toFixed(2) + " GB"}</b> used${cap ? ` of ${cap} MB` : ""}. When the folder reaches the cap, new downloads are skipped.`;
+    }).catch(() => {});
+  }
   $("#settingsModal").hidden = false;
 }
 
@@ -3153,6 +3285,9 @@ async function init() {
   $("#extCancel").addEventListener("click", () => { _extCancel = true; extStatus("Stopping…"); });
   $("#importClose").addEventListener("click", () => $("#importModal").hidden = true);
   $("#importModal").addEventListener("click", e => { if (e.target.id === "importModal") $("#importModal").hidden = true; });
+  $("#plDetailClose").addEventListener("click", closePlaylistDetail);
+  $("#plDetailModal").addEventListener("click", e => { if (e.target.id === "plDetailModal") closePlaylistDetail(); });
+  $("#plDetailImport").addEventListener("click", () => importPlaylistDetail(true));
   $("#impFetch").addEventListener("click", impFetch);
   $("#impUrl").addEventListener("keydown", e => { if (e.key === "Enter") impFetch(); });
   $("#impSearch").addEventListener("click", impSearchGo);

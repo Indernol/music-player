@@ -69,6 +69,8 @@ fn pl_to_hit(p: &PlaylistItem) -> PlaylistHit {
         url: format!("https://www.youtube.com/playlist?list={}", p.id),
         title: p.name.clone(),
         author: p.channel.as_ref().map(|c| c.name.clone()).unwrap_or_default(),
+        thumbnail: p.thumbnail.last().map(|t| t.url.clone()).unwrap_or_default(),
+        count: p.video_count.unwrap_or(0),
     }
 }
 
@@ -181,12 +183,20 @@ pub async fn channel_all(url: &str) -> Result<Vec<OnlineTrack>, String> {
 
 pub async fn playlist(url: &str) -> Result<PlaylistImport, String> {
     let rp = rp()?;
-    let mut pl = rp.query().playlist(playlist_id(url)).await.map_err(es)?;
-    let _ = pl.videos.extend_limit(rp.query(), 1000).await;
-    Ok(PlaylistImport {
-        title: pl.name.clone(),
-        tracks: pl.videos.items.iter().map(vid_to_track).collect(),
-    })
+    match rp.query().playlist(playlist_id(url)).await {
+        Ok(mut pl) => {
+            let _ = pl.videos.extend_limit(rp.query(), 1000).await;
+            Ok(PlaylistImport {
+                title: pl.name.clone(),
+                tracks: pl.videos.items.iter().map(vid_to_track).collect(),
+            })
+        }
+        // rustypipe's strict playlist model breaks whenever YouTube tweaks the
+        // response (e.g. "missing field description"). Fall back to a lenient
+        // scrape of the playlist page's ytInitialData — schema-tolerant, so it
+        // keeps working across YouTube changes (mandatory on Android).
+        Err(_) => scrape_playlist(url, 5000).await,
+    }
 }
 
 pub async fn playlist_preview(url: &str, count: u32) -> Result<Vec<String>, String> {
@@ -198,6 +208,244 @@ pub async fn playlist_preview(url: &str, count: u32) -> Result<Vec<String>, Stri
         .take(count as usize)
         .map(|v| v.name.clone())
         .collect())
+}
+
+/// First `count` tracks of a playlist as full items (title/channel/duration/
+/// thumbnail) — feeds the playlist detail window without pulling all 1000.
+pub async fn playlist_head(url: &str, count: u32) -> Result<PlaylistImport, String> {
+    let rp = rp()?;
+    match rp.query().playlist(playlist_id(url)).await {
+        Ok(mut pl) => {
+            if (pl.videos.items.len() as u32) < count {
+                let _ = pl.videos.extend_limit(rp.query(), count as usize).await;
+            }
+            Ok(PlaylistImport {
+                title: pl.name.clone(),
+                tracks: pl.videos.items.iter().take(count as usize).map(vid_to_track).collect(),
+            })
+        }
+        Err(_) => scrape_playlist(url, count).await,
+    }
+}
+
+/// Schema-tolerant playlist extractor: fetch the public playlist page and walk
+/// its inlined `ytInitialData` JSON for every `playlistVideoRenderer` (id, title,
+/// author, duration). No strict model — resilient to YouTube response changes,
+/// which is exactly what breaks rustypipe's typed playlist API.
+async fn scrape_playlist(url: &str, limit: u32) -> Result<PlaylistImport, String> {
+    let id = playlist_id(url);
+    let page = format!("https://www.youtube.com/playlist?list={id}");
+    let body = ureq::get(&page)
+        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36")
+        .set("Accept-Language", "en-US,en;q=0.9")
+        // Bypass the EU cookie-consent interstitial (which otherwise 302s to
+        // consent.youtube.com and returns no playlist data).
+        .set("Cookie", "SOCS=CAISEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg; CONSENT=YES+")
+        .call()
+        .map_err(|e| format!("playlist page: {e}"))?
+        .into_string()
+        .map_err(|e| e.to_string())?;
+    let json = extract_initial_data(&body).ok_or("could not read the playlist page")?;
+    let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+
+    // Playlist name from the page <title> ("Name - YouTube"), not the greedy
+    // JSON walk (which would grab a "Play all" button label).
+    let title = body
+        .find("<title>")
+        .and_then(|i| body[i + 7..].find("</title>").map(|j| body[i + 7..i + 7 + j].to_string()))
+        .map(|t| html_unescape(t.trim_end_matches(" - YouTube").trim()))
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "Playlist".to_string());
+    let mut tracks = Vec::new();
+    collect_playlist_videos(&v, &mut tracks, limit as usize);
+    if tracks.is_empty() {
+        return Err("no tracks found on the playlist page".into());
+    }
+    Ok(PlaylistImport { title, tracks })
+}
+
+/// Minimal HTML entity unescape for the handful that show up in a page title.
+fn html_unescape(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+}
+
+/// Pull the `ytInitialData = {…};` JSON object out of a YouTube HTML page.
+fn extract_initial_data(html: &str) -> Option<String> {
+    let start = html.find("ytInitialData")?;
+    let brace = html[start..].find('{')? + start;
+    // Balance braces (accounting for strings/escapes) to find the object end.
+    let bytes = html.as_bytes();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut esc = false;
+    for i in brace..bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if esc { esc = false; }
+            else if c == b'\\' { esc = true; }
+            else if c == b'"' { in_str = false; }
+        } else {
+            match c {
+                b'"' => in_str = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(html[brace..=i].to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// First string value found for `key` anywhere in the tree (playlist title).
+fn find_str(v: &serde_json::Value, key: &str) -> Option<String> {
+    match v {
+        serde_json::Value::Object(m) => {
+            if let Some(s) = m.get(key).and_then(|x| x.as_str()) {
+                if !s.is_empty() { return Some(s.to_string()); }
+            }
+            // YouTube wraps text as { "runs": [{ "text": … }] } or { "simpleText" }
+            if let Some(t) = m.get(key) {
+                if let Some(s) = text_of(t) { if !s.is_empty() { return Some(s); } }
+            }
+            m.values().find_map(|x| find_str(x, key))
+        }
+        serde_json::Value::Array(a) => a.iter().find_map(|x| find_str(x, key)),
+        _ => None,
+    }
+}
+
+/// Extract text from YouTube's `{runs:[{text}]}` / `{simpleText}` shapes.
+fn text_of(v: &serde_json::Value) -> Option<String> {
+    if let Some(s) = v.get("simpleText").and_then(|x| x.as_str()) {
+        return Some(s.to_string());
+    }
+    if let Some(runs) = v.get("runs").and_then(|x| x.as_array()) {
+        let s: String = runs.iter().filter_map(|r| r["text"].as_str()).collect();
+        if !s.is_empty() { return Some(s); }
+    }
+    v.as_str().map(str::to_string)
+}
+
+/// Depth-first walk collecting playlist videos. Handles both the modern
+/// `lockupViewModel` (2024+) and the legacy `playlistVideoRenderer` layouts,
+/// deduplicating by videoId (the same item can appear in several sections).
+fn collect_playlist_videos(v: &serde_json::Value, out: &mut Vec<OnlineTrack>, limit: usize) {
+    let mut seen = std::collections::HashSet::new();
+    walk_videos(v, out, &mut seen, limit);
+}
+
+fn walk_videos(
+    v: &serde_json::Value,
+    out: &mut Vec<OnlineTrack>,
+    seen: &mut std::collections::HashSet<String>,
+    limit: usize,
+) {
+    if out.len() >= limit {
+        return;
+    }
+    match v {
+        serde_json::Value::Object(m) => {
+            let track = m
+                .get("lockupViewModel")
+                .and_then(lockup_to_track)
+                .or_else(|| m.get("playlistVideoRenderer").and_then(video_renderer_to_track));
+            if let Some(t) = track {
+                if seen.insert(t.id.clone()) {
+                    out.push(t);
+                    if out.len() >= limit { return; }
+                }
+            }
+            for val in m.values() {
+                walk_videos(val, out, seen, limit);
+                if out.len() >= limit { return; }
+            }
+        }
+        serde_json::Value::Array(a) => {
+            for val in a {
+                walk_videos(val, out, seen, limit);
+                if out.len() >= limit { return; }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Modern layout: lockupViewModel { contentId, contentType, metadata:{ … title.content } }
+/// with the duration in a thumbnail badge ("3:55").
+fn lockup_to_track(lm: &serde_json::Value) -> Option<OnlineTrack> {
+    if lm["contentType"].as_str() != Some("LOCKUP_CONTENT_TYPE_VIDEO") {
+        return None;
+    }
+    let id = lm["contentId"].as_str()?.to_string();
+    let title = lm["metadata"]["lockupMetadataViewModel"]["title"]["content"]
+        .as_str()
+        .unwrap_or("Untitled")
+        .to_string();
+    // Channel name: first metadata row part's text (locale-proof), e.g.
+    // metadata → contentMetadataViewModel → metadataRows[0] → metadataParts[0]
+    // → text.content. Falls back to the avatar a11y label's trailing name.
+    let meta = &lm["metadata"]["lockupMetadataViewModel"]["metadata"]["contentMetadataViewModel"];
+    let artist = meta["metadataRows"][0]["metadataParts"][0]["text"]["content"]
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| find_str(&lm["metadata"], "a11yLabel").map(|s| s.rsplit(' ').next().unwrap_or("").to_string()))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "YouTube".to_string());
+    // Duration badge text somewhere in the overlays ("m:ss" / "h:mm:ss").
+    let duration_secs = find_hms(lm).unwrap_or(0);
+    Some(OnlineTrack { thumbnail: thumb(&id), title, artist, duration_secs, views: None, id })
+}
+
+/// First "m:ss"-shaped text found in the subtree (thumbnail duration badge).
+fn find_hms(v: &serde_json::Value) -> Option<u64> {
+    match v {
+        serde_json::Value::Object(m) => {
+            if let Some(s) = m.get("text").and_then(|x| x.as_str()) {
+                if s.matches(':').count() >= 1 && s.chars().all(|c| c.is_ascii_digit() || c == ':') {
+                    if let Some(sec) = parse_hms(s) { return Some(sec); }
+                }
+            }
+            m.values().find_map(find_hms)
+        }
+        serde_json::Value::Array(a) => a.iter().find_map(find_hms),
+        _ => None,
+    }
+}
+
+fn video_renderer_to_track(r: &serde_json::Value) -> Option<OnlineTrack> {
+    let id = r["videoId"].as_str()?.to_string();
+    let title = r.get("title").and_then(text_of).unwrap_or_else(|| "Untitled".to_string());
+    let artist = r
+        .get("shortBylineText")
+        .and_then(text_of)
+        .or_else(|| r.get("videoInfo").and_then(text_of))
+        .unwrap_or_else(|| "Unknown Artist".to_string());
+    let duration_secs = r["lengthSeconds"]
+        .as_str()
+        .and_then(|s| s.parse::<u64>().ok())
+        .or_else(|| r.get("lengthText").and_then(text_of).and_then(|t| parse_hms(&t)))
+        .unwrap_or(0);
+    Some(OnlineTrack { thumbnail: thumb(&id), title, artist, duration_secs, views: None, id })
+}
+
+/// "3:57" / "1:02:03" → seconds.
+fn parse_hms(s: &str) -> Option<u64> {
+    let parts: Vec<u64> = s.trim().split(':').filter_map(|p| p.trim().parse().ok()).collect();
+    match parts.as_slice() {
+        [s] => Some(*s),
+        [m, s] => Some(m * 60 + s),
+        [h, m, s] => Some(h * 3600 + m * 60 + s),
+        _ => None,
+    }
 }
 
 /// Best playable stream URL. rodio/symphonia decodes AAC-in-mp4 only (no
@@ -245,11 +493,27 @@ pub async fn download(
     dls: &DlState,
     id: &str,
     dir: &str,
+    quality: &str,
 ) -> Result<String, String> {
     let player = rp()?.query().player(id).await.map_err(es)?;
     let title = player.details.name.clone().unwrap_or_else(|| format!("YouTube {id}"));
     let artist = player.details.channel_name.clone().unwrap_or_default();
-    let url = stream_url_of(&player)?;
+    // "best" → highest-bitrate m4a; a kbps cap → the m4a stream whose bitrate is
+    // closest to (and preferably ≤) the target, so smaller files honor the cap.
+    let url = if quality == "best" || quality.is_empty() {
+        stream_url_of(&player)?
+    } else {
+        let target = quality.parse::<u32>().unwrap_or(0) * 1000;
+        let m4a: Vec<_> = player.audio_streams.iter().filter(|s| s.mime.to_lowercase().contains("mp4")).collect();
+        if m4a.is_empty() {
+            stream_url_of(&player)?
+        } else {
+            // prefer ≤ target (largest under cap); else the smallest available.
+            let under = m4a.iter().filter(|s| s.bitrate <= target).max_by_key(|s| s.bitrate);
+            let pick = under.or_else(|| m4a.iter().min_by_key(|s| s.bitrate)).unwrap();
+            pick.url.clone()
+        }
+    };
 
     let path = format!("{dir}/{} [{id}].m4a", safe_filename(&title));
     let part = format!("{path}.part");

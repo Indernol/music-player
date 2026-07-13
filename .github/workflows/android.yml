@@ -64,10 +64,19 @@ jobs:
           import android.os.Build
           import android.os.Bundle
           import android.content.pm.PackageManager
+          import android.graphics.Color
+          import androidx.core.view.WindowCompat
 
           class MainActivity : TauriActivity() {
             override fun onCreate(savedInstanceState: Bundle?) {
               super.onCreate(savedInstanceState)
+              // Edge-to-edge: draw the web content behind the status / nav bars so
+              // the app is truly fullscreen; the CSS uses safe-area insets to keep
+              // controls clear of them. Transparent bars over the dark UI.
+              WindowCompat.setDecorFitsSystemWindows(window, false)
+              window.statusBarColor = Color.TRANSPARENT
+              window.navigationBarColor = Color.TRANSPARENT
+
               val wanted = if (Build.VERSION.SDK_INT >= 33)
                 arrayOf(android.Manifest.permission.READ_MEDIA_AUDIO)
               else

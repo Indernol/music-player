@@ -76,6 +76,11 @@ const DEFAULTS = {
   sideW: 268,            // sidebar width (px) — drag the handle on its right edge
   npW: 330,              // Now-playing panel width (px) — drag its left edge
   ytView: "grid",        // YouTube results: grid (mini-YouTube cards) | list
+  ytIncludeVideos: true, // search bar returns YouTube videos
+  ytIncludePlaylists: true, // search bar also returns YouTube playlists
+  playlistPreviewCount: 25, // tracks shown in the playlist detail window (1..200)
+  downloadQuality: "best",  // mp3/m4a bitrate cap: best | 320 | 256 | 192 | 128
+  storageCapMb: 0,       // max MB of audio a source folder may hold (0 = unlimited)
   bgImage: "",           // custom background: URL or local file path
   bgBlur: 18,            // px of blur on the background image
   bgDim: 45,             // % darkening of the background image

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Music Player</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -44,7 +44,7 @@
         <button id="sideToggle" class="icon-btn side-toggle" title="Menu">☰</button>
         <div class="search-wrap">
           <span class="search-ico" data-ic="search"></span>
-          <input id="search" type="search" placeholder="Search library — press Enter to search YouTube" autocomplete="off">
+          <input id="search" type="search" placeholder="Search library — Enter to search YouTube (videos + playlists)" autocomplete="off">
         </div>
         <span id="count" class="count"></span>
         <button id="settingsBtn" class="icon-btn top-gear" title="Settings" data-ic="gear"></button>
@@ -139,6 +139,28 @@
       <span id="totTime" class="time">0:00</span>
     </div>
   </footer>
+
+  <div id="plDetailModal" class="modal-backdrop" hidden>
+    <div class="modal pl-detail">
+      <div class="modal-head">
+        <h2 id="plDetailTitle">Playlist</h2>
+        <button id="plDetailClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <div class="pd-head">
+          <div id="plDetailCover" class="pd-cover"></div>
+          <div class="pd-headmeta">
+            <div id="plDetailSub" class="set-hint"></div>
+            <div class="pd-actions">
+              <button id="plDetailImport" class="btn">Import playlist</button>
+              <a id="plDetailLink" class="btn-line sm" target="_blank" rel="noopener">Open on YouTube ↗</a>
+            </div>
+          </div>
+        </div>
+        <div id="plDetailList" class="pd-list"></div>
+      </div>
+    </div>
+  </div>
 
   <div id="ctxMenu" class="ctx-menu" hidden></div>
 

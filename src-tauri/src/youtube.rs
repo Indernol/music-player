@@ -532,6 +532,10 @@ pub struct PlaylistHit {
     pub url: String,
     pub title: String,
     pub author: String,
+    #[serde(default)]
+    pub thumbnail: String,
+    #[serde(default)]
+    pub count: u64,
 }
 
 fn url_encode(s: &str) -> String {
@@ -588,6 +592,8 @@ pub async fn yt_search_playlists(
                         .or_else(|| v["channel"].as_str())
                         .unwrap_or("")
                         .to_string(),
+                    thumbnail: best_thumb(&v),
+                    count: v["playlist_count"].as_u64().or_else(|| v["n_entries"].as_u64()).unwrap_or(0),
                     url,
                 })
             })
@@ -736,6 +742,8 @@ pub async fn yt_channel_playlists(
                         .or_else(|| v["channel"].as_str())
                         .unwrap_or("")
                         .to_string(),
+                    thumbnail: best_thumb(&v),
+                    count: v["playlist_count"].as_u64().or_else(|| v["n_entries"].as_u64()).unwrap_or(0),
                     url,
                 })
             })
@@ -768,6 +776,34 @@ pub async fn yt_channel_all(cfg: State<'_, YtCfg>, url: String) -> Result<Vec<On
     match attempt {
         Ok(v) => Ok(v),
         Err(e) => crate::ytnative::channel_all(&url).await.map_err(|ne| format!("{e} | {ne}")),
+    }
+}
+
+/// First `count` tracks of a playlist as full items (detail window preview).
+#[tauri::command]
+pub async fn yt_playlist_head(
+    cfg: State<'_, YtCfg>,
+    url: String,
+    count: Option<u32>,
+) -> Result<PlaylistImport, String> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("empty URL".into());
+    }
+    let n = count.unwrap_or(25).clamp(1, 200);
+    if crate::ytnative::forced() {
+        return crate::ytnative::playlist_head(&url, n).await;
+    }
+    let attempt = (|| -> Result<PlaylistImport, String> {
+        let range = format!("1:{n}");
+        let out = run_ytdlp(&cfg, &["--flat-playlist", "-j", "--no-warnings", "-I", &range, &url])?;
+        let entries: Vec<Value> = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect();
+        let title = entries.iter().find_map(|v| v["playlist_title"].as_str()).unwrap_or("Playlist").to_string();
+        Ok(PlaylistImport { title, tracks: entries.iter().filter_map(track_from_json).collect() })
+    })();
+    match attempt {
+        Ok(v) => Ok(v),
+        Err(e) => crate::ytnative::playlist_head(&url, n).await.map_err(|ne| format!("{e} | {ne}")),
     }
 }
 
@@ -884,8 +920,12 @@ pub async fn yt_download(
     dls: State<'_, DlState>,
     id: String,
     dir: String,
+    quality: Option<String>,
 ) -> Result<String, String> {
     let dir = resolve_download_dir(&dir)?;
+    // "" / "best" = no cap; otherwise an mp3 bitrate in kbps ("128".."320").
+    let quality = quality.unwrap_or_default();
+    let q = if quality.is_empty() { "best" } else { quality.as_str() };
 
     // Already downloaded? Recursive scan (the folder may hold subdirs like the
     // script's audio_downloads/<subdir>), same `[id]` naming convention.
@@ -894,29 +934,29 @@ pub async fn yt_download(
     }
 
     if crate::ytnative::forced() {
-        return crate::ytnative::download(app.clone(), &dls, &id, &dir).await;
+        return crate::ytnative::download(app.clone(), &dls, &id, &dir, q).await;
     }
     let attempt = (|| -> Result<String, String> {
         let bin = ensure_bin(&cfg)?;
         ensure_ffmpeg(&bin); // best-effort: fetch a static ffmpeg if none is around
         let cookies = cfg.cookies.lock().unwrap().clone();
         if cookies.is_empty() {
-            download_clients(&app, &dls, &bin, &id, &dir, None)
+            download_clients(&app, &dls, &bin, &id, &dir, None, q)
         } else {
             // A logged-in session often makes YouTube withhold every format. If the
             // cookies attempt fails, the no-cookies attempt is the meaningful one —
             // surface ITS error, not the misleading "format not available" cookies one.
-            match download_clients(&app, &dls, &bin, &id, &dir, Some(&cookies)) {
+            match download_clients(&app, &dls, &bin, &id, &dir, Some(&cookies), q) {
                 Ok(p) => Ok(p),
                 Err(e) if e == "canceled" => Err(e),
-                Err(_) => download_clients(&app, &dls, &bin, &id, &dir, None),
+                Err(_) => download_clients(&app, &dls, &bin, &id, &dir, None, q),
             }
         }
     })();
     let res = match attempt {
         Err(e) if e != "canceled" => {
             // yt-dlp broken/missing → native engine saves an m4a instead of mp3.
-            crate::ytnative::download(app.clone(), &dls, &id, &dir)
+            crate::ytnative::download(app.clone(), &dls, &id, &dir, q)
                 .await
                 .map_err(|ne| format!("{e} | {ne}"))
         }
@@ -940,6 +980,7 @@ fn download_clients(
     id: &str,
     dir: &str,
     cookies: Option<&str>,
+    quality: &str,
 ) -> Result<String, String> {
     // `android,web` is the most reliable audio client, so try it right after the
     // default; the default's stream URL often 403s or is DRM-flagged while
@@ -952,7 +993,7 @@ fn download_clients(
     ];
     let mut last = String::from("no download attempt ran");
     for client in CLIENTS {
-        match download_attempt(app, dls, bin, id, dir, cookies, client) {
+        match download_attempt(app, dls, bin, id, dir, cookies, client, quality) {
             Ok(p) => return Ok(p),
             Err(e) if e == "canceled" => return Err(e),
             Err(e) => {
@@ -1002,6 +1043,7 @@ fn download_attempt(
     dir: &str,
     cookies: Option<&str>,
     client: Option<&str>,
+    quality: &str,
 ) -> Result<String, String> {
     let mut cmd = sys_cmd(bin);
     cmd.arg("--no-playlist");
@@ -1020,6 +1062,11 @@ fn download_attempt(
     }
     let out_tpl = format!("{dir}/%(title)s [%(id)s].%(ext)s");
     let page = format!("https://www.youtube.com/watch?v={id}");
+    // Cap the mp3 bitrate when the user picked a quality; "best" leaves it to
+    // the source (yt-dlp's --audio-quality accepts a kbps value).
+    if quality != "best" && !quality.is_empty() {
+        cmd.arg("--audio-quality").arg(format!("{quality}K"));
+    }
     cmd.args([
         "-x",
         "--audio-format",
