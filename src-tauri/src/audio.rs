@@ -128,6 +128,10 @@ impl AudioController {
         let info_t = info.clone();
 
         thread::spawn(move || {
+            // Mark that the thread reached here — if the diagnostic ever shows
+            // this, the open code below never returned (hang), vs "" = thread
+            // never spawned.
+            *info_t.lock().unwrap() = "opening…".to_string();
             // The OutputStream must stay alive for the whole thread. The audio
             // system can be briefly unavailable at cold start (esp. Android),
             // so retry a few times before giving up loudly. A custom error
@@ -140,15 +144,35 @@ impl AudioController {
                 // this thread starts BEFORE setup runs.
                 for attempt in 0..60 {
                     let cb_err = err_t.clone();
-                    let res = OutputStreamBuilder::from_default_device().and_then(|b| {
-                        b.with_error_callback(move |e| {
-                            let m = format!("audio output error: {e}");
-                            eprintln!("[audio] {m}");
-                            *cb_err.lock().unwrap() = Some(m);
-                        })
-                        .open_stream()
-                    });
-                    match res.or_else(|_| OutputStreamBuilder::open_default_stream()) {
+                    // cpal's AAudio backend can PANIC (unwraps on JNI results),
+                    // not just return Err — catch it so the reason is visible
+                    // instead of silently killing the audio thread.
+                    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        OutputStreamBuilder::from_default_device()
+                            .and_then(|b| {
+                                b.with_error_callback(move |e| {
+                                    let m = format!("audio output error: {e}");
+                                    eprintln!("[audio] {m}");
+                                    *cb_err.lock().unwrap() = Some(m);
+                                })
+                                .open_stream()
+                            })
+                            .or_else(|_| OutputStreamBuilder::open_default_stream())
+                    }));
+                    let res = match res {
+                        Ok(r) => r,
+                        Err(p) => {
+                            let m = p.downcast_ref::<&str>().map(|s| s.to_string())
+                                .or_else(|| p.downcast_ref::<String>().cloned())
+                                .unwrap_or_else(|| "panic".into());
+                            eprintln!("[audio] open panicked: {m} (attempt {attempt})");
+                            *info_t.lock().unwrap() = format!("open panicked: {m}");
+                            *err_t.lock().unwrap() = Some(format!("audio panic: {m}"));
+                            thread::sleep(std::time::Duration::from_millis(500));
+                            continue;
+                        }
+                    };
+                    match res {
                         Ok(v) => { got = Some(v); break; }
                         Err(e) => {
                             let msg = format!("no audio output device: {e}");
