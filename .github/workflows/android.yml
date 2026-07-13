@@ -39,6 +39,16 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      - name: Use a STABLE debug signing key
+        run: |
+          # The runner would otherwise generate a fresh debug.keystore each build,
+          # changing the APK signature → Android refuses to upgrade over the old
+          # install → the user must uninstall → settings/library wiped. Ship a
+          # fixed keystore so every build shares one signature (upgrades keep data).
+          mkdir -p ~/.android
+          cp .github/android/debug.keystore ~/.android/debug.keystore
+          keytool -list -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey >/dev/null && echo "fixed debug key in place"
+
       - name: Init Android project
         run: |
           export NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"

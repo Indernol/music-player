@@ -448,11 +448,7 @@ fn parse_hms(s: &str) -> Option<u64> {
     }
 }
 
-/// Best playable stream URL. rodio/symphonia decodes AAC-in-mp4 only (no
-/// opus/webm), so: highest-bitrate m4a audio stream, else a combined mp4
-/// (itag-18 style — the decoder skips the video track).
-pub async fn stream_url(id: &str) -> Result<String, String> {
-    let player = rp()?.query().player(id).await.map_err(es)?;
+fn best_stream_url(player: &rustypipe::model::VideoPlayer) -> Result<String, String> {
     if let Some(s) = player
         .audio_streams
         .iter()
@@ -468,6 +464,27 @@ pub async fn stream_url(id: &str) -> Result<String, String> {
         .min_by_key(|s| s.bitrate)
         .map(|s| s.url.clone())
         .ok_or_else(|| "no AAC/mp4 stream available for this video".into())
+}
+
+/// Best playable stream URL, VALIDATED. rodio/symphonia decodes AAC-in-mp4 only.
+/// googlevideo URLs are IP-bound and on Android the source IP rotates, so a URL
+/// can 403 seconds after being resolved — validate with a tiny range request and
+/// re-resolve up to 3× so the URL handed to the player is known-good.
+pub async fn stream_url(id: &str) -> Result<String, String> {
+    let mut last = String::new();
+    for _ in 0..3 {
+        let player = match rp()?.query().player(id).await { Ok(p) => p, Err(e) => { last = es(e); continue; } };
+        let url = best_stream_url(&player)?;
+        // Cheap validation fetch (first bytes): confirms the URL is live now.
+        match crate::stream::media_agent(&url).get(&url).set("Range", "bytes=0-1").call() {
+            Ok(_) => return Ok(url),
+            Err(ureq::Error::Status(403, _)) => { last = "403 (IP-bound URL, re-resolving)".into(); continue; }
+            // Any other status (206/200/416…) means the URL is reachable — use it.
+            Err(ureq::Error::Status(_, _)) => return Ok(url),
+            Err(e) => { last = format!("{e}"); continue; }
+        }
+    }
+    Err(format!("stream unavailable: {last}"))
 }
 
 fn safe_filename(s: &str) -> String {
@@ -495,36 +512,31 @@ pub async fn download(
     dir: &str,
     quality: &str,
 ) -> Result<String, String> {
-    let player = rp()?.query().player(id).await.map_err(es)?;
+    let mut player = rp()?.query().player(id).await.map_err(es)?;
     let title = player.details.name.clone().unwrap_or_else(|| format!("YouTube {id}"));
     let artist = player.details.channel_name.clone().unwrap_or_default();
-    // "best" → highest-bitrate m4a; a kbps cap → the m4a stream whose bitrate is
-    // closest to (and preferably ≤) the target, so smaller files honor the cap.
-    let url = if quality == "best" || quality.is_empty() {
-        stream_url_of(&player)?
-    } else {
-        let target = quality.parse::<u32>().unwrap_or(0) * 1000;
-        let m4a: Vec<_> = player.audio_streams.iter().filter(|s| s.mime.to_lowercase().contains("mp4")).collect();
-        if m4a.is_empty() {
-            stream_url_of(&player)?
-        } else {
-            // prefer ≤ target (largest under cap); else the smallest available.
-            let under = m4a.iter().filter(|s| s.bitrate <= target).max_by_key(|s| s.bitrate);
-            let pick = under.or_else(|| m4a.iter().min_by_key(|s| s.bitrate)).unwrap();
-            pick.url.clone()
-        }
-    };
 
     let path = format!("{dir}/{} [{id}].m4a", safe_filename(&title));
     let part = format!("{path}.part");
     dls.canceled.lock().unwrap().remove(id);
 
-    // Blocking transfer inline — consistent with the yt-dlp path, which also
-    // does blocking process I/O inside async commands.
-    let resp = crate::stream::media_agent(&url)
-        .get(&url)
-        .call()
-        .map_err(|e| format!("stream fetch: {e}"))?;
+    // googlevideo URLs are pinned to the IP that resolved them; on Android the
+    // (IPv6 privacy) source address rotates, so a URL resolved a moment ago can
+    // 403. Re-resolve a fresh player + URL and retry a few times.
+    let mut resp = None;
+    let mut last = String::new();
+    for attempt in 0..3 {
+        if attempt > 0 {
+            player = match rp()?.query().player(id).await { Ok(p) => p, Err(e) => { last = es(e); continue; } };
+        }
+        let url = pick_download_url(&player, quality)?;
+        match crate::stream::media_agent(&url).get(&url).call() {
+            Ok(r) => { resp = Some(r); break; }
+            Err(ureq::Error::Status(403, _)) => { last = "403 (stream URL expired/IP-bound)".into(); continue; }
+            Err(e) => { last = format!("{e}"); continue; }
+        }
+    }
+    let resp = resp.ok_or_else(|| format!("stream fetch: {last}"))?;
     let total: u64 = resp
         .header("Content-Length")
         .and_then(|s| s.parse().ok())
@@ -566,6 +578,21 @@ pub async fn download(
     // the online index by the frontend).
     let _ = write_tags(&path, &title, &artist, id);
     Ok(path)
+}
+
+/// Pick the download URL for a player + quality ("best" → highest-bitrate m4a;
+/// a kbps cap → the m4a closest to and preferably ≤ the target).
+fn pick_download_url(player: &rustypipe::model::VideoPlayer, quality: &str) -> Result<String, String> {
+    if quality == "best" || quality.is_empty() {
+        return stream_url_of(player);
+    }
+    let target = quality.parse::<u32>().unwrap_or(0) * 1000;
+    let m4a: Vec<_> = player.audio_streams.iter().filter(|s| s.mime.to_lowercase().contains("mp4")).collect();
+    if m4a.is_empty() {
+        return stream_url_of(player);
+    }
+    let under = m4a.iter().filter(|s| s.bitrate <= target).max_by_key(|s| s.bitrate);
+    Ok(under.or_else(|| m4a.iter().min_by_key(|s| s.bitrate)).unwrap().url.clone())
 }
 
 fn stream_url_of(player: &rustypipe::model::VideoPlayer) -> Result<String, String> {
