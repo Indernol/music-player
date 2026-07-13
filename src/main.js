@@ -10,6 +10,14 @@ const T = window.__TAURI__;
 const IS_NATIVE = !!(T && T.core && typeof T.core.invoke === "function");
 const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 const ANDROID_MUSIC_DIR = "/storage/emulated/0/Music";
+function platformName() {
+  if (IS_ANDROID) return "Android";
+  const p = (navigator.userAgentData?.platform || navigator.platform || navigator.userAgent).toLowerCase();
+  if (/win/.test(p)) return "Windows";
+  if (/mac/.test(p)) return "macOS";
+  if (/linux/.test(p)) return "Linux";
+  return "Desktop";
+}
 
 const MOCK_TRACKS = [
   { path: "/demo/a.flac", title: "Aurora", artist: "Kioku", album: "Night Drive", duration_secs: 214, gain: 1 },
@@ -367,7 +375,8 @@ function sortTracks(list) {
 
 // ─── Track list ───
 function renderTracks(list, presorted = false) {
-  view = presorted ? [...list] : sortTracks([...list]);
+  const src = filterBlocked(list);
+  view = presorted ? [...src] : sortTracks([...src]);
   list = view;
   updateCount();
   const host = $("#trackList");
@@ -377,10 +386,11 @@ function renderTracks(list, presorted = false) {
   const nowPath = curIndex >= 0 ? queue[curIndex] : null;
   host.innerHTML = list.map((t, i) => {
     const isNow = nowPath === t.path;
-    return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
+    const blk = isBlocked(t.path);
+    return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
       <div class="tk-idx"><span class="idx-num">${i + 1}</span><span class="idx-play">${IC.play}</span></div>
       ${artCell(t)}
-      <div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
+      <div class="meta"><div class="t">${blk ? "🚫 " : ""}${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
       <div class="album">${esc(t.album)}</div>
       <span class="dur">${fmtDur(t.duration_secs)}</span>
       <button class="more" title="More" data-more="${i}">⋯</button>
@@ -504,6 +514,11 @@ function openContextMenu(x, y) {
     (inPlaylist ? `<div class="ctx-item" data-rm="pl">${ic(IC.minus)}Remove from this playlist</div>` : "") +
     (nLocal ? `<div class="ctx-item ctx-danger" data-rm="local">${ic(IC.trash)}Delete local file${nLocal > 1 ? "s" : ""}${inPlaylist ? " (keep in playlist)" : ""}</div>` : "") +
     (inPlaylist && nLocal ? `<div class="ctx-item ctx-danger" data-rm="both">${ic(IC.trash)}Remove from playlist + delete local</div>` : "") +
+    // ── block / unblock ──
+    `<div class="ctx-sep"></div>` +
+    (paths.every(isBlocked)
+      ? `<div class="ctx-item" data-block="off">${ic(IC.play)}Unblock ${nsfx}</div>`
+      : `<div class="ctx-item" data-block="on">${ic(IC.slash)}Block ${nsfx} (hide + can't play)</div>`) +
     `<div class="ctx-sep"></div>` +
     `<div class="ctx-label">Add ${nsfx} to</div>` +
     pls.map(p => `<div class="ctx-item" data-add="${p.id}">${ic(IC.note)}${esc(p.name)}</div>`).join("") +
@@ -512,6 +527,15 @@ function openContextMenu(x, y) {
   menu.querySelector("[data-dl]")?.addEventListener("click", () => { downloadTracks(paths.filter(isOnline)); closeCtx(); });
   menu.querySelector("[data-play]")?.addEventListener("click", () => { const i = view.findIndex(t => t.path === paths[0]); if (i >= 0) playFrom(i); closeCtx(); });
   menu.querySelector("[data-reveal]")?.addEventListener("click", () => { revealPath(localFileFor(paths[0])); closeCtx(); });
+  menu.querySelector("[data-block]")?.addEventListener("click", (e) => {
+    const on = e.currentTarget.dataset.block === "on";
+    closeCtx();
+    setBlocked(paths, on);
+    // If a currently-playing track just got blocked, skip past it.
+    if (on && curIndex >= 0 && paths.includes(queue[curIndex])) next();
+    selected.clear(); refreshView();
+    flash(on ? `Blocked ${nsfx}` : `Unblocked ${nsfx}`);
+  });
 
   menu.querySelector('[data-rm="pl"]')?.addEventListener("click", () => {
     closeCtx();
@@ -1402,6 +1426,29 @@ async function loadDlBlock() {
 }
 function saveDlBlock() { storeSave("dlblock", JSON.stringify(dlBlock)); }
 
+// ─── Blocked tracks ─────────────────────────────────────────────────────
+// A track can be "blocked" — hidden everywhere and unplayable (skipped in the
+// queue) until unblocked, even if it's saved locally. Keyed by videoId when
+// the track has one (so the local file AND its yt: alias are both blocked),
+// else by path. Persisted in store "blocked". A setting reveals them (greyed).
+let blockedKeys = new Set();
+async function loadBlocked() {
+  const raw = await storeLoad("blocked");
+  if (raw) { try { const a = JSON.parse(raw); if (Array.isArray(a)) blockedKeys = new Set(a); } catch {} }
+}
+function saveBlocked() { storeSave("blocked", JSON.stringify([...blockedKeys])); }
+function blockKeyOf(p) { const v = videoIdOf(p); return v ? "id:" + v : "path:" + p; }
+function isBlocked(p) { return blockedKeys.has(blockKeyOf(p)); }
+function setBlocked(paths, on) {
+  for (const p of paths) { const k = blockKeyOf(p); if (on) blockedKeys.add(k); else blockedKeys.delete(k); }
+  saveBlocked();
+}
+// Drop blocked tracks from a list unless the user chose to reveal them.
+function filterBlocked(list) {
+  if (S().showBlocked) return list;
+  return list.filter(t => !isBlocked(t.path));
+}
+
 // ─── Resume unfinished downloads (Settings → Downloads) ───
 // Persist the still-pending set so a relaunch can re-queue them; yt-dlp resumes
 // any leftover .part file on its own. Only writes when the pending set changes.
@@ -1846,8 +1893,14 @@ function nextIndex(from, manual = false) {
   if (repeatMode === "one" && !manual) return from;
   const order = playOrder();
   const pos = order.indexOf(from);
-  if (pos >= 0 && pos + 1 < order.length) return order[pos + 1];
-  return repeatMode !== "off" ? order[0] ?? -1 : -1; // wrap around when repeating
+  // Walk forward skipping blocked tracks (they can't be played until unblocked).
+  for (let step = pos + 1; step < order.length; step++) {
+    if (!isBlocked(queue[order[step]])) return order[step];
+  }
+  if (repeatMode !== "off") {
+    for (const idx of order) { if (idx !== from && !isBlocked(queue[idx])) return idx; }
+  }
+  return -1;
 }
 function updateNowPlaying(t, path) {
   setPlayIcon(true);
@@ -1888,6 +1941,13 @@ async function startSource(cmd, path, gain) {
 let playSeq = 0; // guards against overlapping hardPlay calls (fast double-clicks)
 async function hardPlay(i) {
   if (i < 0 || i >= queue.length) return;
+  // Blocked track chosen directly (or reached): skip to the next playable one.
+  if (isBlocked(queue[i])) {
+    const j = nextIndex(i, true);
+    if (j >= 0 && j !== i) return hardPlay(j);
+    flash("That track is blocked — unblock it to play");
+    return;
+  }
   _needsStart = false; // a real playback start supersedes any pending resume
   const seq = ++playSeq;
   curIndex = i;
@@ -2647,6 +2707,11 @@ function openSettings() {
       <div class="set-row"><label>Resume unfinished downloads on launch</label><input type="checkbox" id="setResumeDl" ${s.resumeDownloads ? "checked" : ""}></div>
       <div class="set-hint">Where downloads are saved. Pick any folder with the folder picker. Empty = <b>${IS_ANDROID ? "/storage/emulated/0/Music/MusicPlayer" : "~/Music/MusicPlayer"}</b>. The folder is added as a source automatically after a download.</div>
     </div>
+    <div class="set-group"><div class="set-title">Blocked tracks</div>
+      <div class="set-row"><label>Show blocked tracks <span class="set-sub">(greyed instead of hidden)</span></label><input type="checkbox" id="setShowBlocked" ${s.showBlocked ? "checked" : ""}></div>
+      <div class="set-row"><label>Blocked</label><button id="setUnblockAll" class="btn-line sm">Unblock ${blockedKeys.size}</button></div>
+      <div class="set-hint">Right-click a track → <b>Block</b> to hide it and stop it from ever playing (even if it's saved locally), until you unblock it.</div>
+    </div>
     </section>
     <section class="set-pane" data-pane="integrations">
     <div class="set-group"><div class="set-title">Notifications</div>
@@ -2804,6 +2869,8 @@ function openSettings() {
   $("#setPlPrev")?.addEventListener("change", e => SETTINGS.setSetting("playlistPreviewCount", Math.max(1, Math.min(200, Number(e.target.value) || 25))));
   $("#setDlQuality")?.addEventListener("change", e => SETTINGS.setSetting("downloadQuality", e.target.value));
   $("#setStorageCap")?.addEventListener("change", e => SETTINGS.setSetting("storageCapMb", Math.max(0, Number(e.target.value) || 0)));
+  $("#setShowBlocked")?.addEventListener("change", e => { SETTINGS.setSetting("showBlocked", e.target.checked); refreshView(); });
+  $("#setUnblockAll")?.addEventListener("click", () => { blockedKeys.clear(); saveBlocked(); $("#setUnblockAll").textContent = "Unblock 0"; refreshView(); flash("All tracks unblocked"); });
   $("#setDlBlock").addEventListener("click", () => { dlBlock = {}; saveDlBlock(); $("#setDlBlock").textContent = "Forget 0"; flash("Unavailable-track list cleared"); });
   $("#setRerun").addEventListener("click", () => { $("#settingsModal").hidden = true; openSetup(); });
   $("#setLimit").addEventListener("change", e => SETTINGS.setSetting("searchLimit", Number(e.target.value)));
@@ -2852,7 +2919,7 @@ function openSettings() {
   });
   renderUpdateBtn();  // reflect state already known from the startup check
   checkUpdate();      // refresh in the background while the panel is open
-  currentVersion().then(v => { const el = $("#setCurVer"); if (el) el.textContent = v ? `v${v}` : "?"; });
+  currentVersion().then(v => { const el = $("#setCurVer"); if (el) el.textContent = (v ? `v${v}` : "?") + ` · ${platformName()}`; });
   $("#setReset").addEventListener("click", () => { SETTINGS.resetSettings(); applySettings(); refreshView(); openSettings(); flash("Settings reset to defaults"); });
   // Live storage usage of the download folder (best-effort, async).
   if (IS_NATIVE) {
@@ -2943,27 +3010,66 @@ function renderUpdateBtn() {
   const btn = $("#updateBtn");
   if (!btn) return;
   btn.disabled = updateBusy;
+  const isDownload = _releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url);
   if (updateBusy) { btn.hidden = false; btn.textContent = "Building update…"; }
   else if (updateReady) { btn.hidden = false; btn.textContent = `v${availableVersion} ready — restart`; }
-  else if (availableVersion) { btn.hidden = false; btn.textContent = `Update to v${availableVersion}`; }
+  else if (availableVersion) { btn.hidden = false; btn.textContent = isDownload ? `Download v${availableVersion}` : `Update to v${availableVersion}`; }
   else { btn.hidden = true; }
 }
+// cmp semver-ish "a.b.c" → -1 / 0 / 1
+function verCmp(a, b) {
+  const pa = String(a).split("."), pb = String(b).split(".");
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (Number(pa[i]) || 0) - (Number(pb[i]) || 0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+let _releaseInfo = null; // { version, asset_url, page_url, platform }
 async function checkUpdate(manual = false) {
   if (!IS_NATIVE) return;
   if (!manual && S().updateMode === "off") return;
-  const [cur, src] = [await currentVersion(), await invoke("source_version").catch(() => "")];
-  if (src && cur && src !== cur) {
-    availableVersion = src;
-    if (S().updateMode === "auto" && !manual) { runUpdate(); return; }
-    if (manual) flash(`Update available: v${cur} → v${src}`);
+  const cur = await currentVersion();
+  // Desktop with a source tree keeps the in-app rebuild flow; everyone else
+  // (installers, Android) checks GitHub for the newest release that ships an
+  // asset for THIS platform — versions are independent per platform.
+  const src = await invoke("source_version").catch(() => "");
+  const hasSourceTree = !!src;
+  if (hasSourceTree) {
+    if (src && cur && src !== cur) {
+      availableVersion = src; _releaseInfo = null;
+      if (S().updateMode === "auto" && !manual) { runUpdate(); return; }
+      if (manual) flash(`Update available: v${cur} → v${src}`);
+    } else {
+      availableVersion = ""; if (manual) flash(`Up to date (v${cur})`);
+    }
   } else {
-    availableVersion = "";
-    if (manual) flash(src ? `Up to date (v${cur})` : "Source tree not found — cannot check");
+    try {
+      const rel = await invoke("latest_release");
+      _releaseInfo = rel;
+      if (rel.version && cur && verCmp(rel.version, cur) > 0) {
+        availableVersion = rel.version;
+        if (manual) flash(`Update available for ${rel.platform}: v${cur} → v${rel.version}`);
+      } else {
+        availableVersion = ""; if (manual) flash(`Up to date (v${cur})`);
+      }
+    } catch (e) {
+      availableVersion = ""; if (manual) flash(`Could not check updates: ${e}`);
+    }
   }
   renderUpdateBtn();
 }
 async function runUpdate() {
   if (updateBusy || !IS_NATIVE) return;
+  // Installer / Android path: open the platform's release asset to download +
+  // install. No in-app rebuild (that only works from a dev source tree).
+  if (_releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url)) {
+    try {
+      await invoke("open_url", { url: _releaseInfo.asset_url || _releaseInfo.page_url });
+      flash(IS_ANDROID ? "Downloading the new APK — open it to install" : "Opening the download page…");
+    } catch (e) { flash(`Could not open the download: ${e}`); }
+    return;
+  }
   updateBusy = true; renderUpdateBtn();
   try {
     await invoke("self_update");
@@ -3135,6 +3241,21 @@ function renderFollowList() {
   }));
 }
 
+// Open/close the mobile sidebar overlay. Opening it closes any open modal so
+// windows don't stack on top of each other ("suraffiche").
+function toggleSidebar(force) {
+  const open = force === undefined ? !document.body.classList.contains("side-open") : force;
+  document.body.classList.toggle("side-open", open);
+  $("#sideBackdrop").hidden = !open;
+  if (open) closeAllModals();
+}
+// Close every modal/drawer overlay — the single "dismiss everything" used when a
+// higher-priority window takes over, so nothing lingers behind it.
+function closeAllModals() {
+  document.querySelectorAll(".modal-backdrop:not([hidden])").forEach(m => { m.hidden = true; });
+  if (typeof _extBusy !== "undefined") { /* leave a busy import running in bg */ }
+}
+
 // ─── Resizable panels (sidebar / Now-playing) ───────────────────────────────
 // Pointer-drag the handles; the width lives in a CSS var and persists as a
 // setting. Double-click a handle to reset that panel to its default width.
@@ -3187,7 +3308,7 @@ function initResizers() {
 // ─── Wire up ───
 async function init() {
   hydrateIcons();
-  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory()]);
+  await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory(), loadBlocked()]);
   await loadLibrary();
   await normalizeLibraryPaths();      // heal /home vs /var/home aliases + drop duplicates
   if (IS_ANDROID && !folders.length) {
@@ -3208,10 +3329,12 @@ async function init() {
 
   wireTrackList();
   initResizers();
-  // Small screens (Android/narrow windows): the sidebar is an overlay behind ☰.
-  $("#sideToggle").addEventListener("click", () => document.body.classList.toggle("side-open"));
+  // Small screens (Android/narrow windows): the sidebar is an overlay behind ☰,
+  // with a full-screen backdrop so a modal opened underneath can't bleed through.
+  $("#sideToggle").addEventListener("click", () => toggleSidebar());
+  $("#sideBackdrop").addEventListener("click", () => toggleSidebar(false));
   $(".sidebar").addEventListener("click", (e) => {
-    if (window.innerWidth <= 700 && e.target.closest(".nav-item, .pl-row, .src-row")) document.body.classList.remove("side-open");
+    if (window.innerWidth <= 700 && e.target.closest(".nav-item, .pl-row, .src-row")) toggleSidebar(false);
   });
   $("#pickBtn").addEventListener("click", pickFolder);
   $("#manualBtn").addEventListener("click", addManual);

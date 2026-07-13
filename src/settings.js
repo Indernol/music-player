@@ -81,6 +81,7 @@ const DEFAULTS = {
   playlistPreviewCount: 25, // tracks shown in the playlist detail window (1..200)
   downloadQuality: "best",  // mp3/m4a bitrate cap: best | 320 | 256 | 192 | 128
   storageCapMb: 0,       // max MB of audio a source folder may hold (0 = unlimited)
+  showBlocked: false,    // reveal blocked tracks (greyed) instead of hiding them
   bgImage: "",           // custom background: URL or local file path
   bgBlur: 18,            // px of blur on the background image
   bgDim: 45,             // % darkening of the background image

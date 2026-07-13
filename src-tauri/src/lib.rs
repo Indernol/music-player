@@ -286,6 +286,93 @@ fn restart_app(app: tauri::AppHandle) {
     app.restart();
 }
 
+/// Per-platform update info from GitHub releases. Versions are effectively
+/// independent per platform: we return the newest release that actually ships
+/// an installer/APK for THIS OS, so an Android-only fix release doesn't show up
+/// as "newer" to Windows users (and vice-versa). `asset_url` is the direct
+/// download for this platform (APK on Android) — the frontend opens it.
+#[derive(serde::Serialize, Default)]
+struct ReleaseInfo {
+    version: String,
+    asset_url: String,
+    page_url: String,
+    platform: String,
+}
+
+fn platform_asset_match(name: &str) -> bool {
+    let n = name.to_lowercase();
+    if cfg!(target_os = "android") {
+        n.ends_with(".apk")
+    } else if cfg!(target_os = "windows") {
+        n.ends_with(".exe") || n.ends_with(".msi")
+    } else if cfg!(target_os = "macos") {
+        n.ends_with(".dmg") || n.ends_with(".app.tar.gz")
+    } else {
+        n.ends_with(".appimage") || n.ends_with(".deb") || n.ends_with(".rpm")
+    }
+}
+
+fn platform_name() -> &'static str {
+    if cfg!(target_os = "android") { "android" }
+    else if cfg!(target_os = "windows") { "windows" }
+    else if cfg!(target_os = "macos") { "macos" }
+    else { "linux" }
+}
+
+/// Open a URL in the system browser / installer, cross-platform incl. Android.
+/// Used by the mobile update flow to open the APK download.
+#[tauri::command]
+fn open_url(_app: tauri::AppHandle, url: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    { std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn().map_err(|e| e.to_string())?; Ok(()) }
+    #[cfg(target_os = "macos")]
+    { std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?; Ok(()) }
+    #[cfg(target_os = "linux")]
+    { std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?; Ok(()) }
+    #[cfg(target_os = "android")]
+    {
+        // Android WebView hands an https navigation to the browser / package
+        // installer; "_system" targets the external handler for an APK link.
+        use tauri::Manager;
+        let w = _app.get_webview_window("main").ok_or("no window")?;
+        w.eval(&format!("window.open('{}','_system')", url.replace('\'', "%27"))).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn latest_release() -> Result<ReleaseInfo, String> {
+    let resp = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+        .get("https://api.github.com/repos/Indernol/music-player/releases?per_page=20")
+        .set("User-Agent", "MusicPlayer")
+        .call()
+        .map_err(|e| e.to_string())?;
+    let text = resp.into_string().map_err(|e| e.to_string())?;
+    let arr: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let releases = arr.as_array().ok_or("unexpected releases payload")?;
+    // Newest first (the API returns them in that order); pick the first whose
+    // assets include a file for this platform.
+    for r in releases {
+        if r["draft"].as_bool().unwrap_or(false) || r["prerelease"].as_bool().unwrap_or(false) {
+            continue;
+        }
+        let assets = r["assets"].as_array().cloned().unwrap_or_default();
+        if let Some(a) = assets.iter().find(|a| {
+            a["name"].as_str().map(platform_asset_match).unwrap_or(false)
+        }) {
+            return Ok(ReleaseInfo {
+                version: r["tag_name"].as_str().unwrap_or("").trim_start_matches('v').to_string(),
+                asset_url: a["browser_download_url"].as_str().unwrap_or("").to_string(),
+                page_url: r["html_url"].as_str().unwrap_or("").to_string(),
+                platform: platform_name().to_string(),
+            });
+        }
+    }
+    Err("no release with an installer for this platform".into())
+}
+
 /// Update to the latest version on GitHub: fetch, move the tree onto origin/main,
 /// then rebuild. (The app's source tree is only ever a clean checkout.)
 #[tauri::command]
@@ -448,6 +535,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan, scan_diff, play, preload, pause, resume, stop, set_volume, set_agc, seek, status,
             source_version, self_update, restart_app, list_versions, switch_version,
+            latest_release, open_url,
             play_stream, preload_stream, prefetch_stream,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
             youtube::yt_playlist_preview, youtube::yt_playlist_head,

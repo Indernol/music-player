@@ -368,7 +368,7 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .seekbar { flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px; }
 
 /* ─── Context menu ─── */
-.ctx-menu { position: fixed; z-index: 100; min-width: 210px; background: var(--bg-3); border: 1px solid var(--bd-2); border-radius: 10px; padding: 6px; box-shadow: 0 12px 34px rgba(0,0,0,.5); max-height: 340px; overflow-y: auto; }
+.ctx-menu { position: fixed; z-index: 130; min-width: 210px; background: var(--bg-3); border: 1px solid var(--bd-2); border-radius: 10px; padding: 6px; box-shadow: 0 12px 34px rgba(0,0,0,.5); max-height: 340px; overflow-y: auto; }
 .ctx-item { padding: 8px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; color: var(--tx-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ctx-item:hover { background: var(--accent); color: #fff; }
 .ctx-sep { height: 1px; background: var(--bd); margin: 5px 6px; }
@@ -398,10 +398,19 @@ body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
 .set-pane { display: none; flex-direction: column; gap: 12px; }
 .set-pane.on { display: flex; }
 @media (max-width: 640px) {
+  .modal.settings { width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .modal.settings .modal-head { padding-top: calc(12px + var(--safe-top)); }
   .modal.settings .modal-body { flex-direction: column; }
   .set-nav { flex: 0 0 auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--bd); }
   .set-tab { width: auto; white-space: nowrap; }
   .set-tab.on { box-shadow: inset 0 -2px 0 var(--accent); }
+  .set-panes { padding-bottom: calc(18px + var(--safe-bottom)); }
+  /* Long rows (label + wide control) stack so nothing gets clipped on a phone. */
+  .set-row { flex-wrap: wrap; }
+  .text-in, .sel.wide { width: 100%; }
+  /* Full-screen modals on mobile: give them safe-area breathing room. */
+  .modal-backdrop { padding: 0; }
+  .modal { max-height: 100dvh; }
 }
 /* Settings groups as cards */
 .set-group { padding: 13px 16px 10px; border: 1px solid var(--bd); border-radius: 12px; background: rgba(255, 255, 255, .025); }
@@ -421,7 +430,7 @@ body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,
 .swatch.on { border-color: var(--tx-1); box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px currentColor; }
 
 /* ─── Toast ─── */
-.toast { position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--bg-3); color: var(--tx-1); border: 1px solid var(--bd-2); padding: 9px 16px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 110; }
+.toast { position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--bg-3); color: var(--tx-1); border: 1px solid var(--bd-2); padding: 9px 16px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 140; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 .mock-banner { background: rgba(245,158,11,.12); color: #f59e0b; border: 1px solid rgba(245,158,11,.3); border-radius: 8px; padding: 8px 12px; margin: 10px 12px; font-size: 12px; }
@@ -864,17 +873,32 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
 
 /* ─── Small screens / Android: single column, sidebar as an overlay ─── */
 .side-toggle { display: none; font-size: 16px; }
-/* Edge-to-edge: keep interactive UI clear of the status bar + home indicator. */
-.topbar { padding-top: calc(var(--topbar-pad, 13px) + env(safe-area-inset-top, 0px)); }
-.app { padding-left: calc(8px + env(safe-area-inset-left, 0px)); padding-right: calc(8px + env(safe-area-inset-right, 0px)); }
-.player { margin-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+/* Edge-to-edge safe areas. Android WebView doesn't always expose env() insets,
+   so MainActivity also writes --android-inset-* CSS vars; take whichever is
+   bigger. --safe-top etc. are the single source used across the layout. */
+:root {
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--android-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--android-inset-bottom, 0px));
+  --safe-left: max(env(safe-area-inset-left, 0px), var(--android-inset-left, 0px));
+  --safe-right: max(env(safe-area-inset-right, 0px), var(--android-inset-right, 0px));
+}
+.topbar { padding-top: calc(var(--topbar-pad, 13px) + var(--safe-top)); }
+.app { padding-left: calc(8px + var(--safe-left)); padding-right: calc(8px + var(--safe-right)); }
+.player { margin-bottom: calc(8px + var(--safe-bottom)); }
+.side-backdrop { position: fixed; inset: 0; z-index: 118; background: rgba(0,0,0,.5); }
+
+/* Blocked tracks: greyed + struck when revealed (Settings → show blocked). */
+.track.blocked { opacity: .5; }
+.track.blocked .meta .t { text-decoration: line-through; }
 @media (max-width: 700px) {
   .side-toggle { display: inline-grid; place-items: center; }
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
+  /* Sidebar overlay sits ABOVE modals/drawers with its own full backdrop, so a
+     modal opened underneath never bleeds through beside it. */
   body.side-open .sidebar {
-    display: flex; position: fixed; top: calc(8px + env(safe-area-inset-top, 0px)); left: 8px; bottom: 126px;
-    width: min(300px, 84vw); z-index: 95;
+    display: flex; position: fixed; top: calc(8px + var(--safe-top)); left: calc(8px + var(--safe-left)); bottom: calc(118px + var(--safe-bottom));
+    width: min(300px, 84vw); z-index: 119;
     border: 1px solid var(--bd-2); box-shadow: 18px 0 44px rgba(0, 0, 0, .55);
   }
   #sideResize { display: none; }
