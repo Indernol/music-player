@@ -13,6 +13,7 @@
 
       <button id="navLibrary" class="nav-item active"><span class="ni-ico" data-ic="disc"></span> Library</button>
       <button id="navHistory" class="nav-item"><span class="ni-ico" data-ic="clock"></span> Recently played</button>
+      <button id="navShare" class="nav-item"><span class="ni-ico" data-ic="globe"></span> Share over WiFi</button>
 
       <input id="sideFilter" type="search" placeholder="Filter sources & playlists…" autocomplete="off" class="side-filter">
 
@@ -140,6 +141,44 @@
       <span id="totTime" class="time">0:00</span>
     </div>
   </footer>
+
+  <div id="shareModal" class="modal-backdrop" hidden>
+    <div class="modal share">
+      <div class="modal-head">
+        <h2>Share over WiFi</h2>
+        <button id="shareClose" class="icon-btn" title="Close" data-ic="x"></button>
+      </div>
+      <div class="modal-body">
+        <div class="set-hint">Play your music on another device on the same WiFi — no account, nothing leaves your network. One device <b>hosts</b> its library, the other <b>connects</b> with the code.</div>
+
+        <div class="set-group"><div class="set-title">Host — share this device's library</div>
+          <div id="shareHostIdle">
+            <div class="set-hint">Start a local server so another device can browse, stream and download your library + playlists.</div>
+            <button id="shareHostStart" class="btn">Start sharing</button>
+          </div>
+          <div id="shareHostOn" hidden>
+            <div class="share-code-row">
+              <div><div class="set-sub">On the other device, choose “Connect” and enter:</div>
+                <div class="share-addr" id="shareAddr">—</div>
+                <div class="share-code" id="shareCode">000000</div></div>
+            </div>
+            <div id="shareHostInfo" class="set-hint"></div>
+            <button id="shareHostStop" class="btn-line sm">Stop sharing</button>
+          </div>
+        </div>
+
+        <div class="set-group"><div class="set-title">Connect — receive from another device</div>
+          <div class="set-row"><label>Host address <span class="set-sub">(IP shown on the host)</span></label>
+            <input type="text" id="shareHostIp" class="text-in" placeholder="192.168.1.23" autocomplete="off"></div>
+          <div class="set-row"><label>Port</label><input type="number" id="shareHostPort" class="num-in" value="0" min="0" max="65535"></div>
+          <div class="set-row"><label>Code</label><input type="text" id="shareConnCode" class="text-in" placeholder="000000" inputmode="numeric" maxlength="6"></div>
+          <label class="setup-chk"><input type="checkbox" id="shareSaveLocal"> Save streamed tracks locally as I play them</label>
+          <button id="shareConnect" class="btn">Connect</button>
+          <div id="shareConnStatus" class="set-hint"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="plDetailModal" class="modal-backdrop" hidden>
     <div class="modal pl-detail">

@@ -8,6 +8,7 @@ mod mpris;
 mod rpc;
 mod store;
 mod stream;
+mod share;
 pub mod youtube;
 pub mod ytnative;
 
@@ -114,6 +115,17 @@ async fn play_stream(
 ) -> Result<u64, String> {
     let url = resolve_stream_url(&yt, &cfg, &id).await?;
     Ok(state.audio.play_url(url, gain))
+}
+
+/// Play a direct audio URL (LAN device sharing streams remote files this way).
+#[tauri::command]
+fn play_direct(url: String, gain: f32, state: State<AppState>) -> u64 {
+    state.audio.play_url(url, gain)
+}
+
+#[tauri::command]
+fn preload_direct(url: String, gain: f32, state: State<AppState>) {
+    state.audio.preload_url(url, gain);
 }
 
 #[tauri::command]
@@ -518,6 +530,7 @@ pub fn run() {
         .manage(youtube::YtCfg::default())
         .manage(youtube::DlState::default())
         .manage(mpris::MediaState::default())
+        .manage(share::ShareState::default())
         .setup(|app| {
             // Native YouTube engine cache (client versions, visitor data).
             ytnative::init_storage(
@@ -536,7 +549,8 @@ pub fn run() {
             scan, scan_diff, play, preload, pause, resume, stop, set_volume, set_agc, seek, status,
             source_version, self_update, restart_app, list_versions, switch_version,
             latest_release, open_url,
-            play_stream, preload_stream, prefetch_stream,
+            share::share_start, share::share_stop, share::share_status, share::share_connect, share::share_download,
+            play_stream, preload_stream, prefetch_stream, play_direct, preload_direct,
             youtube::yt_search, youtube::yt_search_playlists, youtube::yt_playlist,
             youtube::yt_playlist_preview, youtube::yt_playlist_head,
             youtube::yt_channel, youtube::yt_channel_videos,

@@ -49,7 +49,10 @@ jobs:
           M=src-tauri/gen/android/app/src/main/AndroidManifest.xml
           # Library scanning needs media-audio read access (scoped storage).
           sed -i 's#<uses-permission android:name="android.permission.INTERNET" */>#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />#' "$M"
-          grep -n "uses-permission" "$M"
+          # LAN device sharing streams over plain HTTP on the local network —
+          # allow cleartext traffic (blocked by default since Android 9).
+          sed -i 's#<application #<application android:usesCleartextTraffic="true" #' "$M"
+          grep -n "uses-permission\|usesCleartextTraffic" "$M"
 
       - name: Request media permission at startup (MainActivity)
         run: |

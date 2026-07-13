@@ -887,6 +887,13 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
 .player { margin-bottom: calc(8px + var(--safe-bottom)); }
 .side-backdrop { position: fixed; inset: 0; z-index: 118; background: rgba(0,0,0,.5); }
 
+/* Share over WiFi modal */
+.modal.share { width: min(460px, 94vw); }
+.share .modal-body { display: flex; flex-direction: column; gap: 12px; }
+.share-code-row { display: flex; align-items: center; gap: 12px; }
+.share-addr { font-family: var(--font-mono, monospace); font-size: 15px; color: var(--tx-1); margin: 4px 0; }
+.share-code { font-family: var(--font-mono, monospace); font-size: 30px; font-weight: 800; letter-spacing: .12em; color: var(--accent-2); }
+
 /* Blocked tracks: greyed + struck when revealed (Settings → show blocked). */
 .track.blocked { opacity: .5; }
 .track.blocked .meta .t { text-decoration: line-through; }

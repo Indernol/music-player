@@ -1201,6 +1201,108 @@ async function searchOnline(q, page = 0) {
   }
 }
 
+// ─── Share over WiFi (LAN host ↔ client) ────────────────────────────────
+// One device hosts its library over HTTP on the LAN; another connects with the
+// host IP + a pairing code and streams / downloads. No account, no cloud.
+let _remote = null; // { base, code, tracks: Map<path,track> } when connected
+function shareKeyOf(t) {
+  // Stable per-file key the host serves under (videoId or a path hash).
+  const v = videoIdOf(t.path);
+  if (v) return "v" + v;
+  let h = 0; for (const c of t.path) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return "h" + h.toString(36);
+}
+function openShare() {
+  toggleSidebar(false);
+  $("#shareModal").hidden = false;
+  refreshShareHost();
+}
+async function refreshShareHost() {
+  try {
+    const st = await invoke("share_status");
+    $("#shareHostIdle").hidden = st.running;
+    $("#shareHostOn").hidden = !st.running;
+    if (st.running) {
+      $("#shareAddr").textContent = `${st.ip} : ${st.port}`;
+      $("#shareCode").textContent = st.code;
+      $("#shareHostPort").value = st.port;
+      $("#shareHostIp").value = $("#shareHostIp").value || st.ip;
+    }
+  } catch {}
+}
+async function shareHostStart() {
+  if (!IS_NATIVE) { flash("Sharing needs the native app"); return; }
+  // Only local files can be served (streams have no bytes to hand out).
+  const local = library.filter(t => !isOnline(t.path));
+  const files = local.map(t => ({ key: shareKeyOf(t), path: t.path }));
+  const libExport = local.map(t => ({ ...t, _key: shareKeyOf(t) }));
+  const btn = $("#shareHostStart"); btn.disabled = true; btn.textContent = "Starting…";
+  try {
+    const st = await invoke("share_start", {
+      library: JSON.stringify(libExport),
+      playlists: JSON.stringify(PL.getPlaylists()),
+      files,
+    });
+    $("#shareHostInfo").textContent = `Sharing ${files.length} local track${files.length === 1 ? "" : "s"} + ${PL.getPlaylists().length} playlist${PL.getPlaylists().length === 1 ? "" : "s"}. Keep the app open.`;
+    await refreshShareHost();
+    flash(`Sharing on ${st.ip}:${st.port} — code ${st.code}`);
+  } catch (e) { flash(`Could not start sharing: ${e}`); }
+  finally { btn.disabled = false; btn.textContent = "Start sharing"; }
+}
+async function shareHostStop() { try { await invoke("share_stop"); } catch {} refreshShareHost(); flash("Stopped sharing"); }
+// Save a currently-streaming remote track to the local library (once).
+const _remoteSaving = new Set();
+async function shareSaveRemote(t) {
+  if (!t?._remoteUrl || _remoteSaving.has(t.path)) return;
+  const local = libraryLocalFor(videoIdOf(t.path));
+  if (local) return; // already have it
+  _remoteSaving.add(t.path);
+  const vid = videoIdOf(t.path);
+  const base = `${(t.artist || "Unknown").replace(/[\\/:*?"<>|]/g, "_")} - ${(t.title || "track").replace(/[\\/:*?"<>|]/g, "_")}`;
+  const name = vid ? `${base} [${vid}].mp3` : `${base}.mp3`;
+  const tid = taskStart("Saving from device", { detail: t.title || name });
+  try {
+    const file = await invoke("share_download", { url: t._remoteUrl, dir: S().downloadDir || "", name, id: vid || t.path });
+    const dir = file.slice(0, file.lastIndexOf("/"));
+    if (!folders.includes(dir)) folders.push(dir);
+    await rescanFolder(dir);
+    taskEnd(tid, { detail: "saved", ttl: 4000 });
+  } catch (e) { taskEnd(tid, { status: "error", detail: String(e) }); }
+  finally { _remoteSaving.delete(t.path); }
+}
+async function shareConnect() {
+  if (!IS_NATIVE) { flash("Connecting needs the native app"); return; }
+  const host = $("#shareHostIp").value.trim();
+  const port = Number($("#shareHostPort").value) || 0;
+  const code = $("#shareConnCode").value.trim();
+  if (!host || !port || !code) { $("#shareConnStatus").textContent = "Fill host, port and code."; return; }
+  const btn = $("#shareConnect"); btn.disabled = true; btn.textContent = "Connecting…";
+  $("#shareConnStatus").textContent = "Connecting…";
+  try {
+    const data = await invoke("share_connect", { host, port, code });
+    const remoteTracks = JSON.parse(data.library || "[]");
+    const map = new Map();
+    const tracks = remoteTracks.map(t => {
+      const key = t._key || shareKeyOf(t);
+      const streamUrl = `${data.base}/file/${key}?code=${encodeURIComponent(code)}`;
+      // Give the remote track a distinct path so it doesn't collide with local.
+      const rt = { ...t, path: "remote:" + key, _remoteUrl: streamUrl, _remoteKey: key, album: t.album || "Shared" };
+      map.set(rt.path, rt); onlineIndex.set(rt.path, rt); return rt;
+    });
+    _remote = { base: data.base, code, tracks: map, saveLocal: $("#shareSaveLocal").checked };
+    $("#shareModal").hidden = true;
+    // Show the remote library as the current view.
+    active = { type: "remote", id: host };
+    markActive();
+    setViewHead({ icon: IC.globe, title: `Shared from ${host}`, subtitle: `${tracks.length} track${tracks.length === 1 ? "" : "s"} streamed over WiFi` });
+    $("#trackList").classList.remove("yt-grid");
+    renderTracks(tracks, true);
+    flash(`Connected — ${tracks.length} tracks`);
+  } catch (e) {
+    $("#shareConnStatus").textContent = String(e);
+  } finally { btn.disabled = false; btn.textContent = "Connect"; }
+}
+
 // ─── Playlist detail window ─────────────────────────────────────────────
 // A real preview (not a text blurb): the first N tracks (N = playlistPreviewCount
 // setting) with thumbnails, an "Import" button, and a link to the full playlist
@@ -1934,6 +2036,11 @@ function effectivePath(path) {
   return local ? local.path : path;
 }
 async function startSource(cmd, path, gain) {
+  // "remote:<key>" pseudo-paths stream a shared file from a paired device.
+  if (String(path).startsWith("remote:")) {
+    const t = _remote?.tracks.get(path) || onlineIndex.get(path);
+    if (t?._remoteUrl) return invoke(cmd + "_direct", { url: t._remoteUrl, gain });
+  }
   // Local files use play/preload; "yt:" pseudo-paths stream via yt-dlp resolution.
   if (isOnline(path)) return invoke(cmd + "_stream", { id: ytId(path), gain });
   return invoke(cmd, { path, gain });
@@ -1981,6 +2088,8 @@ async function hardPlay(i) {
   savePlayback();
   if (t) $("#nowSub").textContent = `${t.artist} — ${t.album}`;
   mediaPlayback();
+  // Optionally cache a streamed shared track to the local library as it plays.
+  if (_remote?.saveLocal && String(path).startsWith("remote:")) shareSaveRemote(t);
   await schedulePreload();
 }
 async function schedulePreload() {
@@ -3411,6 +3520,12 @@ async function init() {
   $("#plDetailClose").addEventListener("click", closePlaylistDetail);
   $("#plDetailModal").addEventListener("click", e => { if (e.target.id === "plDetailModal") closePlaylistDetail(); });
   $("#plDetailImport").addEventListener("click", () => importPlaylistDetail(true));
+  $("#navShare").addEventListener("click", openShare);
+  $("#shareClose").addEventListener("click", () => $("#shareModal").hidden = true);
+  $("#shareModal").addEventListener("click", e => { if (e.target.id === "shareModal") $("#shareModal").hidden = true; });
+  $("#shareHostStart").addEventListener("click", shareHostStart);
+  $("#shareHostStop").addEventListener("click", shareHostStop);
+  $("#shareConnect").addEventListener("click", shareConnect);
   $("#impFetch").addEventListener("click", impFetch);
   $("#impUrl").addEventListener("keydown", e => { if (e.key === "Enter") impFetch(); });
   $("#impSearch").addEventListener("click", impSearchGo);
