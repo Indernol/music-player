@@ -384,14 +384,11 @@ async fn self_update(app: tauri::AppHandle) -> Result<String, String> {
         return do_build(&app);
     }
 
-    let url = "https://github.com/Indernol/music-player/releases/latest";
-    #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd").args(["/C", "start", url]).spawn();
-    #[cfg(target_os = "linux")]
-    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-    #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg(url).spawn();
-
+    // No source tree (installer / mobile): open the releases page to download.
+    use tauri_plugin_opener::OpenerExt;
+    let _ = app
+        .opener()
+        .open_url("https://github.com/Indernol/music-player/releases/latest".to_string(), None::<&str>);
     Err("Opened the download page in your browser. Please run the new installer to update.".into())
 }
 
