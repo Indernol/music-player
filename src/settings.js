@@ -82,6 +82,11 @@ const DEFAULTS = {
   downloadQuality: "best",  // mp3/m4a bitrate cap: best | 320 | 256 | 192 | 128
   storageCapMb: 0,       // max MB of audio a source folder may hold (0 = unlimited)
   showBlocked: false,    // reveal blocked tracks (greyed) instead of hiding them
+  gdriveClientId: "",    // user's Google OAuth Client ID (Desktop app)
+  gdriveClientSecret: "",// user's Google OAuth Client secret (Desktop app)
+  gdriveTokens: null,    // { refresh_token, access_token, expires_at, email }
+  syncAuto: true,        // auto push/pull on changes + launch
+  syncAt: 0,             // last successful sync (unix ms)
   bgImage: "",           // custom background: URL or local file path
   bgBlur: 18,            // px of blur on the background image
   bgDim: 45,             // % darkening of the background image

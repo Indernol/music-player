@@ -18,6 +18,9 @@ export async function initPlaylists() {
 }
 
 export function getPlaylists() { return _cache; }
+// Persist after a direct mutation of the array returned by getPlaylists()
+// (used by cloud-sync merge, which appends/edits in place).
+export function persist() { _persist(); }
 
 export function createPlaylist(name) {
   const pl = { id: crypto.randomUUID(), name: (name || "").trim() || "New playlist", paths: [] };

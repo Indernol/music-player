@@ -2740,7 +2740,7 @@ dependencies = [
 
 [[package]]
 name = "music-player"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "base64 0.22.1",
  "discord-rich-presence",
@@ -2751,6 +2751,7 @@ dependencies = [
  "rustypipe",
  "serde",
  "serde_json",
+ "sha2",
  "souvlaki",
  "tauri",
  "tauri-build",

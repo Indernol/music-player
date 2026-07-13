@@ -1201,6 +1201,112 @@ async function searchOnline(q, page = 0) {
   }
 }
 
+// ─── Account & cloud sync (Google Drive appDataFolder) ──────────────────
+// Sign in with a Google account; playlists / settings / blocked / follows /
+// online index sync through the private appDataFolder of THAT account's Drive,
+// so the same account on any device shares the same library structure. Audio
+// files are NOT synced (too big) — the local scan + LAN share bring those.
+const SYNC_DEVICE_KEYS = new Set([ // never overwritten from the cloud (per-device)
+  "downloadDir", "sideW", "npW", "ytdlpPath", "cookiesBrowser", "gdriveTokens",
+  "gdriveClientId", "gdriveClientSecret", "startOnBoot", "uiScale", "syncAt",
+]);
+function gdriveCreds() { return { clientId: S().gdriveClientId || "", clientSecret: S().gdriveClientSecret || "" }; }
+async function gdriveRestore() {
+  const t = S().gdriveTokens;
+  if (IS_NATIVE && t && t.refresh_token) { try { await invoke("gdrive_set_tokens", { tokens: t }); } catch {} }
+}
+async function accountSignIn() {
+  if (!IS_NATIVE) { flash("Sign-in needs the native app"); return; }
+  const { clientId, clientSecret } = gdriveCreds();
+  if (!clientId) { flash("Enter your Google OAuth Client ID first (see the hint)"); return; }
+  flash("Opening Google sign-in in your browser…");
+  try {
+    const res = await invoke("gdrive_sign_in", { clientId, clientSecret });
+    SETTINGS.setSetting("gdriveTokens", res.tokens);
+    flash(`Signed in as ${res.email || "Google account"}`);
+    openSettings();
+    await syncPull(true); // first thing: pull anything already in the cloud
+  } catch (e) { flash(`Sign-in failed: ${e}`); }
+}
+async function accountSignOut() {
+  try { await invoke("gdrive_sign_out"); } catch {}
+  SETTINGS.setSetting("gdriveTokens", null);
+  flash("Signed out"); openSettings();
+}
+// Build the sync bundle from the local stores.
+function buildSyncBundle() {
+  const s = S();
+  const syncSettings = {};
+  for (const [k, v] of Object.entries(s)) if (!SYNC_DEVICE_KEYS.has(k)) syncSettings[k] = v;
+  return {
+    v: 1, at: Date.now(),
+    playlists: PL.getPlaylists(),
+    settings: syncSettings,
+    blocked: [...blockedKeys],
+    follows,
+    online: Object.fromEntries([...onlineIndex.entries()].slice(-4000)),
+  };
+}
+// Merge a pulled bundle into local state (additive + newest-wins for settings).
+function mergeSyncBundle(b) {
+  if (!b || typeof b !== "object") return false;
+  let changed = false;
+  // Playlists: union by id; union track paths (dedup, keep order).
+  if (Array.isArray(b.playlists)) {
+    const mine = PL.getPlaylists();
+    const byId = new Map(mine.map(p => [p.id, p]));
+    for (const rp of b.playlists) {
+      const cur = byId.get(rp.id);
+      if (!cur) { PL.getPlaylists().push(rp); changed = true; }
+      else {
+        const seen = new Set(cur.paths);
+        for (const p of (rp.paths || [])) if (!seen.has(p)) { cur.paths.push(p); seen.add(p); changed = true; }
+        if (rp.name && rp.name !== cur.name) { cur.name = rp.name; changed = true; }
+        if (rp.image && !cur.image) { cur.image = rp.image; changed = true; }
+      }
+    }
+    if (changed) PL.persist();
+  }
+  // Online index: fill gaps (metadata for shared/streamed tracks).
+  if (b.online) { for (const [k, v] of Object.entries(b.online)) if (!onlineIndex.has(k)) { onlineIndex.set(k, v); changed = true; } saveOnline(); }
+  // Blocked: union.
+  if (Array.isArray(b.blocked)) { const before = blockedKeys.size; for (const k of b.blocked) blockedKeys.add(k); if (blockedKeys.size !== before) { saveBlocked(); changed = true; } }
+  // Follows: union by url.
+  if (Array.isArray(b.follows)) { const urls = new Set(follows.map(f => f.url)); for (const f of b.follows) if (!urls.has(f.url)) { follows.push(f); changed = true; } if (changed) saveFollows(); }
+  // Settings: apply cloud values (skipping device-specific keys) only if the
+  // cloud bundle is newer than our last local change of settings.
+  if (b.settings && typeof b.settings === "object") {
+    for (const [k, v] of Object.entries(b.settings)) if (!SYNC_DEVICE_KEYS.has(k) && S()[k] !== v) { SETTINGS.setSetting(k, v); changed = true; }
+  }
+  return changed;
+}
+let _syncing = false;
+async function syncPush(silent) {
+  if (!IS_NATIVE || _syncing || !S().gdriveTokens?.refresh_token) return;
+  _syncing = true;
+  try {
+    await invoke("gdrive_push", { ...gdriveCreds(), bundle: JSON.stringify(buildSyncBundle()) });
+    SETTINGS.setSetting("syncAt", Date.now());
+    if (!silent) flash("Synced to your Google Drive");
+  } catch (e) { if (!silent) flash(`Sync (upload) failed: ${e}`); }
+  finally { _syncing = false; }
+}
+async function syncPull(silent) {
+  if (!IS_NATIVE || _syncing || !S().gdriveTokens?.refresh_token) return;
+  _syncing = true;
+  try {
+    const raw = await invoke("gdrive_pull", { ...gdriveCreds() });
+    if (raw) {
+      const changed = mergeSyncBundle(JSON.parse(raw));
+      if (changed) { renderPlaylists(); applySettings(); refreshView(); }
+      if (!silent) flash(changed ? "Pulled updates from your Drive" : "Already up to date");
+    } else if (!silent) flash("Nothing in the cloud yet — press Sync to upload");
+    SETTINGS.setSetting("syncAt", Date.now());
+  } catch (e) { if (!silent) flash(`Sync (download) failed: ${e}`); }
+  finally { _syncing = false; }
+}
+async function syncNow() { await syncPull(true); await syncPush(false); }
+
 // ─── Share over WiFi (LAN host ↔ client) ────────────────────────────────
 // One device hosts its library over HTTP on the LAN; another connects with the
 // host IP + a pairing code and streams / downloads. No account, no cloud.
@@ -2823,6 +2929,18 @@ function openSettings() {
     </div>
     </section>
     <section class="set-pane" data-pane="integrations">
+    <div class="set-group"><div class="set-title">Account &amp; cloud sync</div>
+      ${s.gdriveTokens?.refresh_token
+        ? `<div class="set-row"><label>Signed in</label><b>${esc(s.gdriveTokens.email || "Google account")}</b></div>
+           <div class="set-row"><label>Auto-sync <span class="set-sub">(on launch + after changes)</span></label><input type="checkbox" id="setSyncAuto" ${s.syncAuto !== false ? "checked" : ""}></div>
+           <div class="set-row"><label>${s.syncAt ? "Last synced " + new Date(s.syncAt).toLocaleString() : "Never synced"}</label>
+             <span class="dir-pick"><button id="setSyncNow" class="btn-line sm">Sync now</button><button id="setSignOut" class="btn-line sm">Sign out</button></span></div>
+           <div class="set-hint">Playlists, settings, blocked tracks and follows sync through the private app folder of your Google Drive — same account on any device stays in sync, anywhere. Your audio files are not uploaded (use “Share over WiFi” for those).</div>`
+        : `<div class="set-hint">Sign in with Google to sync your playlists / settings / blocked / follows across your devices through your own Google Drive (nothing goes to us). Audio files aren't uploaded.<br><br><b>One-time setup:</b> create a free OAuth client at <b>console.cloud.google.com</b> → APIs &amp; Services → Credentials → <i>Create OAuth client ID</i> → application type <b>Desktop app</b>, enable the <b>Google Drive API</b>, then paste the Client ID (and secret) below.</div>
+           <div class="set-row"><label>Google OAuth Client ID</label><input type="text" id="setGdId" class="text-in" placeholder="…apps.googleusercontent.com" value="${esc(s.gdriveClientId)}"></div>
+           <div class="set-row"><label>Client secret <span class="set-sub">(Desktop app)</span></label><input type="text" id="setGdSecret" class="text-in" placeholder="GOCSPX-…" value="${esc(s.gdriveClientSecret)}"></div>
+           <button id="setSignIn" class="btn">Sign in with Google</button>`}
+    </div>
     <div class="set-group"><div class="set-title">Notifications</div>
       <div class="set-row"><label>Desktop notification on track change</label><input type="checkbox" id="setNotify" ${s.notifyOnChange ? "checked" : ""}></div>
       <div class="set-hint">Tip: your desktop's media widget already shows the track (MPRIS) — turn this off if you see two popups.</div>
@@ -2979,6 +3097,13 @@ function openSettings() {
   $("#setDlQuality")?.addEventListener("change", e => SETTINGS.setSetting("downloadQuality", e.target.value));
   $("#setStorageCap")?.addEventListener("change", e => SETTINGS.setSetting("storageCapMb", Math.max(0, Number(e.target.value) || 0)));
   $("#setShowBlocked")?.addEventListener("change", e => { SETTINGS.setSetting("showBlocked", e.target.checked); refreshView(); });
+  // Account & cloud sync
+  $("#setGdId")?.addEventListener("change", e => SETTINGS.setSetting("gdriveClientId", e.target.value.trim()));
+  $("#setGdSecret")?.addEventListener("change", e => SETTINGS.setSetting("gdriveClientSecret", e.target.value.trim()));
+  $("#setSignIn")?.addEventListener("click", accountSignIn);
+  $("#setSignOut")?.addEventListener("click", accountSignOut);
+  $("#setSyncNow")?.addEventListener("click", syncNow);
+  $("#setSyncAuto")?.addEventListener("change", e => SETTINGS.setSetting("syncAuto", e.target.checked));
   $("#setUnblockAll")?.addEventListener("click", () => { blockedKeys.clear(); saveBlocked(); $("#setUnblockAll").textContent = "Unblock 0"; refreshView(); flash("All tracks unblocked"); });
   $("#setDlBlock").addEventListener("click", () => { dlBlock = {}; saveDlBlock(); $("#setDlBlock").textContent = "Forget 0"; flash("Unavailable-track list cleared"); });
   $("#setRerun").addEventListener("click", () => { $("#settingsModal").hidden = true; openSetup(); });
@@ -3607,6 +3732,13 @@ async function init() {
   // then periodically according to the configured interval.
   setTimeout(() => checkFollows(), 20000);
   setInterval(() => checkFollows(false, true), 15 * 60 * 1000);
+
+  // Cloud sync: restore tokens, then auto-pull on launch (and periodically).
+  await gdriveRestore();
+  if (S().gdriveTokens?.refresh_token && S().syncAuto !== false) {
+    setTimeout(() => syncPull(true), 6000);
+    setInterval(() => syncNow(), 10 * 60 * 1000);
+  }
 }
 
 init().catch(e => console.error("[init] failed:", e));
