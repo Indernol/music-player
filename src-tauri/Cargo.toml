@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.17.0"
+version = "0.17.1"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -45,6 +45,13 @@ rustypipe = { version = "0.11", default-features = false, features = ["rustls-tl
 # (no libdbus). Windows/other: souvlaki's default (SMTC) backend.
 [target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
 souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }
+
+# Android: rquickjs-sys (rustypipe's QuickJS engine for YouTube's JS cipher
+# challenges) ships no pregenerated bindings for aarch64-linux-android — force
+# its bindgen feature so bindings are generated at build time (the Android CI
+# provides libclang + NDK sysroot via BINDGEN_EXTRA_CLANG_ARGS).
+[target.'cfg(target_os = "android")'.dependencies]
+rquickjs-sys = { version = "0.9", features = ["bindgen"] }
 
 # Desktop-only plugins (no-op or unsupported on mobile).
 # "Launch at login": Linux .desktop in ~/.config/autostart, Windows run-key,

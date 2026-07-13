@@ -835,8 +835,17 @@ fn find_existing(dir: &str, id: &str) -> Option<String> {
 
 fn resolve_download_dir(dir: &str) -> Result<String, String> {
     let dir = dir.trim();
+    // Android: $HOME is the app-private sandbox — downloads must land on the
+    // shared storage so they show up in the user's Music library (and survive
+    // an uninstall). Desktop keeps ~/Music/MusicPlayer.
+    #[cfg(target_os = "android")]
+    let default = "/storage/emulated/0/Music/MusicPlayer".to_string();
+    #[cfg(not(target_os = "android"))]
+    let default = format!("{}/Music/MusicPlayer", std::env::var("HOME").map_err(|e| e.to_string())?);
+    #[cfg(not(target_os = "android"))]
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-    let default = format!("{home}/Music/MusicPlayer");
+    #[cfg(target_os = "android")]
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/storage/emulated/0".into());
     let resolved = if dir.is_empty() {
         default.clone()
     } else if let Some(rest) = dir.strip_prefix("~/") {

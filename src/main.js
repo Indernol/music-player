@@ -8,6 +8,8 @@ import { storeLoad, storeSave } from "./store.js";
 
 const T = window.__TAURI__;
 const IS_NATIVE = !!(T && T.core && typeof T.core.invoke === "function");
+const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
+const ANDROID_MUSIC_DIR = "/storage/emulated/0/Music";
 
 const MOCK_TRACKS = [
   { path: "/demo/a.flac", title: "Aurora", artist: "Kioku", album: "Night Drive", duration_secs: 214, gain: 1 },
@@ -2253,7 +2255,7 @@ async function pickFolder() {
   try {
     const path = await T.core.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Choose a music folder" } });
     if (path) await addSource(path);
-  } catch (e) { console.error("[dialog]", e); const p = await askText("Add a folder", { placeholder: "Folder path" }); if (p) await addSource(p); }
+  } catch (e) { console.error("[dialog]", e); const p = await askText("Add a folder", { placeholder: IS_ANDROID ? ANDROID_MUSIC_DIR : "Folder path" }); if (p) await addSource(p); }
   finally { btn.disabled = false; }
 }
 async function addManual() { const p = await askText("Add a folder", { placeholder: "/path/to/music" }); if (p) addSource(p); }
@@ -2909,6 +2911,7 @@ function setupStep(n) {
 }
 async function setupDetect() {
   const st = $("#suYtStatus");
+  if (IS_ANDROID) { st.className = "setup-status ok"; st.textContent = "Built-in YouTube engine — nothing to set up on Android."; return; }
   // yt_config auto-downloads a standalone copy when nothing is found, so this
   // may take a few seconds on first run.
   st.className = "setup-status"; st.textContent = "Setting up yt-dlp (downloading if needed)…";
@@ -3055,6 +3058,10 @@ async function init() {
   await Promise.all([PL.initPlaylists(), SETTINGS.loadSettings(), loadOnline(), loadFollows(), loadDlBlock(), loadHistory()]);
   await loadLibrary();
   await normalizeLibraryPaths();      // heal /home vs /var/home aliases + drop duplicates
+  if (IS_ANDROID && !folders.length) {
+    // Give the permission dialog a moment, then adopt the shared Music folder.
+    setTimeout(() => { addSource(ANDROID_MUSIC_DIR).catch(() => {}); }, 4000);
+  }
   if (enrichLibrary()) saveLibrary();
   const relinked = relinkPlaylists(); // heal playlist paths after moved/re-added music
   if (relinked) flash(`Relinked ${relinked} moved track${relinked === 1 ? "" : "s"}`);
