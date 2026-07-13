@@ -153,7 +153,10 @@ impl AudioController {
                         Err(e) => {
                             let msg = format!("no audio output device: {e}");
                             if attempt % 4 == 0 { eprintln!("[audio] {msg} (attempt {attempt})"); }
-                            *err_t.lock().unwrap() = Some(msg);
+                            *err_t.lock().unwrap() = Some(msg.clone());
+                            // Show the real reason live in the diagnostic even
+                            // while retrying (not only after giving up).
+                            *info_t.lock().unwrap() = format!("open failed: {e}");
                             thread::sleep(std::time::Duration::from_millis(500));
                         }
                     }
