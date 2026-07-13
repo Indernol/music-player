@@ -168,7 +168,13 @@ impl AudioController {
                         *err_t.lock().unwrap() = None;
                         v
                     }
-                    None => return, // give up — status/audio_error() reports why
+                    None => {
+                        // Give up, but expose WHY (the real cpal/AAudio error) so
+                        // the "Audio output" diagnostic shows the cause.
+                        let why = err_t.lock().unwrap().clone().unwrap_or_else(|| "unknown".into());
+                        *info_t.lock().unwrap() = format!("open failed: {why}");
+                        return;
+                    }
                 }
             };
             *sink_t.lock().unwrap() = (0, Some(Arc::new(Sink::connect_new(stream.mixer()))));

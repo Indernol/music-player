@@ -1734,7 +1734,7 @@ function dlRow(d) {
   return `
     <div class="dl-row ${d.status}" data-path="${esc(d.path)}" title="${esc(d.err || d.title)}">
       <span class="dl-ico">${d.permanent ? IC.slash : DL_ICON[d.status]}</span>
-      <span class="dl-name">${esc(d.title)}</span>
+      <span class="dl-name">${esc(d.title)}${d.status === "error" && d.err ? `<span class="dl-err">${esc(d.err.slice(0, 140))}</span>` : ""}</span>
       <span class="dl-prog"><i style="width:${d.status === "done" ? 100 : (d.pct || 0)}%"></i></span>
       <span class="dl-pct">${d.status === "active" ? (d.pct || 0) + "%" : d.status}</span>
       ${d.status === "queued" || d.status === "active" ? `<button class="dl-x" data-dlx="${esc(d.path)}" title="Cancel">${IC.x}</button>` : ""}
@@ -2686,7 +2686,10 @@ async function applyTheme() {
   // Custom slider-thumb image (the "pink dot"). Resolved to a data URL for local
   // paths, like the wallpaper, and applied as a CSS var used by every range thumb.
   applyThumbImage(s);
-  document.body.style.zoom = String((s.uiScale ?? 100) / 100);
+  // CSS `zoom` shifts the coordinate space of position:fixed elements and vw
+  // units on the Android WebView (content ends up offset / cut off — the
+  // "dezoom" bug). Use it on desktop only; mobile keeps a 1:1 viewport.
+  document.body.style.zoom = IS_ANDROID ? "" : String((s.uiScale ?? 100) / 100);
   applyAccent();
   root.setProperty("--app-bg-blur", `${s.bgBlur ?? 18}px`);
   root.setProperty("--app-bg-dim", String(s.bgDim ?? 45));
