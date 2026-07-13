@@ -146,19 +146,8 @@ fn urlenc(s: &str) -> String {
 }
 
 fn open_browser(app: &tauri::AppHandle, url: &str) {
-    #[cfg(target_os = "windows")]
-    { let _ = (app, std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn()); }
-    #[cfg(target_os = "macos")]
-    { let _ = (app, std::process::Command::new("open").arg(url).spawn()); }
-    #[cfg(target_os = "linux")]
-    { let _ = (app, std::process::Command::new("xdg-open").arg(url).spawn()); }
-    #[cfg(target_os = "android")]
-    {
-        use tauri::Manager;
-        if let Some(w) = app.get_webview_window("main") {
-            let _ = w.eval(&format!("window.open('{}','_system')", url.replace('\'', "%27")));
-        }
-    }
+    use tauri_plugin_opener::OpenerExt;
+    let _ = app.opener().open_url(url.to_string(), None::<&str>);
 }
 
 #[derive(Deserialize)]

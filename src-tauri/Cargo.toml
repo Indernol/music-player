@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.21.1"
+version = "0.21.2"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -18,6 +18,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+# Open URLs/files via the OS default handler — the ONLY reliable way to open an
+# external browser from the Android WebView (window.open does nothing there).
+tauri-plugin-opener = "2"
 discord-rich-presence = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

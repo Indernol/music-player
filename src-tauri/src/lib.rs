@@ -333,24 +333,12 @@ fn platform_name() -> &'static str {
 }
 
 /// Open a URL in the system browser / installer, cross-platform incl. Android.
-/// Used by the mobile update flow to open the APK download.
+/// Uses tauri-plugin-opener, which fires a proper ACTION_VIEW intent on Android
+/// (window.open does nothing from the WebView) — the mobile update download.
 #[tauri::command]
-fn open_url(_app: tauri::AppHandle, url: String) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    { std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn().map_err(|e| e.to_string())?; Ok(()) }
-    #[cfg(target_os = "macos")]
-    { std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?; Ok(()) }
-    #[cfg(target_os = "linux")]
-    { std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?; Ok(()) }
-    #[cfg(target_os = "android")]
-    {
-        // Android WebView hands an https navigation to the browser / package
-        // installer; "_system" targets the external handler for an APK link.
-        use tauri::Manager;
-        let w = _app.get_webview_window("main").ok_or("no window")?;
-        w.eval(&format!("window.open('{}','_system')", url.replace('\'', "%27"))).map_err(|e| e.to_string())?;
-        Ok(())
-    }
+fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -515,7 +503,8 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init());
     // "Launch at login" toggle (Settings → System) — desktop only.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_autostart::init(
