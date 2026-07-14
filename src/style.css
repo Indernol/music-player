@@ -379,8 +379,10 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .ctx-label { padding: 6px 12px 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--tx-3); font-weight: 800; }
 
 /* ─── Settings modal ─── */
-.modal-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.6); display: grid; place-items: center; overscroll-behavior: contain; }
-#cookieModal { z-index: 95; }
+/* Above the mobile sidebar drawer (z-index 119) so a modal opened from a sidebar
+   button (Import…) sits ON TOP of it instead of behind it. */
+.modal-backdrop { position: fixed; inset: 0; z-index: 122; background: rgba(0,0,0,.6); display: grid; place-items: center; overscroll-behavior: contain; }
+#cookieModal { z-index: 124; }
 /* Only the body scrolls — the header stays put and the scrollbar is clipped
    inside the rounded corners (no bar cutting across the header / top corner). */
 .modal { width: min(560px, 92vw); max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }

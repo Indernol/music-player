@@ -894,7 +894,7 @@ async function unfollowPlaylist(id) {
 // song list (title + artist) — from a public Spotify link (backend scrape) or a
 // pasted "Artist - Title" list — match each track on YouTube, and collect them
 // into a new local playlist (optionally downloaded to mp3).
-function openImportPick() { $("#pickModal").hidden = false; }
+function openImportPick() { toggleSidebar(false); $("#pickModal").hidden = false; }
 let _extBusy = false, _extCancel = false;
 function openExtImport() {
   if (!IS_NATIVE) { flash("Importing needs the native app"); return; }
@@ -1179,15 +1179,18 @@ async function searchOnline(q, page = 0) {
     const limit = Number(S().searchLimit) || 20;
     const wantVideos = S().ytIncludeVideos !== false;
     const wantPlaylists = S().ytIncludePlaylists !== false;
-    // Fetch whichever result types the filters ask for, in parallel.
-    const [res, pls] = await Promise.all([
-      wantVideos ? invoke("yt_search", { query: q, limit, offset: ytPage * limit }) : Promise.resolve([]),
-      wantPlaylists ? invoke("yt_search_playlists", { query: q, limit: Math.min(12, limit), offset: ytPage * Math.min(12, limit) }).catch(() => []) : Promise.resolve([]),
-    ]);
+    // Fire both in parallel but DON'T let the (slower, natively-scraped)
+    // playlist lookup hold back the video results — render the videos the moment
+    // they land, then slot the playlists in when they arrive. Waiting on both
+    // was what made search feel "way too long".
+    const plP = wantPlaylists
+      ? invoke("yt_search_playlists", { query: q, limit: Math.min(12, limit), offset: ytPage * Math.min(12, limit) }).catch(() => [])
+      : Promise.resolve([]);
+    const res = wantVideos ? await invoke("yt_search", { query: q, limit, offset: ytPage * limit }) : [];
     if (seq !== _searchSeq) { taskDrop(tid); return; } // superseded by a newer search
     ytHasMore = Array.isArray(res) && res.length >= limit;
     onlineResults = (res || []).map(onlineFromResult);
-    onlinePlaylists = Array.isArray(pls) ? pls : [];
+    onlinePlaylists = []; // filled in below when plP resolves
     onlineResults.forEach(t => onlineIndex.set(t.path, t));
     // Don't clobber wherever the user navigated meanwhile: render only if the
     // online view is still current, otherwise park the result in Activity.
@@ -1201,6 +1204,12 @@ async function searchOnline(q, page = 0) {
       });
       flash(`Search “${q}” ready — see the Activity badge`);
     }
+    // Playlists arrive independently → merge them in without blocking the videos.
+    plP.then(pls => {
+      if (seq !== _searchSeq) return;
+      onlinePlaylists = Array.isArray(pls) ? pls : [];
+      if (onlinePlaylists.length && active.type === "online" && onlineQuery === q) renderOnlineResults();
+    });
   } catch (e) {
     if (seq !== _searchSeq) { taskDrop(tid); return; }
     taskEnd(tid, { status: "error", detail: String(e) });

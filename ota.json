@@ -1,8 +1,8 @@
 {
-  "version": "0.22.5",
+  "version": "0.22.6",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Thumbnails in list view, tap-to-play on mobile, and a fixed player bar layout."
+  "notes": "Faster search (videos show instantly), and the Import window now opens on top of the sidebar."
 }
