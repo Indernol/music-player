@@ -159,7 +159,12 @@ jobs:
 
             private fun hideSystemBars() {
               val c = WindowCompat.getInsetsController(window, window.decorView)
-              c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPES
+              // The compat constant isn't in this androidx.core; use the platform
+              // one (API 30+, same value) so swiping an edge reveals the bars.
+              if (Build.VERSION.SDK_INT >= 30) {
+                c.systemBarsBehavior =
+                  android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPES
+              }
               c.hide(WindowInsetsCompat.Type.systemBars())
             }
 
