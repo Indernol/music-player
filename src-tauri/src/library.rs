@@ -2,7 +2,9 @@
 //! Returns plain `Track` structs — no coupling to audio or UI.
 
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::io::Read;
+use std::sync::{Mutex, OnceLock};
 use walkdir::WalkDir;
 
 // lofty imports (VERSION-SENSITIVE — see Cargo.toml note). The prelude brings the
@@ -217,6 +219,45 @@ pub async fn read_image(path: String) -> Result<String, String> {
         return Err("image too large (max 25 MB)".into());
     }
     Ok(format!("data:{mime};base64,{}", STANDARD.encode(data)))
+}
+
+static NET_IMG_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+/// Fetch a remote thumbnail (YouTube covers) and return it as a data URL. The
+/// Android WebView refuses to load external network background-images, so covers
+/// are proxied through Rust (which reaches i.ytimg fine) and handed back inline.
+/// Restricted to known image hosts and cached in memory.
+#[tauri::command]
+pub async fn net_image(url: String) -> Result<String, String> {
+    let ok_host = ["i.ytimg.com", "i9.ytimg.com", "yt3.ggpht.com", "lh3.googleusercontent.com"]
+        .iter()
+        .any(|h| url.contains(h));
+    if !url.starts_with("https://") || !ok_host {
+        return Err("unsupported image url".into());
+    }
+    let cache = NET_IMG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(v) = cache.lock().unwrap().get(&url) {
+        return Ok(v.clone());
+    }
+    let resp = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .get(&url)
+        .set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
+        .call()
+        .map_err(|e| e.to_string())?;
+    let mime = resp.header("Content-Type").unwrap_or("image/jpeg").to_string();
+    let mut bytes = Vec::new();
+    resp.into_reader()
+        .take(6 * 1024 * 1024)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.is_empty() {
+        return Err("empty image".into());
+    }
+    let data = format!("data:{};base64,{}", mime, STANDARD.encode(&bytes));
+    cache.lock().unwrap().insert(url, data.clone());
+    Ok(data)
 }
 
 /// Differential scan for refreshes: walk the folders, but only read tags for

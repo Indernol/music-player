@@ -614,7 +614,7 @@ pub fn run() {
             youtube::yt_download, youtube::yt_cancel,
             youtube::yt_config, youtube::yt_install, youtube::detect_browsers,
             mpris::media_update, mpris::media_playback,
-            library::cover, library::read_image, library::delete_file, library::open_path,
+            library::cover, library::read_image, library::net_image, library::delete_file, library::open_path,
             library::canon_path, library::canon_paths, library::folder_size,
             store::store_load, store::store_save,
             rpc::rpc_update, rpc::rpc_clear,

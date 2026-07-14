@@ -137,7 +137,16 @@ function artInitial(t) { const s = (t.album || t.title || "?").trim(); return (s
 // ─── Album art (embedded cover, deduped per album, lazily fetched) ───
 const coverCache = new Map(); // albumKey -> dataURL | "" (none/pending)
 function albumKey(t) { return `${t.artist}|||${t.album}`; }
-function setArtImg(el, url) { el.style.background = ""; el.style.backgroundImage = `url("${url}")`; el.textContent = ""; el.classList.add("has-cover"); }
+function setArtImg(el, url) {
+  el.style.background = ""; el.textContent = ""; el.classList.add("has-cover");
+  // Android WebView won't load network images → proxy them to a data: URL.
+  if (IS_ANDROID && /^https?:\/\//.test(url)) {
+    el.dataset.proxied = url;
+    netThumb(url).then(d => { if (el.dataset.proxied === url) el.style.backgroundImage = `url("${d}")`; }).catch(() => {});
+  } else {
+    el.style.backgroundImage = `url("${url}")`;
+  }
+}
 function setArtPlaceholder(el, t) { el.classList.remove("has-cover"); el.style.backgroundImage = ""; el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t); el.dataset.album = albumKey(t); }
 function artCell(t) {
   if (t.thumbnail && S().showArt) return `<div class="art has-cover" style="background-image:url('${esc(t.thumbnail)}')"></div>`;
@@ -182,6 +191,28 @@ function hydrateCovers() {
   else { const seen = new Set(); for (const t of view.slice(0, 60)) { const k = albumKey(t); if (!seen.has(k)) { seen.add(k); fetchCover(t); } } }
 }
 function refreshView() { if (active.type === "source") openSource(active.id); else if (active.type === "playlist") openPlaylist(active.id); else if (active.type === "online") renderOnlineResults(); else showLibrary(); }
+
+// The Android WebView won't load external network background-images, so YouTube
+// covers (i.ytimg…) are proxied through the Rust backend into inline data: URLs
+// (which DO render, like local covers). Desktop loads them natively → no-op.
+const _netThumb = new Map();
+async function netThumb(url) {
+  const c = _netThumb.get(url);
+  if (c) return c;
+  const d = await invoke("net_image", { url });
+  _netThumb.set(url, d);
+  return d;
+}
+function proxyCovers(root) {
+  if (!IS_ANDROID) return;
+  (root || document).querySelectorAll(".art.has-cover, .yc-thumb, .pc-thumb, .ac-avatar, .pd-cover, .pd-thumb, .np-art.has-cover, .ov-art.has-cover, .dl-cover.has-cover").forEach(el => {
+    const m = String(el.style.backgroundImage || "").match(/url\(['"]?(https:\/\/[^'")]+)['"]?\)/);
+    if (!m || el.dataset.proxied === m[1]) return;
+    const src = m[1];
+    el.dataset.proxied = src;
+    netThumb(src).then(d => { el.style.backgroundImage = `url("${d}")`; }).catch(() => { delete el.dataset.proxied; });
+  });
+}
 
 // ─── Online tracks (YouTube via yt-dlp, same approach as play_yt_audio.sh) ───
 // Online tracks live under pseudo-paths "yt:<videoId>" so queue/playlist/selection
@@ -413,6 +444,7 @@ function renderTracks(list, presorted = false) {
   // per-row listeners on every render made big libraries stutter.
   updatePlayingRow();
   hydrateCovers();
+  proxyCovers(host);
 }
 
 function wireTrackList() {
@@ -1057,6 +1089,7 @@ function prependPlaylistList(pls) {
   wrap.innerHTML = `<div class="list-sep">${IC.list} Playlists</div>` + pls.map(playlistCardHtml).join("");
   host.insertAdjacentElement("afterbegin", wrap);
   wirePlaylistCards(wrap, pls);
+  proxyCovers(wrap);
 }
 // Mini-YouTube card grid: 16:9 thumbnail + duration badge + channel + views,
 // hover ▶ plays instantly. Cards keep the .track class + data-path/data-idx so
@@ -1095,6 +1128,7 @@ function renderYtGrid(fresh, owned, playlists = []) {
       : "");
   if (playlists.length) wirePlaylistCards(host, playlists);
   updatePlayingRow();
+  proxyCovers(host);
 }
 // The channel header (avatar, name, mode toggle, "Download all"), pinned above
 // the results on page 1 once yt_channel resolves.
@@ -1115,6 +1149,7 @@ function injectArtistCard() {
   card.querySelector('[data-ac="videos"]').addEventListener("click", () => { if (ytArtistMode !== "videos") { ytArtistMode = "videos"; renderOnlineResults(); } });
   card.querySelector('[data-ac="playlists"]').addEventListener("click", loadArtistPlaylists);
   card.querySelector('[data-ac="dl"]').addEventListener("click", downloadArtistAll);
+  proxyCovers(card);
 }
 function renderArtistPlaylists() {
   const host = $("#trackList");
@@ -1448,6 +1483,8 @@ async function openPlaylistDetail(p) {
   $("#plDetailLink").href = p.url;
   const cover = $("#plDetailCover");
   cover.style.backgroundImage = p.thumbnail ? `url("${p.thumbnail}")` : "";
+  cover.classList.toggle("has-cover", !!p.thumbnail);
+  proxyCovers(m);
   const cap = Math.max(1, Math.min(200, Number(S().playlistPreviewCount) || 25));
   $("#plDetailList").innerHTML = `<div class="nx-note">Loading first ${cap} tracks…</div>`;
   m.hidden = false;
@@ -1467,6 +1504,7 @@ async function openPlaylistDetail(p) {
       (more ? `<a class="pd-more" href="${esc(p.url)}" target="_blank" rel="noopener">+ ${more} more — view the full playlist on YouTube ↗</a>` : "");
     $("#plDetailList").querySelectorAll("[data-pdplay]").forEach(el =>
       el.addEventListener("click", () => { const t = onlineIndex.get(el.dataset.pdplay); if (t) { queue = [t.path]; playFrom(0); } }));
+    proxyCovers(m);
   } catch (e) {
     $("#plDetailList").innerHTML = `<div class="nx-note">Could not load: ${esc(String(e))}</div>`;
   }
@@ -1823,6 +1861,7 @@ function dlRender() {
     finished.length > 8 ? `<div class="dl-more">… ${finished.length - 8} more finished</div>` : "",
   ];
   $("#dlList").innerHTML = parts.join("");
+  proxyCovers($("#dlList"));
   $("#dlList").querySelectorAll("[data-tskx]").forEach(b => b.addEventListener("click", (e) => {
     e.stopPropagation();
     const t = bgTasks.get(b.dataset.tskx);
