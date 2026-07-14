@@ -268,13 +268,13 @@ body.bg-light.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(255,255,255,.7); }
 .yt-grid .yt-card.playing .yc-title { color: var(--accent-2); }
 .yt-grid .yt-card.owned { opacity: .75; }
 .yc-thumb {
-  /* 16:9 via the padding-bottom hack, NOT aspect-ratio: the user's Android
-     WebView doesn't support aspect-ratio, which left this box 0px tall — the
-     reason song covers NEVER showed while every fixed-size box (.pc-thumb,
-     .ac-avatar, .art) always did. Padding-% works on every engine. */
-  position: relative; height: 0; padding-bottom: 56.25%; border-radius: 9px; overflow: hidden;
-  background: var(--bg-3) center / cover no-repeat;
+  /* The thumbnail is a real <img> inside (see .yc-img): its natural 16:9 gives
+     the box a real height that paints on every engine — the padding-ratio and
+     aspect-ratio tricks both failed on the user's old Android WebView. */
+  position: relative; border-radius: 9px; overflow: hidden; background: var(--bg-3);
 }
+.yc-img { display: block; width: 100%; height: auto; }
+.art-img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .yc-dur {
   position: absolute; right: 6px; bottom: 6px; padding: 1px 5px; border-radius: 5px;
   background: rgba(0, 0, 0, .82); color: #fff; font-size: 11px; font-weight: 700;
@@ -581,9 +581,9 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 }
 .np-head { display: flex; align-items: center; justify-content: space-between; }
 .ov-art {
-  width: 100%; aspect-ratio: 1; border-radius: 12px; flex-shrink: 0;
-  background: var(--bg-3); display: grid; place-items: center;
-  font-size: 46px; font-weight: 800; color: rgba(255, 255, 255, .9); overflow: hidden;
+  /* padding-bottom square (aspect-ratio unsupported on the old WebView). */
+  width: 100%; height: 0; padding-bottom: 100%; border-radius: 12px; flex-shrink: 0;
+  background: var(--bg-3) center / cover no-repeat; overflow: hidden;
 }
 /* Big artwork: contain (not crop) on black — YouTube thumbnails are letterboxed
    16:9, cover made them look off-center; contain shows the full art, centered. */

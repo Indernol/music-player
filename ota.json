@@ -1,8 +1,8 @@
 {
-  "version": "0.22.18",
+  "version": "0.22.19",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "YouTube covers now show on Android (fetch the JPEG thumbnail, not the WebP the WebView cannot render)."
+  "notes": "Song/video thumbnails now render on Android (real <img> tags instead of CSS background boxes the old WebView could not paint)."
 }

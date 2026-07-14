@@ -149,7 +149,7 @@ function setArtImg(el, url) {
 }
 function setArtPlaceholder(el, t) { el.classList.remove("has-cover"); el.style.backgroundImage = ""; el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t); el.dataset.album = albumKey(t); }
 function artCell(t) {
-  if (t.thumbnail && S().showArt) return `<div class="art has-cover" style="background-image:url('${esc(t.thumbnail)}')"></div>`;
+  if (t.thumbnail && S().showArt) return `<div class="art has-cover"><img class="art-img" data-net="${esc(t.thumbnail)}" alt=""></div>`;
   const k = albumKey(t);
   const cov = S().showArt ? coverCache.get(k) : "";
   if (cov) return `<div class="art has-cover" data-album="${esc(k)}" style="background-image:url('${cov}')"></div>`;
@@ -208,8 +208,21 @@ async function netThumb(url) {
   return d;
 }
 function proxyCovers(root) {
+  const scope = root || document;
+  // Song/video thumbnails are real <img> elements — universal, no WebView
+  // background-painting or box-sizing quirks (the old device rendered fixed-size
+  // background boxes like playlists but NOT the padding-ratio ones). Set the src
+  // from the proxy on Android, straight from the network on desktop.
+  scope.querySelectorAll("img[data-net]").forEach(el => {
+    const src = el.dataset.net;
+    if (!src || el.dataset.done === src) return;
+    el.dataset.done = src;
+    if (IS_ANDROID && /^https?:\/\//.test(src)) netThumb(src).then(d => { el.src = d; }).catch(() => { el.dataset.done = ""; });
+    else el.src = src;
+  });
   if (!IS_ANDROID) return;
-  (root || document).querySelectorAll(".art.has-cover, .yc-thumb, .pc-thumb, .ac-avatar, .pd-cover, .pd-thumb, .np-art.has-cover, .ov-art.has-cover, .dl-cover.has-cover").forEach(el => {
+  // background-image covers (playlists, artist avatar, now-playing, download rows).
+  scope.querySelectorAll(".art.has-cover, .pc-thumb, .ac-avatar, .pd-cover, .pd-thumb, .np-art.has-cover, .ov-art.has-cover, .dl-cover.has-cover").forEach(el => {
     const m = String(el.style.backgroundImage || "").match(/url\(['"]?(https:\/\/[^'")]+)['"]?\)/);
     if (!m || el.dataset.proxied === m[1]) return;
     const src = m[1];
@@ -1109,7 +1122,8 @@ function renderYtGrid(fresh, owned, playlists = []) {
   const card = (t, i, own) => {
     const vs = fmtViews(t.views);
     return `<div class="track yt-card ${nowPath === t.path ? "playing" : ""} ${own ? "owned" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
-      <div class="yc-thumb"${t.thumbnail ? ` style="background-image:url('${esc(t.thumbnail)}')"` : ""}>
+      <div class="yc-thumb">
+        ${t.thumbnail ? `<img class="yc-img" data-net="${esc(t.thumbnail)}" alt="">` : ""}
         <span class="yc-dur">${fmtDur(t.duration_secs)}</span>
         ${own ? `<span class="yc-own" title="Already in your library">${IC.check}</span>` : ""}
         <button class="yc-play" data-play="${i}" title="Play now">${IC.play}</button>
