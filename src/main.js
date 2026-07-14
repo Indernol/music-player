@@ -2164,7 +2164,7 @@ function updateNowPlaying(t, path) {
   // before the wall clock is re-anchored, so the RPC push happens at the real
   // playback start (hardPlay / gapless advance) with an explicit position of 0.
 }
-async function playFrom(viewIdx) { queue = view.map(t => t.path); history = []; if (shuffle) buildShuffle(viewIdx); await hardPlay(viewIdx); }
+async function playFrom(viewIdx) { _drainSkips = 0; queue = view.map(t => t.path); history = []; if (shuffle) buildShuffle(viewIdx); await hardPlay(viewIdx); }
 // If an online track was downloaded (file named "… [<id>].mp3"), play the local
 // file instead of streaming from YouTube (Settings → "Prefer local file").
 function effectivePath(path) {
@@ -2306,6 +2306,7 @@ function startProgressLoop() {
 
 let _posTick = 0;
 let _lastAudioErr = "";
+let _drainSkips = 0; // consecutive instant-drain auto-advances (failing streams)
 function startPolling() {
   setInterval(async () => {
     // Surface silent audio failures (no output device, undecodable stream) so
@@ -2337,11 +2338,22 @@ function startPolling() {
       rpcTrack(t); recordHistory(t, queue[curIndex]); savePlayback(); // gapless advance
       await schedulePreload();
     } else if (queued === 0 && playing) {
-      // Sink drained: end of queue — or the preload failed (e.g. stream error).
-      // If there is a next track, recover by hard-starting it instead of dying.
+      // Sink drained: end of queue — or the stream failed to open (e.g. a 403
+      // the re-resolver couldn't recover). A real end-of-track means the track
+      // actually played; an instant drain with no progress means the stream
+      // failed. Recover to the next track, but DON'T cascade through the whole
+      // library when every stream is failing — stop after a few dry skips.
+      const playedReal = wallPos() > 1.2 || (st.position || 0) > 1.2;
+      if (playedReal) _drainSkips = 0;
       const j = nextIndex(curIndex);
-      if (j >= 0) { history.push(curIndex); await hardPlay(j); }
-      else { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); } // queue drained → clear the progress bar
+      if (j >= 0 && _drainSkips < 4) {
+        if (!playedReal) _drainSkips++;
+        history.push(curIndex); await hardPlay(j);
+      } else if (j >= 0) {
+        playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback();
+        _drainSkips = 0;
+        flash("Playback keeps failing (stream errors) — stopped. Try again in a moment.");
+      } else { playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback(); rpcStop(trackByPath(queue[curIndex])); } // queue drained → clear the progress bar
     }
   }, 300);
 }

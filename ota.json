@@ -1,8 +1,8 @@
 {
-  "version": "0.22.6",
+  "version": "0.22.7",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Faster search (videos show instantly), and the Import window now opens on top of the sidebar."
+  "notes": "Fixes the 403 stream errors (auto re-resolves the URL) and the cascade where a failed track skipped through the whole library."
 }

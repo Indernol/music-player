@@ -173,18 +173,26 @@ async fn play_stream(
     cfg: State<'_, youtube::YtCfg>,
 ) -> Result<u64, String> {
     let url = resolve_stream_url(&yt, &cfg, &id).await?;
-    Ok(state.audio.play_url(url, gain))
+    Ok(state.audio.play_url(url, gain, Some(reresolver(&id))))
+}
+
+/// A callback the audio stream calls to get a FRESH URL when a connection 403s
+/// (the IP-bound googlevideo link went stale — constant on Android). Always
+/// re-resolves natively, bypassing the cache.
+fn reresolver(id: &str) -> crate::stream::ReResolve {
+    let id = id.to_string();
+    std::sync::Arc::new(move || tauri::async_runtime::block_on(ytnative::stream_url(&id)))
 }
 
 /// Play a direct audio URL (LAN device sharing streams remote files this way).
 #[tauri::command]
 fn play_direct(url: String, gain: f32, state: State<AppState>) -> u64 {
-    state.audio.play_url(url, gain)
+    state.audio.play_url(url, gain, None)
 }
 
 #[tauri::command]
 fn preload_direct(url: String, gain: f32, state: State<AppState>) {
-    state.audio.preload_url(url, gain);
+    state.audio.preload_url(url, gain, None);
 }
 
 #[tauri::command]
@@ -196,7 +204,7 @@ async fn preload_stream(
     cfg: State<'_, youtube::YtCfg>,
 ) -> Result<(), String> {
     let url = resolve_stream_url(&yt, &cfg, &id).await?;
-    state.audio.preload_url(url, gain);
+    state.audio.preload_url(url, gain, Some(reresolver(&id)));
     Ok(())
 }
 

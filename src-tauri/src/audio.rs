@@ -10,7 +10,7 @@
 //! Play/Preload/Clear need the (!Send) stream handle, so they go through the
 //! channel. Pause/resume/seek/volume/status act on the shared `Sink` directly.
 
-use crate::stream::HttpStream;
+use crate::stream::{HttpStream, ReResolve};
 use rodio::{Decoder, OutputStreamBuilder, Sink, Source};
 use serde::Serialize;
 use std::fs::File;
@@ -34,8 +34,8 @@ const AGC_MAX_GAIN: f32 = 1.8;
 enum AudioCmd {
     Play(String, f32, u64),    // path, linear gain, epoch — hard start (fresh sink)
     Preload(String, f32),      // path, linear gain — append for gapless continuation
-    PlayUrl(String, f32, u64), // remote stream URL, epoch — hard start (fresh sink)
-    PreloadUrl(String, f32),   // remote stream URL — append for gapless continuation
+    PlayUrl(String, f32, u64, Option<ReResolve>), // remote stream URL, epoch, re-resolver
+    PreloadUrl(String, f32, Option<ReResolve>),   // remote stream URL, re-resolver
     Clear(u64),                // stop everything (empty sink)
 }
 
@@ -96,10 +96,10 @@ fn append_track(sink: &Sink, path: &str, gain: f32, agc: bool, err: &Arc<Mutex<O
     }
 }
 
-fn append_url(sink: &Sink, url: &str, gain: f32, agc: bool, err: &Arc<Mutex<Option<String>>>) {
+fn append_url(sink: &Sink, url: &str, gain: f32, agc: bool, err: &Arc<Mutex<Option<String>>>, rr: Option<ReResolve>) {
     // byte_len is mandatory here: symphonia's isomp4 demuxer refuses to probe
     // YouTube's moov-after-mdat m4a files without knowing the total size.
-    match HttpStream::open(url.to_string()).and_then(|s| {
+    match HttpStream::open(url.to_string(), rr).and_then(|s| {
         let len = s.byte_len();
         Decoder::builder()
             .with_data(s)
@@ -253,17 +253,17 @@ impl AudioController {
                             append_track(&s, &path, gain, agc_on, &err_t);
                         }
                     }
-                    AudioCmd::PlayUrl(url, gain, epoch) => {
+                    AudioCmd::PlayUrl(url, gain, epoch, rr) => {
                         let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
                         new_sink.set_volume(*vol_t.lock().unwrap());
-                        append_url(&new_sink, &url, gain, agc_on, &err_t);
+                        append_url(&new_sink, &url, gain, agc_on, &err_t, rr);
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
                     }
-                    AudioCmd::PreloadUrl(url, gain) => {
+                    AudioCmd::PreloadUrl(url, gain, rr) => {
                         let s = sink_t.lock().unwrap().1.clone();
                         if let Some(s) = s {
-                            append_url(&s, &url, gain, agc_on, &err_t);
+                            append_url(&s, &url, gain, agc_on, &err_t, rr);
                         }
                     }
                     AudioCmd::Clear(epoch) => {
@@ -323,13 +323,13 @@ impl AudioController {
     pub fn preload(&self, path: String, gain: f32) {
         self.send(AudioCmd::Preload(path, gain));
     }
-    pub fn play_url(&self, url: String, gain: f32) -> u64 {
+    pub fn play_url(&self, url: String, gain: f32, rr: Option<ReResolve>) -> u64 {
         let e = self.bump_epoch();
-        self.send(AudioCmd::PlayUrl(url, gain, e));
+        self.send(AudioCmd::PlayUrl(url, gain, e, rr));
         e
     }
-    pub fn preload_url(&self, url: String, gain: f32) {
-        self.send(AudioCmd::PreloadUrl(url, gain));
+    pub fn preload_url(&self, url: String, gain: f32, rr: Option<ReResolve>) {
+        self.send(AudioCmd::PreloadUrl(url, gain, rr));
     }
     pub fn stop(&self) -> u64 {
         let e = self.bump_epoch();

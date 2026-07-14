@@ -12,6 +12,12 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Fetches a FRESH stream URL for the same track — called when a connection is
+/// rejected (403/302), which on Android happens constantly because googlevideo
+/// URLs are bound to the IP that resolved them and the phone's IPv6 privacy
+/// address rotates. Re-resolving gets a URL valid for the current address.
+pub type ReResolve = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
+
 const CAP: usize = 8 * 1024 * 1024; // read-ahead window
 const BACK: u64 = 256 * 1024; // kept behind the reader for small back-seeks
 const CHUNK: usize = 64 * 1024; // network read size
@@ -64,6 +70,30 @@ pub(crate) fn media_agent(url: &str) -> ureq::Agent {
     b.build()
 }
 
+/// Connect at `pos`; on failure (typically a 403 from a rotated IP) ask the
+/// re-resolver for a fresh URL and try once more, updating `url` in place so all
+/// later reads use the working link.
+fn connect_rr(
+    url: &mut String,
+    pos: u64,
+    rr: &Option<ReResolve>,
+) -> Result<(Box<dyn Read + Send>, Option<u64>), String> {
+    match connect(url, pos) {
+        Ok(x) => Ok(x),
+        Err(e) => {
+            if let Some(rr) = rr {
+                if let Ok(fresh) = rr() {
+                    if fresh != *url {
+                        *url = fresh;
+                    }
+                    return connect(url, pos);
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
 fn connect(url: &str, pos: u64) -> Result<(Box<dyn Read + Send>, Option<u64>), String> {
     let resp = media_agent(url)
         .get(url)
@@ -83,7 +113,7 @@ fn connect(url: &str, pos: u64) -> Result<(Box<dyn Read + Send>, Option<u64>), S
 }
 
 /// Downloads into the shared window, following the reader's position.
-fn fetcher(url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, initial: Box<dyn Read + Send>) {
+fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, initial: Box<dyn Read + Send>, rr: Option<ReResolve>) {
     let (lock, cv) = &*shared;
     let mut conn: Option<(Box<dyn Read + Send>, u64)> = Some((initial, 0)); // reader, absolute pos
     let mut tmp = vec![0u8; CHUNK];
@@ -127,7 +157,7 @@ fn fetcher(url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, initial
                 conn = None;
             }
             if conn.is_none() {
-                match connect(&url, from) {
+                match connect_rr(&mut url, from, &rr) {
                     Ok((r, _)) => conn = Some((r, from)),
                     Err(e) => {
                         if attempt == RETRIES {
@@ -179,8 +209,9 @@ impl HttpStream {
         self.len
     }
 
-    pub fn open(url: String) -> Result<Self, String> {
-        let (reader, total) = connect(&url, 0)?;
+    pub fn open(url: String, rr: Option<ReResolve>) -> Result<Self, String> {
+        let mut url = url;
+        let (reader, total) = connect_rr(&mut url, 0, &rr)?;
         let len = total.ok_or("server did not report a stream length")?;
         let shared = Arc::new((
             Mutex::new(Shared {
@@ -193,7 +224,7 @@ impl HttpStream {
             Condvar::new(),
         ));
         let sh = shared.clone();
-        thread::spawn(move || fetcher(url, len, sh, reader));
+        thread::spawn(move || fetcher(url, len, sh, reader, rr));
         Ok(HttpStream { len, pos: 0, shared })
     }
 }
