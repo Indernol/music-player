@@ -13,6 +13,11 @@ window.__MP_BOOTED__ = true;
 const T = window.__TAURI__;
 const IS_NATIVE = !!(T && T.core && typeof T.core.invoke === "function");
 const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
+// On a touch device a single tap should PLAY the row (like every mobile music
+// app) — the desktop "click selects, double-click plays" model makes a tap only
+// select, so users double-tap, the second tap lands on a neighbouring row, and
+// the wrong ("random") track plays with no obvious way to change it.
+const IS_TOUCH = IS_ANDROID || !!(window.matchMedia && matchMedia("(pointer: coarse)").matches);
 const ANDROID_MUSIC_DIR = "/storage/emulated/0/Music";
 function platformName() {
   if (IS_ANDROID) return "Android";
@@ -425,7 +430,11 @@ function wireTrackList() {
       return;
     }
     const row = e.target.closest(".track");
-    if (row) rowClick(e, Number(row.dataset.idx), row.dataset.path);
+    if (row) {
+      // Touch: tap plays immediately; long-press opens the context menu (below).
+      if (IS_TOUCH && !e.ctrlKey && !e.metaKey && !e.shiftKey) { playFrom(Number(row.dataset.idx)); return; }
+      rowClick(e, Number(row.dataset.idx), row.dataset.path);
+    }
   });
   host.addEventListener("dblclick", (e) => {
     if (e.target.closest("[data-more]")) return;

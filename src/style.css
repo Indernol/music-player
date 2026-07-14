@@ -325,6 +325,9 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 .track.playing .tk-idx::after { content: "●"; position: absolute; left: -9px; color: var(--accent); font-size: 8px; }
 .album { font-size: 13px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .art { width: 40px; height: 40px; border-radius: 6px; display: grid; place-items: center; font-weight: 800; font-size: 16px; color: rgba(255,255,255,.92); overflow: hidden; }
+/* With a cover image, fill the box (YouTube thumbs are 320×180 — without this
+   they render at native size and only a corner shows). Mirrors .yc-thumb. */
+.art.has-cover { background-size: cover; background-position: center; background-repeat: no-repeat; color: transparent; font-size: 0; }
 .meta { min-width: 0; }
 .meta .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta .s { font-size: 12px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -922,8 +925,11 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .track, .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 52px 28px; }
   .track .album, .list-head .lh-album { display: none; }
   .count { display: none; }
-  .player-main { grid-template-columns: auto 1fr auto; gap: 8px; }
-  .volume input#volume { width: 64px; }
+  /* minmax(0,...) lets the side cells shrink below their content so the track
+     title ellipsises instead of the "now playing" cell growing and overlapping
+     the centred transport controls (the shuffle-over-artwork bug). */
+  .player-main { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; }
+  .volume input#volume { width: 56px; }
   body.np-docked.np-open .app { margin-right: 0; }
   .np-drawer { width: min(var(--np-w, 330px), 96vw); }
   .tracklist.yt-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }

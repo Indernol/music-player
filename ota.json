@@ -1,8 +1,8 @@
 {
-  "version": "0.22.2",
+  "version": "0.22.3",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "OTA update system: the app now hot-updates its interface from the repo without a reinstall."
+  "notes": "Thumbnails in list view, tap-to-play on mobile, and a fixed player bar layout."
 }
