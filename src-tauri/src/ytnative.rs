@@ -12,7 +12,8 @@ use rustypipe::client::RustyPipe;
 use rustypipe::model::{ChannelItem, PlaylistItem, VideoItem};
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 
 static STORAGE: OnceLock<PathBuf> = OnceLock::new();
@@ -477,25 +478,123 @@ fn best_stream_url(player: &rustypipe::model::VideoPlayer) -> Result<String, Str
         .ok_or_else(|| "no AAC/mp4 stream available for this video".into())
 }
 
-/// Best playable stream URL, VALIDATED. rodio/symphonia decodes AAC-in-mp4 only.
-/// googlevideo URLs are IP-bound and on Android the source IP rotates, so a URL
-/// can 403 seconds after being resolved — validate with a tiny range request and
-/// re-resolve up to 3× so the URL handed to the player is known-good.
-pub async fn stream_url(id: &str) -> Result<String, String> {
-    let mut last = String::new();
-    for _ in 0..3 {
-        let player = match rp()?.query().player(id).await { Ok(p) => p, Err(e) => { last = es(e); continue; } };
-        let url = best_stream_url(&player)?;
-        // Cheap validation fetch (first bytes): confirms the URL is live now.
-        match crate::stream::media_agent(&url).get(&url).set("User-Agent", crate::stream::YT_UA).set("Range", "bytes=0-1").call() {
-            Ok(_) => return Ok(url),
-            Err(ureq::Error::Status(403, _)) => { last = "403 (IP-bound URL, re-resolving)".into(); continue; }
-            // Any other status (206/200/416…) means the URL is reachable — use it.
-            Err(ureq::Error::Status(_, _)) => return Ok(url),
-            Err(e) => { last = format!("{e}"); continue; }
+// ─── ANDROID_VR stream resolution ───────────────────────────────────────────
+// As of 2025+, YouTube gates stream URLs behind PO tokens (BotGuard) and JS
+// signature descrambling for every client rustypipe supports (Desktop/Ios/Tv →
+// 403 or broken deobfuscation), which is why streaming AND downloading died. The
+// ANDROID_VR (Oculus Quest) client is the one that still returns DIRECTLY
+// fetchable URLs — no JS runtime, no signature, no PO token. So we call the
+// Innertube player endpoint ourselves for stream + download resolution. (Search,
+// playlists and channels still go through rustypipe, which works for those.)
+/// Must match crate::stream::YT_UA (the fetch UA).
+pub const VR_UA: &str = "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12L; en_US; Quest 3 Build/SQ3A.220605.009.A1) gzip";
+const VR_VERSION: &str = "1.62.27";
+
+// visitorData is REQUIRED — without it the player returns LOGIN_REQUIRED. Cached.
+static VISITOR: OnceLock<Mutex<Option<(Instant, String)>>> = OnceLock::new();
+
+fn visitor_data() -> Result<String, String> {
+    let cell = VISITOR.get_or_init(|| Mutex::new(None));
+    if let Some((at, vd)) = cell.lock().unwrap().as_ref() {
+        if at.elapsed() < Duration::from_secs(3 * 3600) {
+            return Ok(vd.clone());
         }
     }
-    Err(format!("stream unavailable: {last}"))
+    let html = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .get("https://www.youtube.com/")
+        .set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
+        .set("Accept-Language", "en")
+        .call()
+        .map_err(es)?
+        .into_string()
+        .map_err(es)?;
+    let vd = html
+        .split_once("\"visitorData\":\"")
+        .and_then(|(_, r)| r.split_once('"'))
+        .map(|(v, _)| v.to_string())
+        .ok_or("could not obtain visitorData")?;
+    *cell.lock().unwrap() = Some((Instant::now(), vd.clone()));
+    Ok(vd)
+}
+
+/// Raw Innertube player response via the ANDROID_VR client.
+fn vr_player(id: &str) -> Result<serde_json::Value, String> {
+    let vd = visitor_data()?;
+    let body = serde_json::json!({
+        "context": { "client": {
+            "clientName": "ANDROID_VR", "clientVersion": VR_VERSION,
+            "deviceMake": "Oculus", "deviceModel": "Quest 3", "androidSdkVersion": 32,
+            "osName": "Android", "osVersion": "12L", "hl": "en", "gl": "US",
+            "visitorData": vd,
+        }},
+        "videoId": id, "contentCheckOk": true, "racyCheckOk": true,
+    });
+    let v: serde_json::Value = crate::stream::media_agent("https://www.youtube.com/youtubei/v1/player")
+        .post("https://www.youtube.com/youtubei/v1/player")
+        .set("User-Agent", VR_UA)
+        .set("X-YouTube-Client-Name", "28")
+        .set("X-YouTube-Client-Version", VR_VERSION)
+        .set("X-Goog-Visitor-Id", &vd)
+        .send_json(body)
+        .map_err(es)?
+        .into_json()
+        .map_err(es)?;
+    let status = v["playabilityStatus"]["status"].as_str().unwrap_or("");
+    if status != "OK" {
+        let reason = v["playabilityStatus"]["reason"]
+            .as_str()
+            .or_else(|| v["playabilityStatus"]["errorScreen"]["playerErrorMessageRenderer"]["reason"]["simpleText"].as_str())
+            .unwrap_or(status);
+        return Err(format!("unplayable: {reason}"));
+    }
+    Ok(v)
+}
+
+/// Highest-bitrate directly-fetchable AAC/mp4 audio URL from a VR player payload.
+fn vr_audio_url(v: &serde_json::Value, max_kbps: Option<u64>) -> Result<String, String> {
+    let fmts = v["streamingData"]["adaptiveFormats"]
+        .as_array()
+        .ok_or("no adaptiveFormats")?;
+    let mut auds: Vec<&serde_json::Value> = fmts
+        .iter()
+        .filter(|f| {
+            f["mimeType"].as_str().map(|m| m.contains("audio/mp4")).unwrap_or(false)
+                && f["url"].as_str().is_some()
+        })
+        .collect();
+    if auds.is_empty() {
+        return Err("no audio/mp4 stream".into());
+    }
+    auds.sort_by_key(|f| f["bitrate"].as_u64().unwrap_or(0));
+    let pick = match max_kbps {
+        // closest at or below the cap, else the lowest available
+        Some(cap) => auds
+            .iter()
+            .rev()
+            .find(|f| f["bitrate"].as_u64().unwrap_or(0) <= cap * 1000)
+            .or_else(|| auds.first())
+            .copied(),
+        None => auds.last().copied(),
+    };
+    pick.and_then(|f| f["url"].as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "no audio/mp4 stream".into())
+}
+
+fn vr_title_artist(v: &serde_json::Value, id: &str) -> (String, String) {
+    let d = &v["videoDetails"];
+    (
+        d["title"].as_str().filter(|s| !s.is_empty()).unwrap_or(&format!("YouTube {id}")).to_string(),
+        d["author"].as_str().unwrap_or_default().to_string(),
+    )
+}
+
+/// Best playable stream URL via the ANDROID_VR client (directly fetchable).
+pub async fn stream_url(id: &str) -> Result<String, String> {
+    let v = vr_player(id)?;
+    vr_audio_url(&v, None)
 }
 
 fn safe_filename(s: &str) -> String {
@@ -523,27 +622,26 @@ pub async fn download(
     dir: &str,
     quality: &str,
 ) -> Result<String, String> {
-    let mut player = rp()?.query().player(id).await.map_err(es)?;
-    let title = player.details.name.clone().unwrap_or_else(|| format!("YouTube {id}"));
-    let artist = player.details.channel_name.clone().unwrap_or_default();
+    let mut vp = vr_player(id)?;
+    let (title, artist) = vr_title_artist(&vp, id);
+    let max_kbps = if quality == "best" || quality.is_empty() { None } else { quality.parse::<u64>().ok() };
 
     let path = format!("{dir}/{} [{id}].m4a", safe_filename(&title));
     let part = format!("{path}.part");
     dls.canceled.lock().unwrap().remove(id);
 
-    // googlevideo URLs are pinned to the IP that resolved them; on Android the
-    // (IPv6 privacy) source address rotates, so a URL resolved a moment ago can
-    // 403. Re-resolve a fresh player + URL and retry a few times.
+    // A stream URL can occasionally 403 (expired) — re-resolve a fresh player +
+    // URL and retry a few times.
     let mut resp = None;
     let mut last = String::new();
     for attempt in 0..3 {
         if attempt > 0 {
-            player = match rp()?.query().player(id).await { Ok(p) => p, Err(e) => { last = es(e); continue; } };
+            vp = match vr_player(id) { Ok(p) => p, Err(e) => { last = e; continue; } };
         }
-        let url = pick_download_url(&player, quality)?;
+        let url = vr_audio_url(&vp, max_kbps)?;
         match crate::stream::media_agent(&url).get(&url).set("User-Agent", crate::stream::YT_UA).call() {
             Ok(r) => { resp = Some(r); break; }
-            Err(ureq::Error::Status(403, _)) => { last = "403 (stream URL expired/IP-bound)".into(); continue; }
+            Err(ureq::Error::Status(403, _)) => { last = "403 (stream URL expired)".into(); continue; }
             Err(e) => { last = format!("{e}"); continue; }
         }
     }
