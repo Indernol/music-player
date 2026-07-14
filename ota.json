@@ -1,8 +1,8 @@
 {
-  "version": "0.22.21",
+  "version": "0.22.22",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Song covers finally render on old WebViews (real thumb height, no padding hack) + channel card no longer overlaps on phones + mixed OTA bundles self-heal."
+  "notes": "Video covers use the same proven recipe as playlist covers, phones show search results as a list by default, and the results page can no longer pan sideways."
 }

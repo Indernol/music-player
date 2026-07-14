@@ -75,7 +75,8 @@ const DEFAULTS = {
   uiNpOpen: false,       // Up-next panel open (restored at launch)
   sideW: 268,            // sidebar width (px) — drag the handle on its right edge
   npW: 330,              // Now-playing panel width (px) — drag its left edge
-  ytView: "grid",        // YouTube results: grid (mini-YouTube cards) | list
+  ytView: "grid",        // YouTube results on desktop: grid (mini-YouTube cards) | list
+  ytViewTouch: "list",   // YouTube results on phones/touch: rows read better + 40px covers
   ytIncludeVideos: true, // search bar returns YouTube videos
   ytIncludePlaylists: true, // search bar also returns YouTube playlists
   playlistPreviewCount: 25, // tracks shown in the playlist detail window (1..200)

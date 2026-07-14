@@ -20,9 +20,14 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.21";
-if (IS_NATIVE && window.__MP_OTA__ && window.__MP_OTA__ !== SRC_VERSION) {
-  const k = "mpOtaHealed:" + window.__MP_OTA__;
+const SRC_VERSION = "0.22.22";
+// style.css carries a "MP_CSS <version>" marker: modules and css are fetched
+// separately by ota_apply, so the CSS alone can be a stale cached copy (the
+// version-const check above can't see that).
+const _otaCss = document.getElementById("otaCss");
+const _cssStale = !!_otaCss && _otaCss.textContent.indexOf("MP_CSS " + SRC_VERSION) < 0;
+if (IS_NATIVE && window.__MP_OTA__ && (window.__MP_OTA__ !== SRC_VERSION || _cssStale)) {
+  const k = "mpOtaHealed:" + window.__MP_OTA__ + ":" + SRC_VERSION;
   if (!sessionStorage.getItem(k)) {
     sessionStorage.setItem(k, "1");
     T.core.invoke("ota_rollback")
@@ -167,7 +172,9 @@ function setArtImg(el, url) {
 }
 function setArtPlaceholder(el, t) { el.classList.remove("has-cover"); el.style.backgroundImage = ""; el.style.background = artColor(t.artist + t.album); el.textContent = artInitial(t); el.dataset.album = albumKey(t); }
 function artCell(t) {
-  if (t.thumbnail && S().showArt) return `<div class="art has-cover"><img class="art-img" data-net="${esc(t.thumbnail)}" alt=""></div>`;
+  // Background on a fixed-size box — the ONE recipe confirmed to render on the
+  // user's old WebView (playlist covers). <img> inside these boxes did not.
+  if (t.thumbnail && S().showArt) return `<div class="art has-cover" style="background-image:url('${esc(t.thumbnail)}')"></div>`;
   const k = albumKey(t);
   const cov = S().showArt ? coverCache.get(k) : "";
   if (cov) return `<div class="art has-cover" data-album="${esc(k)}" style="background-image:url('${cov}')"></div>`;
@@ -257,8 +264,10 @@ function proxyCovers(root) {
     else el.src = src;
   });
   if (!IS_ANDROID) return;
-  // background-image covers (playlists, artist avatar, now-playing, download rows).
-  scope.querySelectorAll(".art.has-cover, .pc-thumb, .ac-avatar, .pd-cover, .pd-thumb, .np-art.has-cover, .ov-art.has-cover, .dl-cover.has-cover").forEach(el => {
+  // background-image covers (songs, videos, playlists, artist avatar,
+  // now-playing, download rows) — all fixed-height boxes, the recipe that
+  // provably paints on the old WebView.
+  scope.querySelectorAll(".art.has-cover, .yc-thumb, .pc-thumb, .ac-avatar, .pd-cover, .pd-thumb, .np-art.has-cover, .ov-art.has-cover, .dl-cover.has-cover").forEach(el => {
     const m = String(el.style.backgroundImage || "").match(/url\(['"]?(https:\/\/[^'")]+)['"]?\)/);
     if (!m || el.dataset.proxied === m[1]) return;
     const src = m[1];
@@ -1062,6 +1071,10 @@ let onlineQuery = "";
 let ytPage = 0, ytHasMore = false;
 // Artist/channel header card shown on the first page of a search.
 let ytArtist = null, ytArtistMode = "videos", ytArtistPls = [];
+// Phones default to the row list (readable 2-line titles, 40px covers — the
+// box recipe that renders everywhere); desktop keeps the card grid. Separate
+// keys so each device class remembers its own explicit toggle.
+function ytViewMode() { return IS_TOUCH ? (S().ytViewTouch || "list") : (S().ytView || "grid"); }
 function renderOnlineResults() {
   active = { type: "online", id: onlineQuery };
   markActive();
@@ -1083,8 +1096,8 @@ function renderOnlineResults() {
         (owned.length ? ` · ${owned.length} already in your library` : ""),
     actions: plMode ? "" :
       `<div class="yt-viewtog">
-        <button id="ytGridBtn" class="btn-line sm ${(S().ytView || "grid") === "grid" ? "ac-on" : ""}" title="Card view (mini YouTube)">▦</button>
-        <button id="ytListBtn" class="btn-line sm ${(S().ytView || "grid") === "list" ? "ac-on" : ""}" title="List view">≡</button>
+        <button id="ytGridBtn" class="btn-line sm ${ytViewMode() === "grid" ? "ac-on" : ""}" title="Card view (mini YouTube)">▦</button>
+        <button id="ytListBtn" class="btn-line sm ${ytViewMode() === "list" ? "ac-on" : ""}" title="List view">≡</button>
       </div>` +
       `<label class="yt-inc"><input type="checkbox" id="ytIncVid" ${wantVideos ? "checked" : ""}> Videos</label>` +
       `<label class="yt-inc"><input type="checkbox" id="ytIncPl" ${wantPlaylists ? "checked" : ""}> Playlists</label>` +
@@ -1104,11 +1117,11 @@ function renderOnlineResults() {
   });
   $("#ytPrev")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage - 1));
   $("#ytNext")?.addEventListener("click", () => searchOnline(onlineQuery, ytPage + 1));
-  $("#ytGridBtn")?.addEventListener("click", () => { SETTINGS.setSetting("ytView", "grid"); renderOnlineResults(); });
-  $("#ytListBtn")?.addEventListener("click", () => { SETTINGS.setSetting("ytView", "list"); renderOnlineResults(); });
+  $("#ytGridBtn")?.addEventListener("click", () => { SETTINGS.setSetting(IS_TOUCH ? "ytViewTouch" : "ytView", "grid"); renderOnlineResults(); });
+  $("#ytListBtn")?.addEventListener("click", () => { SETTINGS.setSetting(IS_TOUCH ? "ytViewTouch" : "ytView", "list"); renderOnlineResults(); });
   if (plMode) {
     renderArtistPlaylists();
-  } else if ((S().ytView || "grid") === "grid") {
+  } else if (ytViewMode() === "grid") {
     renderYtGrid(sortTracks([...fresh]), sortTracks([...owned]), pls);
   } else {
     renderTracks([...sortTracks([...fresh]), ...sortTracks([...owned])], true);
@@ -1158,8 +1171,7 @@ function renderYtGrid(fresh, owned, playlists = []) {
   const card = (t, i, own) => {
     const vs = fmtViews(t.views);
     return `<div class="track yt-card ${nowPath === t.path ? "playing" : ""} ${own ? "owned" : ""} ${selected.has(t.path) ? "selected" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
-      <div class="yc-thumb">
-        ${t.thumbnail ? `<img class="yc-img" data-net="${esc(t.thumbnail)}" alt="">` : ""}
+      <div class="yc-thumb"${t.thumbnail ? ` style="background-image:url('${esc(t.thumbnail)}')"` : ""}>
         <span class="yc-dur">${fmtDur(t.duration_secs)}</span>
         ${own ? `<span class="yc-own" title="Already in your library">${IC.check}</span>` : ""}
         <button class="yc-play" data-play="${i}" title="Play now">${IC.play}</button>
@@ -1666,9 +1678,10 @@ async function impFetch() {
     $("#impStatus").textContent = `“${res.title}” — ${impTracks.length} tracks. Untick what you don't want.`;
     $("#impList").innerHTML = impTracks.map((t, i) =>
       `<label class="imp-item"><input type="checkbox" data-imp="${i}" checked>
-        <img src="${esc(t.thumbnail)}" alt="" loading="lazy">
+        <img data-net="${esc(t.thumbnail)}" alt="" loading="lazy">
         <span class="imp-meta"><span class="t">${esc(t.title)}</span><span class="s">${esc(t.artist)}${t.duration_secs ? " · " + fmtDur(t.duration_secs) : ""}</span></span>
       </label>`).join("");
+    proxyCovers($("#impList")); // raw network <img> never loads on Android
     const pls = PL.getPlaylists();
     $("#impDest").innerHTML =
       `<option value="__new">New playlist — “${esc(res.title)}”</option>` +
