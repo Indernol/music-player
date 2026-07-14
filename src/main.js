@@ -13,6 +13,24 @@ window.__MP_BOOTED__ = true;
 const T = window.__TAURI__;
 const IS_NATIVE = !!(T && T.core && typeof T.core.invoke === "function");
 const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
+
+// Must match ota.json "version" — bump both together on every OTA release.
+// raw.githubusercontent edge-caches files ~5 min, so ota_apply can pair a fresh
+// manifest with STALE module files: the app then reports the new version while
+// running old code (and "check update" says up-to-date forever — exactly the
+// "covers still broken after updating" trap). Detect the mismatch and re-apply
+// from scratch, once per version, so a mixed bundle always heals itself.
+const SRC_VERSION = "0.22.21";
+if (IS_NATIVE && window.__MP_OTA__ && window.__MP_OTA__ !== SRC_VERSION) {
+  const k = "mpOtaHealed:" + window.__MP_OTA__;
+  if (!sessionStorage.getItem(k)) {
+    sessionStorage.setItem(k, "1");
+    T.core.invoke("ota_rollback")
+      .then(() => T.core.invoke("ota_apply"))
+      .catch(() => {})
+      .then(() => location.reload());
+  }
+}
 // On a touch device a single tap should PLAY the row (like every mobile music
 // app) — the desktop "click selects, double-click plays" model makes a tap only
 // select, so users double-tap, the second tap lands on a neighbouring row, and
@@ -197,15 +215,30 @@ function refreshView() { if (active.type === "source") openSource(active.id); el
 // (which DO render, like local covers). Desktop loads them natively → no-op.
 const _netThumb = new Map();
 async function netThumb(url) {
-  // i.ytimg serves WebP when the ?sqp=… params are present, and the Android
-  // WebView renders JPEG data: URLs but NOT WebP ones — so drop the query to get
-  // the plain .jpg (that's why local JPEG covers showed but YouTube ones didn't).
-  const clean = /i\.ytimg\.com\/vi\//.test(url) ? url.split("?")[0] : url;
+  // i.ytimg serves WebP when the ?sqp=… params are present (and always on the
+  // /vi_webp/ path), and the Android WebView renders JPEG data: URLs but NOT
+  // WebP ones — so normalise to the plain /vi/….jpg (that's why local JPEG
+  // covers showed but YouTube ones didn't).
+  const clean = /i\.ytimg\.com\/vi(_webp)?\//.test(url)
+    ? url.split("?")[0].replace("/vi_webp/", "/vi/").replace(/\.webp$/, ".jpg")
+    : url;
   const c = _netThumb.get(clean);
   if (c) return c;
-  const d = await invoke("net_image", { url: clean });
-  _netThumb.set(clean, d);
-  return d;
+  try {
+    const d = await invoke("net_image", { url: clean });
+    _netThumb.set(clean, d);
+    return d;
+  } catch (e) {
+    // hq720.jpg only exists for HD uploads (404 otherwise) — mqdefault.jpg
+    // exists for every video, 320×180, plenty for the card grids.
+    const m = clean.match(/i\.ytimg\.com\/vi\/([\w-]{11})\//);
+    if (!m) throw e;
+    const fb = `https://i.ytimg.com/vi/${m[1]}/mqdefault.jpg`;
+    if (fb === clean) throw e;
+    const d = await invoke("net_image", { url: fb });
+    _netThumb.set(clean, d);
+    return d;
+  }
 }
 function proxyCovers(root) {
   const scope = root || document;
@@ -217,7 +250,10 @@ function proxyCovers(root) {
     const src = el.dataset.net;
     if (!src || el.dataset.done === src) return;
     el.dataset.done = src;
-    if (IS_ANDROID && /^https?:\/\//.test(src)) netThumb(src).then(d => { el.src = d; }).catch(() => { el.dataset.done = ""; });
+    // Last resort when the proxy fails (offline burst, unknown host): point the
+    // <img> at the network URL directly — some WebViews do load plain <img>
+    // sources even though they refuse background-images.
+    if (IS_ANDROID && /^https?:\/\//.test(src)) netThumb(src).then(d => { el.src = d; }).catch(() => { el.src = src; });
     else el.src = src;
   });
   if (!IS_ANDROID) return;

@@ -118,7 +118,7 @@ body.rs-dragging .rs-handle { background: var(--vio-glow); box-shadow: inset 0 0
 .ac-avatar { width: 60px; height: 60px; border-radius: 50%; flex-shrink: 0; background: var(--bg-4) center/cover no-repeat; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
 .ac-meta { flex: 1; min-width: 0; }
 .ac-name { font-size: 19px; font-weight: 700; color: var(--tx-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ac-sub { font-size: 12px; color: var(--tx-3); }
+.ac-sub { font-size: 12px; color: var(--tx-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ac-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .ac-actions .ac-on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ac-pl { display: flex; align-items: baseline; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; }
@@ -269,13 +269,18 @@ body.bg-light.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(255,255,255,.7); }
 .yt-grid .yt-card.playing .yc-title { color: var(--accent-2); }
 .yt-grid .yt-card.owned { opacity: .75; }
 .yc-thumb {
-  /* Reserve a fixed 16:9 box (padding-ratio, so the card height is stable BEFORE
-     the image loads → no reflow/jump, every card identical → even columns). The
-     <img> is absolutely positioned to fill it (renders on every engine, unlike a
-     ratio-box background which the old Android WebView won't paint). */
-  position: relative; height: 0; padding-bottom: 56.25%; border-radius: 9px; overflow: hidden; background: var(--bg-3);
+  /* A REAL height, never the height:0 + padding-bottom ratio hack: the old
+     Android WebView renders NOTHING over the padding zone — not the background
+     AND not the absolutely-positioned children (that's why the covers stayed
+     invisible even after they became real <img> tags, and why the duration
+     badge never showed). Old engines get a fixed ~16:9 fallback; anything that
+     understands aspect-ratio gets the exact ratio. */
+  position: relative; height: 118px; border-radius: 9px; overflow: hidden; background: var(--bg-3);
 }
-.yc-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+@supports (aspect-ratio: 16/9) { .yc-thumb { height: auto; aspect-ratio: 16/9; } }
+/* Explicit offsets, not the inset shorthand — the old Android WebView (< 87)
+   ignores inset, which would leave these unpinned. Same for the rules below. */
+.yc-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
 .art-img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .yc-dur {
   position: absolute; right: 6px; bottom: 6px; padding: 1px 5px; border-radius: 5px;
@@ -288,7 +293,7 @@ body.bg-light.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(255,255,255,.7); }
 }
 .yc-own svg { width: 13px; height: 13px; }
 .yc-play {
-  position: absolute; inset: 0; margin: auto; width: 44px; height: 44px; border-radius: 50%;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; margin: auto; width: 44px; height: 44px; border-radius: 50%;
   border: none; background: rgba(0, 0, 0, .68); color: #fff; display: grid; place-items: center;
   opacity: 0; transform: scale(.9); transition: opacity .14s, transform .14s; cursor: pointer;
 }
@@ -387,7 +392,7 @@ body.paused .track.playing { box-shadow: inset 0 0 0 1.5px var(--bd-2); }
 /* ─── Settings modal ─── */
 /* Above the mobile sidebar drawer (z-index 119) so a modal opened from a sidebar
    button (Import…) sits ON TOP of it instead of behind it. */
-.modal-backdrop { position: fixed; inset: 0; z-index: 122; background: rgba(0,0,0,.6); display: grid; place-items: center; overscroll-behavior: contain; }
+.modal-backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 122; background: rgba(0,0,0,.6); display: grid; place-items: center; overscroll-behavior: contain; }
 #cookieModal { z-index: 124; }
 /* Only the body scrolls — the header stays put and the scrollbar is clipped
    inside the rounded corners (no bar cutting across the header / top corner). */
@@ -414,7 +419,7 @@ body.bg-light.has-bg .set-nav { background: rgba(0, 0, 0, .02); }
      centering — a centered item that's even 1px wider than the viewport gets
      its LEFT edge clipped and unreachable (the bug that cut "YOUTUBE"→"UTUBE").
      inset:0 pins all four edges so there is no horizontal overflow at all. */
-  .modal.settings { position: fixed; inset: 0; width: auto; max-width: none; height: auto; max-height: none; border-radius: 0; overflow: hidden; }
+  .modal.settings { position: fixed; top: 0; right: 0; bottom: 0; left: 0; width: auto; max-width: none; height: auto; max-height: none; border-radius: 0; overflow: hidden; }
   .modal.settings .modal-head { padding-top: calc(12px + var(--safe-top)); }
   .modal.settings .modal-body { flex-direction: column; min-width: 0; overflow-x: hidden; }
   .set-nav { flex: 0 0 auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--bd); }
@@ -458,7 +463,7 @@ body.has-bg .num-in { background: rgba(255,255,255,.08); border-color: rgba(255,
 
 /* ─── Custom background (image + blur + dim) & translucent panels ─── */
 body::before {
-  content: ""; position: fixed; inset: -60px; z-index: -1; pointer-events: none;
+  content: ""; position: fixed; top: -60px; right: -60px; bottom: -60px; left: -60px; z-index: -1; pointer-events: none;
   background: var(--app-bg-image, none) center / cover no-repeat;
   filter: blur(var(--app-bg-blur, 18px)) brightness(calc(1 - var(--app-bg-dim, 45) / 100));
   /* Promote to its own GPU layer so the (static) blur is cached as a texture and
@@ -583,10 +588,13 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 }
 .np-head { display: flex; align-items: center; justify-content: space-between; }
 .ov-art {
-  /* padding-bottom square (aspect-ratio unsupported on the old WebView). */
-  width: 100%; height: 0; padding-bottom: 100%; border-radius: 12px; flex-shrink: 0;
+  /* Real height (see .yc-thumb: the padding-bottom ratio hack paints nothing
+     on the old WebView). Fixed near-square fallback, exact square via
+     @supports on modern engines. */
+  width: 100%; height: 272px; border-radius: 12px; flex-shrink: 0;
   background: var(--bg-3) center / cover no-repeat; overflow: hidden;
 }
+@supports (aspect-ratio: 1) { .ov-art { height: auto; aspect-ratio: 1; } }
 /* Big artwork: contain (not crop) on black — YouTube thumbnails are letterboxed
    16:9, cover made them look off-center; contain shows the full art, centered. */
 .ov-art.has-cover { background-size: contain !important; background-repeat: no-repeat !important; background-position: center !important; background-color: #000 !important; color: transparent; }
@@ -911,7 +919,7 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
 .topbar { padding-top: calc(var(--topbar-pad, 13px) + var(--safe-top)); }
 .app { padding-left: calc(8px + var(--safe-left)); padding-right: calc(8px + var(--safe-right)); }
 .player { margin-bottom: calc(8px + var(--safe-bottom)); }
-.side-backdrop { position: fixed; inset: 0; z-index: 118; background: rgba(0,0,0,.5); }
+.side-backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 118; background: rgba(0,0,0,.5); }
 
 /* Share over WiFi modal */
 .modal.share { width: min(460px, 94vw); }
@@ -956,9 +964,28 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .np-drawer { width: min(var(--np-w, 330px), 96vw); }
   /* Explicit columns (no auto-fill guesswork on older WebViews): always 2-up. */
   .tracklist.yt-grid { grid-template-columns: 1fr 1fr; }
+  /* Old-engine fallback height matched to the 2-up card width (card ≈
+     (100vw − paddings − gap) / 2, thumb = card − 2×8px padding, ×9/16).
+     Engines with aspect-ratio keep the exact 16:9 from the base rule. */
+  .yc-thumb { height: calc((50vw - 46px) * 0.5625); }
+  @supports (aspect-ratio: 16/9) { .yc-thumb { height: auto; } }
   .pl-card-grid { grid-template-columns: 1fr; }
   /* The results toolbar (view toggle, Videos/Playlists, Prev/Next) had
      flex-shrink:0 and clipped off the right edge — full line + wrap instead. */
   .vh-actions { flex-basis: 100%; margin-left: 0; }
+  /* One-line ellipsis left "Searching “x” — page 1… (you can ke…": let the
+     header subtitle wrap (2 lines max worth of useful text) on phones. */
+  .vh-sub { white-space: normal; max-width: none; }
+  /* Channel header card: the action buttons have a fixed min content width, so
+     in a flex row they crushed .ac-meta to 0px — the name vanished and the
+     un-clipped "YouTube channel" line overflowed straight under the buttons.
+     Stack instead: avatar + name on the first row, buttons on their own row.
+     Margins, not flex gap (old WebViews don't do gap in flexbox). */
+  .artist-card { flex-wrap: wrap; gap: 0; }
+  .ac-avatar { width: 48px; height: 48px; }
+  .ac-meta { flex: 1 1 0; margin-left: 12px; }
+  .ac-name { font-size: 17px; }
+  .ac-actions { flex: 1 1 100%; justify-content: flex-start; gap: 0; margin-top: 6px; }
+  .ac-actions .btn-line { margin: 6px 8px 0 0; }
   .dl-head { flex-wrap: wrap; row-gap: 6px; }
 }

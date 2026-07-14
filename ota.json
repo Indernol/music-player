@@ -1,8 +1,8 @@
 {
-  "version": "0.22.20",
+  "version": "0.22.21",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Search grid: every card is a fixed 16:9 so columns line up and the layout no longer jumps while thumbnails load."
+  "notes": "Song covers finally render on old WebViews (real thumb height, no padding hack) + channel card no longer overlaps on phones + mixed OTA bundles self-heal."
 }

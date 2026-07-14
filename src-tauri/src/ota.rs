@@ -173,7 +173,11 @@ pub async fn ota_apply(app: tauri::AppHandle) -> Result<String, String> {
         wanted.push(h.clone());
     }
     for name in &wanted {
-        let body = get_text(&format!("{RAW_BASE}/src/{name}"))?;
+        // raw.githubusercontent edge-caches ~5 min and the cache key includes the
+        // query string: pinning the manifest version busts the cache, so a fresh
+        // manifest can never be paired with stale module files (a mixed bundle
+        // reports the new version while running old code).
+        let body = get_text(&format!("{RAW_BASE}/src/{name}?ota={}", m.version))?;
         if body.trim().is_empty() {
             return Err(format!("empty file: {name}"));
         }
