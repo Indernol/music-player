@@ -42,11 +42,12 @@ fn rp() -> Result<&'static RustyPipe, String> {
     let cb = reqwest::ClientBuilder::new();
     #[cfg(target_os = "android")]
     let cb = cb.local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+    // NB: do NOT set a custom user_agent here — rustypipe needs its own per-client
+    // UAs to scrape search/browse (an Oculus VR UA makes it fail to find
+    // visitorData and panic → infinite empty search). The VR client UA is used
+    // ONLY for the media fetch + our own ANDROID_VR player call.
     let client = RustyPipe::builder()
         .storage_dir(dir)
-        // Same UA the media fetch uses (crate::stream::YT_UA) so googlevideo sees
-        // one identity for resolve + fetch — a mismatch is a 403.
-        .user_agent(crate::stream::YT_UA)
         .build_with_client(cb)
         .map_err(|e| format!("native yt client: {e}"))?;
     let _ = RP.set(client);
