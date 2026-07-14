@@ -43,6 +43,9 @@ fn rp() -> Result<&'static RustyPipe, String> {
     let cb = cb.local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
     let client = RustyPipe::builder()
         .storage_dir(dir)
+        // Same UA the media fetch uses (crate::stream::YT_UA) so googlevideo sees
+        // one identity for resolve + fetch — a mismatch is a 403.
+        .user_agent(crate::stream::YT_UA)
         .build_with_client(cb)
         .map_err(|e| format!("native yt client: {e}"))?;
     let _ = RP.set(client);
@@ -484,7 +487,7 @@ pub async fn stream_url(id: &str) -> Result<String, String> {
         let player = match rp()?.query().player(id).await { Ok(p) => p, Err(e) => { last = es(e); continue; } };
         let url = best_stream_url(&player)?;
         // Cheap validation fetch (first bytes): confirms the URL is live now.
-        match crate::stream::media_agent(&url).get(&url).set("Range", "bytes=0-1").call() {
+        match crate::stream::media_agent(&url).get(&url).set("User-Agent", crate::stream::YT_UA).set("Range", "bytes=0-1").call() {
             Ok(_) => return Ok(url),
             Err(ureq::Error::Status(403, _)) => { last = "403 (IP-bound URL, re-resolving)".into(); continue; }
             // Any other status (206/200/416…) means the URL is reachable — use it.
@@ -538,7 +541,7 @@ pub async fn download(
             player = match rp()?.query().player(id).await { Ok(p) => p, Err(e) => { last = es(e); continue; } };
         }
         let url = pick_download_url(&player, quality)?;
-        match crate::stream::media_agent(&url).get(&url).call() {
+        match crate::stream::media_agent(&url).get(&url).set("User-Agent", crate::stream::YT_UA).call() {
             Ok(r) => { resp = Some(r); break; }
             Err(ureq::Error::Status(403, _)) => { last = "403 (stream URL expired/IP-bound)".into(); continue; }
             Err(e) => { last = format!("{e}"); continue; }

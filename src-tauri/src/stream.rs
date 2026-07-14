@@ -12,6 +12,13 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// User-Agent used for BOTH resolving (rustypipe's Desktop client) and fetching
+/// the media (ureq). googlevideo binds each stream URL to the IP **and the
+/// User-Agent** of the client that resolved it; a mismatched UA on the fetch is
+/// rejected with 403 (the root of the endless stream/download failures). Keeping
+/// the two identical is what makes the fetch authorised.
+pub const YT_UA: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
+
 /// Fetches a FRESH stream URL for the same track — called when a connection is
 /// rejected (403/302), which on Android happens constantly because googlevideo
 /// URLs are bound to the IP that resolved them and the phone's IPv6 privacy
@@ -119,6 +126,7 @@ fn connect(url: &str, pos: u64, len: u64) -> Result<(Box<dyn Read + Send>, Optio
     };
     let resp = media_agent(url)
         .get(target)
+        .set("User-Agent", YT_UA)
         .call()
         .map_err(|e| e.to_string())?;
     let total = resp
