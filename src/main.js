@@ -197,10 +197,14 @@ function refreshView() { if (active.type === "source") openSource(active.id); el
 // (which DO render, like local covers). Desktop loads them natively → no-op.
 const _netThumb = new Map();
 async function netThumb(url) {
-  const c = _netThumb.get(url);
+  // i.ytimg serves WebP when the ?sqp=… params are present, and the Android
+  // WebView renders JPEG data: URLs but NOT WebP ones — so drop the query to get
+  // the plain .jpg (that's why local JPEG covers showed but YouTube ones didn't).
+  const clean = /i\.ytimg\.com\/vi\//.test(url) ? url.split("?")[0] : url;
+  const c = _netThumb.get(clean);
   if (c) return c;
-  const d = await invoke("net_image", { url });
-  _netThumb.set(url, d);
+  const d = await invoke("net_image", { url: clean });
+  _netThumb.set(clean, d);
   return d;
 }
 function proxyCovers(root) {

@@ -1,8 +1,8 @@
 {
-  "version": "0.22.16",
+  "version": "0.22.17",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Download rows no longer overlap on mobile (progress bar on its own line) and now show the track cover."
+  "notes": "YouTube covers now show on Android (fetch the JPEG thumbnail, not the WebP the WebView cannot render)."
 }
