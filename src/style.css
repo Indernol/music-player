@@ -931,7 +931,12 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
      title ellipsises instead of the "now playing" cell growing and overlapping
      the centred transport controls (the shuffle-over-artwork bug). */
   .player-main { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; }
-  .volume input#volume { width: 56px; }
+  /* Phones use hardware volume — drop the slider + icon so the transport
+     controls (and the download toggle when active) have room and stop
+     overlapping. The download toggle stays for access to downloads. */
+  .volume input#volume, .volume .vol-ico { display: none; }
+  .volume { gap: 4px; }
+  .controls { gap: 4px; }
   body.np-docked.np-open .app { margin-right: 0; }
   .np-drawer { width: min(var(--np-w, 330px), 96vw); }
   .tracklist.yt-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }

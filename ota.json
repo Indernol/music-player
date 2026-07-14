@@ -1,8 +1,8 @@
 {
-  "version": "0.22.7",
+  "version": "0.22.9",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Fixes the 403 stream errors (auto re-resolves the URL) and the cascade where a failed track skipped through the whole library."
+  "notes": "The real 403 fix (streams like the working downloader, no Range header) and a decluttered mobile player bar."
 }

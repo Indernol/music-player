@@ -80,9 +80,10 @@ pub(crate) fn media_agent(url: &str) -> ureq::Agent {
 fn connect_rr(
     url: &mut String,
     pos: u64,
+    len: u64,
     rr: &Option<ReResolve>,
 ) -> Result<(Box<dyn Read + Send>, Option<u64>), String> {
-    match connect(url, pos) {
+    match connect(url, pos, len) {
         Ok(x) => Ok(x),
         Err(e) => {
             if let Some(rr) = rr {
@@ -90,7 +91,7 @@ fn connect_rr(
                     if fresh != *url {
                         *url = fresh;
                     }
-                    return connect(url, pos);
+                    return connect(url, pos, len);
                 }
             }
             Err(e)
@@ -98,10 +99,26 @@ fn connect_rr(
     }
 }
 
-fn connect(url: &str, pos: u64) -> Result<(Box<dyn Read + Send>, Option<u64>), String> {
+/// Append a query parameter (googlevideo takes byte ranges this way).
+fn with_query(url: &str, extra: &str) -> String {
+    if url.contains('?') { format!("{url}&{extra}") } else { format!("{url}?{extra}") }
+}
+
+fn connect(url: &str, pos: u64, len: u64) -> Result<(Box<dyn Read + Send>, Option<u64>), String> {
+    // googlevideo 403s an HTTP `Range` header it didn't issue — this is exactly
+    // why streaming failed while the native DOWNLOADER (a plain GET) worked. So
+    // fetch the whole stream with a plain GET at pos 0, and for seeks use
+    // googlevideo's own `&range=` QUERY parameter instead of the header.
+    let ranged;
+    let target = if pos == 0 {
+        url
+    } else {
+        let end = if len > 0 { len - 1 } else { pos + 10_000_000 };
+        ranged = with_query(url, &format!("range={pos}-{end}"));
+        &ranged
+    };
     let resp = media_agent(url)
-        .get(url)
-        .set("Range", &format!("bytes={pos}-"))
+        .get(target)
         .call()
         .map_err(|e| e.to_string())?;
     let total = resp
@@ -161,7 +178,7 @@ fn fetcher(mut url: String, len: u64, shared: Arc<(Mutex<Shared>, Condvar)>, ini
                 conn = None;
             }
             if conn.is_none() {
-                match connect_rr(&mut url, from, &rr) {
+                match connect_rr(&mut url, from, len, &rr) {
                     Ok((r, _)) => conn = Some((r, from)),
                     Err(e) => {
                         if attempt == RETRIES {
@@ -215,7 +232,7 @@ impl HttpStream {
 
     pub fn open(url: String, rr: Option<ReResolve>) -> Result<Self, String> {
         let mut url = url;
-        let (reader, total) = connect_rr(&mut url, 0, &rr)?;
+        let (reader, total) = connect_rr(&mut url, 0, 0, &rr)?;
         let len = total.ok_or("server did not report a stream length")?;
         let shared = Arc::new((
             Mutex::new(Shared {
