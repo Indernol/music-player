@@ -2550,7 +2550,15 @@ function listenDlEvents() {
     try { const { id, pct } = typeof payload === "string" ? JSON.parse(payload) : payload; dlProgress(id, Number(pct) || 0); }
     catch {}
   }).catch(e => console.error("[dl listen]", e));
+  // APK self-update download progress (Android in-app updater).
+  T.event.listen("apkdl", ({ payload }) => {
+    try {
+      const pct = Number((typeof payload === "string" ? JSON.parse(payload) : payload).pct) || 0;
+      if (_apkTask) taskUpdate(_apkTask, { pct, detail: `downloading APK… ${pct}%` });
+    } catch {}
+  }).catch(() => {});
 }
+let _apkTask = null;
 
 function listenMediaEvents() {
   if (!IS_NATIVE || !T.event?.listen) return;
@@ -2731,6 +2739,14 @@ async function rescanAll() {
 }
 async function pickFolder() {
   if (!IS_NATIVE) { const p = await askText("Add a folder", { placeholder: "Folder path" }); if (p) await addSource(p); return; }
+  // Android has no system folder picker through the dialog plugin (it silently
+  // returns nothing → the button "does nothing"). Ask for the path directly,
+  // prefilled with the standard Music folder.
+  if (IS_ANDROID) {
+    const p = await askText("Add a folder", { placeholder: ANDROID_MUSIC_DIR, value: ANDROID_MUSIC_DIR });
+    if (p) await addSource(p);
+    return;
+  }
   const btn = $("#pickBtn"); btn.disabled = true;
   try {
     const path = await T.core.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Choose a music folder" } });
@@ -3093,6 +3109,7 @@ function openSettings() {
           <button id="updateBtn" class="btn-line sm" hidden>Update</button>
         </span></div>
       <div class="set-hint" id="setAudioInfo">Audio output: checking…</div>
+      <div class="set-hint" id="setEngineInfo"></div>
       <div class="set-hint" id="setUpdHint">${IS_ANDROID
         ? "Checks GitHub for the newest APK for Android. “Update” opens the download — install it to update. Android and desktop versions update independently."
         : "Checks GitHub for the newest release for your platform. “Update” opens the installer download."}</div>
@@ -3266,6 +3283,8 @@ function openSettings() {
   checkUpdate();      // refresh in the background while the panel is open
   currentVersion().then(v => { const el = $("#setCurVer"); if (!el) return; const ota = window.__MP_OTA__; el.textContent = (ota ? `v${ota} (OTA)` : (v ? `v${v}` : "?")) + ` · ${platformName()}`; });
   if (IS_NATIVE) invoke("audio_info").then(cfg => { const el = $("#setAudioInfo"); if (el) el.textContent = cfg ? `Audio output: ${cfg}` : "Audio output: NO DEVICE OPENED — that's why there's no sound"; }).catch(() => {});
+  // WebView engine version — pinpoints which CSS/JS features the device lacks.
+  { const el = $("#setEngineInfo"); if (el) el.textContent = `Engine: ${navigator.userAgent}` + (window.__MP_OTA__ ? ` · OTA v${window.__MP_OTA__}` : ""); }
   $("#setReset").addEventListener("click", () => { SETTINGS.resetSettings(); applySettings(); refreshView(); openSettings(); flash("Settings reset to defaults"); });
   // Live storage usage of the download folder (best-effort, async).
   if (IS_NATIVE) {
@@ -3443,6 +3462,25 @@ async function runUpdate() {
     if (!_releaseInfo) { try { _releaseInfo = await invoke("latest_release"); } catch (e) { flash(`Could not find a release: ${e}`); return; } }
     const url = _releaseInfo && (_releaseInfo.asset_url || _releaseInfo.page_url);
     if (!url) { flash("No downloadable release found for this platform"); return; }
+    // Android: download the APK in-app (with progress in the Activity center),
+    // then hand it straight to the system installer — no browser, no GitHub,
+    // just "Install". Falls back to opening the download if anything fails.
+    if (IS_ANDROID && _releaseInfo.asset_url) {
+      updateBusy = true; renderUpdateBtn();
+      const tid = taskStart(`Update v${availableVersion}`, { detail: "downloading APK… 0%" });
+      _apkTask = tid;
+      try {
+        const path = await invoke("download_apk", { url: _releaseInfo.asset_url });
+        taskEnd(tid, { detail: "downloaded — installer opened", ttl: 8000 });
+        await invoke("install_apk", { path });
+        flash("Tap Install in the Android prompt — your settings are kept");
+      } catch (e) {
+        taskEnd(tid, { status: "error", detail: String(e) });
+        try { await invoke("open_url", { url }); flash("Opening the APK download instead…"); } catch {}
+      }
+      _apkTask = null; updateBusy = false; renderUpdateBtn();
+      return;
+    }
     try {
       await invoke("open_url", { url });
       flash(IS_ANDROID ? "Opening the APK download — open the file to install" : "Opening the download page…");

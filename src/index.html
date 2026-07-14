@@ -403,20 +403,31 @@ Risks: YouTube often <b>blocks</b> extraction for logged-in sessions (“format 
             document.head.appendChild(st);
             var em = document.getElementById("embCss"); if (em) em.remove();
           }
-          // Blob-URL ES modules can't resolve "./x.js" relative imports, so
-          // rewrite them to bare "mp:x.js" specifiers wired through an import map.
-          var names = Object.keys(b.modules), imap = { imports: {} }, urls = {};
-          names.forEach(function (n) {
-            var code = b.modules[n];
-            names.forEach(function (dep) {
-              code = code.split('"./' + dep + '"').join('"mp:' + dep + '"')
-                         .split("'./" + dep + "'").join("'mp:" + dep + "'");
-            });
-            urls[n] = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
-            imap.imports["mp:" + n] = urls[n];
-          });
-          var im = document.createElement("script"); im.type = "importmap";
-          im.textContent = JSON.stringify(imap); document.head.appendChild(im);
+          // Blob-URL ES modules can't resolve "./x.js" relative imports. Import
+          // maps would fix that but older Android WebViews (< Chrome 89) don't
+          // support them — the OTA would silently fail and the watchdog roll it
+          // back. So instead: build the blobs dependency-first and rewrite each
+          // "./dep.js" import to the dep's own blob URL. Works on every engine.
+          var names = Object.keys(b.modules), urls = {}, pending = names.slice(), guard = 0;
+          while (pending.length && guard++ < 50) {
+            for (var i = pending.length - 1; i >= 0; i--) {
+              var n = pending[i], code = b.modules[n], ok = true;
+              for (var j = 0; j < names.length; j++) {
+                var dep = names[j];
+                if (dep === n) continue;
+                if (code.indexOf('"./' + dep + '"') >= 0 || code.indexOf("'./" + dep + "'") >= 0) {
+                  if (!urls[dep]) { ok = false; break; }
+                  code = code.split('"./' + dep + '"').join('"' + urls[dep] + '"')
+                             .split("'./" + dep + "'").join("'" + urls[dep] + "'");
+                }
+              }
+              if (ok) {
+                urls[n] = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+                pending.splice(i, 1);
+              }
+            }
+          }
+          if (!urls[b.entry]) { embedded(); return; } // circular/unresolved → safe fallback
           window.__MP_OTA__ = b.version || "?";
           // Watchdog: main.js sets __MP_BOOTED__ once it loads. If a bad OTA
           // build never boots, wipe it and reload into the embedded build.

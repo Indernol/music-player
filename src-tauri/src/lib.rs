@@ -407,6 +407,94 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// In-app APK self-update, step 1 (Android): download the release APK into the
+/// app's external files dir (the FileProvider root) with "apkdl" progress
+/// events, so the user never has to visit GitHub or a browser.
+#[tauri::command]
+async fn download_apk(app: tauri::AppHandle, url: String) -> Result<String, String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (&app, &url);
+        Err("Android only".into())
+    }
+    #[cfg(target_os = "android")]
+    {
+        use std::io::{Read, Write};
+        use tauri::Emitter;
+        let dir = "/storage/emulated/0/Android/data/com.indernol.musicplayer/files";
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let path = format!("{dir}/update.apk");
+        let part = format!("{path}.part");
+        // No overall timeout — the APK is large; only cap the connect phase.
+        let resp = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(20))
+            .build()
+            .get(&url)
+            .set("User-Agent", "MusicPlayer")
+            .call()
+            .map_err(|e| e.to_string())?;
+        let total: u64 = resp
+            .header("Content-Length")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let mut reader = resp.into_reader();
+        let mut out = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+        let mut buf = vec![0u8; 256 * 1024];
+        let (mut done, mut last) = (0u64, -1i32);
+        loop {
+            let n = reader.read(&mut buf).map_err(|e| format!("download read: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+            done += n as u64;
+            if total > 0 {
+                let pct = ((done * 100) / total) as i32;
+                if pct != last {
+                    last = pct;
+                    let _ = app.emit("apkdl", serde_json::json!({ "pct": pct }));
+                }
+            }
+        }
+        out.flush().ok();
+        drop(out);
+        if total > 0 && done < total {
+            let _ = std::fs::remove_file(&part);
+            return Err("download ended early".into());
+        }
+        std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
+        Ok(path)
+    }
+}
+
+/// Step 2: hand the downloaded APK to the system installer. Calls the
+/// MainActivity.installApk(String) Kotlin helper via JNI (the Activity object
+/// is the context registered in ndk_context by initNdkContext).
+#[tauri::command]
+fn install_apk(path: String) -> Result<(), String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = path;
+        Err("Android only".into())
+    }
+    #[cfg(target_os = "android")]
+    {
+        let ctx = ndk_context::android_context();
+        let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| e.to_string())?;
+        let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+        let activity = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+        let jpath = env.new_string(&path).map_err(|e| e.to_string())?;
+        env.call_method(
+            &activity,
+            "installApk",
+            "(Ljava/lang/String;)V",
+            &[jni::objects::JValue::Object(&jpath)],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
 #[tauri::command]
 async fn latest_release() -> Result<ReleaseInfo, String> {
     let resp = ureq::AgentBuilder::new()
@@ -602,7 +690,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan, scan_diff, play, preload, pause, resume, stop, set_volume, set_agc, seek, status, audio_error, audio_info,
             source_version, self_update, restart_app, list_versions, switch_version,
-            latest_release, open_url,
+            latest_release, open_url, download_apk, install_apk,
             share::share_start, share::share_stop, share::share_status, share::share_connect, share::share_download,
             gdrive::gdrive_sign_in, gdrive::gdrive_sign_out, gdrive::gdrive_set_tokens, gdrive::gdrive_account, gdrive::gdrive_pull, gdrive::gdrive_push,
             ota::ota_bundle, ota::ota_check, ota::ota_apply, ota::ota_rollback,

@@ -64,7 +64,19 @@ jobs:
           # LAN device sharing streams over plain HTTP on the local network —
           # allow cleartext traffic (blocked by default since Android 9).
           sed -i 's#<application #<application android:usesCleartextTraffic="true" #' "$M"
-          grep -n "uses-permission\|usesCleartextTraffic" "$M"
+          # In-app self-update: let the app hand a downloaded APK to the system
+          # installer (REQUEST_INSTALL_PACKAGES) via a FileProvider rooted at the
+          # app's external files dir (where download_apk saves update.apk).
+          sed -i 's#<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />#<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />#' "$M"
+          mkdir -p src-tauri/gen/android/app/src/main/res/xml
+          cat > src-tauri/gen/android/app/src/main/res/xml/file_paths.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths><external-files-path name="files" path="." /></paths>
+          XML
+          # De-indent the heredoc output (YAML indentation would break the XML).
+          sed -i 's/^          //' src-tauri/gen/android/app/src/main/res/xml/file_paths.xml
+          sed -i 's#</application>#    <provider android:name="androidx.core.content.FileProvider" android:authorities="com.indernol.musicplayer.fileprovider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" /></provider>\n    </application>#' "$M"
+          grep -n "uses-permission\|usesCleartextTraffic\|provider" "$M"
 
       - name: Request media permission at startup (MainActivity)
         run: |
@@ -154,6 +166,20 @@ jobs:
                     android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) } catch (e2: Exception) {}
                 }
               }
+            }
+
+            // Hands a downloaded APK to the system installer (in-app update).
+            // Called from Rust via JNI (install_apk command). The FileProvider
+            // (manifest) exposes the external files dir where update.apk lands.
+            fun installApk(path: String) {
+              try {
+                val f = java.io.File(path)
+                val uri = androidx.core.content.FileProvider.getUriForFile(this, "\$packageName.fileprovider", f)
+                val i = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                i.setDataAndType(uri, "application/vnd.android.package-archive")
+                i.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+              } catch (e: Exception) { android.util.Log.e("MusicPlayer", "installApk failed", e) }
             }
 
             private fun hideSystemBars() {

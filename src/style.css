@@ -268,7 +268,11 @@ body.bg-light.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(255,255,255,.7); }
 .yt-grid .yt-card.playing .yc-title { color: var(--accent-2); }
 .yt-grid .yt-card.owned { opacity: .75; }
 .yc-thumb {
-  position: relative; aspect-ratio: 16 / 9; border-radius: 9px; overflow: hidden;
+  /* 16:9 via the padding-bottom hack, NOT aspect-ratio: the user's Android
+     WebView doesn't support aspect-ratio, which left this box 0px tall — the
+     reason song covers NEVER showed while every fixed-size box (.pc-thumb,
+     .ac-avatar, .art) always did. Padding-% works on every engine. */
+  position: relative; height: 0; padding-bottom: 56.25%; border-radius: 9px; overflow: hidden;
   background: var(--bg-3) center / cover no-repeat;
 }
 .yc-dur {
@@ -948,6 +952,11 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .dl-prog { order: 10; flex: 1 1 100%; }
   body.np-docked.np-open .app { margin-right: 0; }
   .np-drawer { width: min(var(--np-w, 330px), 96vw); }
-  .tracklist.yt-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  /* Explicit columns (no auto-fill guesswork on older WebViews): always 2-up. */
+  .tracklist.yt-grid { grid-template-columns: 1fr 1fr; }
   .pl-card-grid { grid-template-columns: 1fr; }
+  /* The results toolbar (view toggle, Videos/Playlists, Prev/Next) had
+     flex-shrink:0 and clipped off the right edge — full line + wrap instead. */
+  .vh-actions { flex-basis: 100%; margin-left: 0; }
+  .dl-head { flex-wrap: wrap; row-gap: 6px; }
 }

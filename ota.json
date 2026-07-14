@@ -1,5 +1,5 @@
 {
-  "version": "0.22.17",
+  "version": "0.22.18",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
