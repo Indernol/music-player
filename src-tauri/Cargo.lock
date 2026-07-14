@@ -2767,6 +2767,7 @@ dependencies = [
  "local-ip-address",
  "lofty",
  "ndk-context",
+ "reqwest 0.12.28",
  "rodio",
  "rquickjs-sys",
  "rustypipe",

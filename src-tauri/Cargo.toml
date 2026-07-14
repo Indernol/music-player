@@ -49,6 +49,10 @@ sha2 = "0.10"
 # fallback on desktop. rustls+webpki so no OpenSSL/system CA is needed on
 # Android. src/ytnative.rs wraps it behind the same shapes as youtube.rs.
 rustypipe = { version = "0.11", default-features = false, features = ["rustls-tls-webpki-roots"] }
+# Only for building rustypipe's HTTP client with an IPv4-pinned source on Android
+# (googlevideo binds stream URLs to the resolving IP; Android's IPv6 privacy
+# addresses rotate → 403). Matches the reqwest version rustypipe pulls (0.12).
+reqwest = { version = "0.12", default-features = false }
 
 # MPRIS/SMTC media controls (src/mpris.rs). Linux: the pure-Rust zbus backend
 # (no libdbus). Windows/other: souvlaki's default (SMTC) backend.

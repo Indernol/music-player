@@ -58,7 +58,11 @@ pub(crate) fn media_agent(url: &str) -> ureq::Agent {
     let b = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
         .timeout_read(Duration::from_secs(15));
-    let b = match url_wants_ipv6(url) {
+    // On Android we force the whole chain to IPv4 (see ytnative::rp), so fetch
+    // the media over IPv4 too — matching the IPv4 the URL was resolved with.
+    // Elsewhere, just pin to the family the URL's ip= demands.
+    let want_v6 = if cfg!(target_os = "android") { Some(false) } else { url_wants_ipv6(url) };
+    let b = match want_v6 {
         Some(want_v6) => b.resolver(move |netloc: &str| -> io::Result<Vec<std::net::SocketAddr>> {
             use std::net::ToSocketAddrs;
             let all: Vec<_> = netloc.to_socket_addrs()?.collect();

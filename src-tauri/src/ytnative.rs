@@ -33,9 +33,17 @@ fn rp() -> Result<&'static RustyPipe, String> {
         .cloned()
         .unwrap_or_else(|| std::env::temp_dir().join("musicplayer-rustypipe"));
     let _ = std::fs::create_dir_all(&dir);
+    // Build rustypipe's reqwest client. On Android, pin the source to IPv4
+    // (bind to 0.0.0.0 → IPv4-only socket): googlevideo binds each stream URL to
+    // the IP that resolved it, and Android hands out rotating IPv6 "privacy"
+    // addresses, so the resolve IP and the later audio-fetch IP differ → 403.
+    // IPv4 uses the single stable NAT address for both, keeping the URL valid.
+    let cb = reqwest::ClientBuilder::new();
+    #[cfg(target_os = "android")]
+    let cb = cb.local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
     let client = RustyPipe::builder()
         .storage_dir(dir)
-        .build()
+        .build_with_client(cb)
         .map_err(|e| format!("native yt client: {e}"))?;
     let _ = RP.set(client);
     Ok(RP.get().unwrap())
