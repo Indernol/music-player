@@ -64,7 +64,9 @@ fn thumb(id: &str) -> String {
 
 fn vid_to_track(v: &VideoItem) -> OnlineTrack {
     OnlineTrack {
-        thumbnail: thumb(&v.id),
+        // Use rustypipe's own thumbnail URL (same format as playlists, which
+        // load fine) rather than a hand-built i.ytimg mqdefault link.
+        thumbnail: v.thumbnail.last().map(|t| t.url.clone()).unwrap_or_else(|| thumb(&v.id)),
         title: v.name.clone(),
         artist: v
             .channel
@@ -623,7 +625,16 @@ pub async fn download(
     dir: &str,
     quality: &str,
 ) -> Result<String, String> {
-    let mut vp = vr_player(id)?;
+    // Resolve with a couple of retries — a transient DNS/network hiccup on the
+    // first resolve shouldn't fail (and get marked permanent) the whole download.
+    let mut vp = {
+        let mut got = None;
+        let mut e = String::new();
+        for _ in 0..3 {
+            match vr_player(id) { Ok(p) => { got = Some(p); break; } Err(err) => e = err }
+        }
+        got.ok_or(e)?
+    };
     let (title, artist) = vr_title_artist(&vp, id);
     let max_kbps = if quality == "best" || quality.is_empty() { None } else { quality.parse::<u64>().ok() };
 

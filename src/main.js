@@ -1647,6 +1647,7 @@ const DL_TRANSIENT = [
   "not a bot", "sign in to confirm you", "429", "too many requests", "rate limit", "rate-limited",
   "http error 403", "format is not available", "no video formats",
   "unable to download", "connection", "timed out", "timeout", "temporary failure", "network", "getaddrinfo",
+  "dns", "lookup address", "failed to lookup", "resolve dns", "dns error",
 ];
 function dlTransientErr(msg) { const m = String(msg).toLowerCase(); return DL_TRANSIENT.some(s => m.includes(s)); }
 const DL_ICON = { queued: IC.clock, active: IC.dl, done: IC.check, error: IC.alert, canceled: IC.slash };
