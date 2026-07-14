@@ -835,6 +835,11 @@ body.win-blur .dl-toggle.busy::before { animation-play-state: paused; }
 .task-row.clickable { cursor: pointer; border-radius: 7px; }
 .task-row.clickable:hover { background: var(--bg-3); }
 .task-row.error .dl-pct { color: #f87171; }
+.dl-cover { width: 30px; height: 30px; border-radius: 6px; flex-shrink: 0; background: var(--bg-3) center / cover no-repeat; display: grid; place-items: center; color: var(--tx-3); }
+.dl-cover.has-cover { color: transparent; font-size: 0; }
+.dl-cover svg { width: 15px; height: 15px; }
+.dl-row.done .dl-cover { color: #34d399; }
+.dl-row.error .dl-cover { color: #f59e0b; }
 .dl-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tx-1); }
 .dl-err { display: block; font-size: 10.5px; color: #f59e0b; white-space: normal; line-height: 1.3; margin-top: 2px; }
 .dl-row.error .dl-name { white-space: normal; }
@@ -937,6 +942,10 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .volume input#volume, .volume .vol-ico { display: none; }
   .volume { gap: 4px; }
   .controls { gap: 4px; }
+  /* Download rows: the fixed 140px progress bar left the title ~1 char wide.
+     Put the bar on its own full-width line below title + %, so nothing overlaps. */
+  .dl-row { flex-wrap: wrap; row-gap: 6px; }
+  .dl-prog { order: 10; flex: 1 1 100%; }
   body.np-docked.np-open .app { margin-right: 0; }
   .np-drawer { width: min(var(--np-w, 330px), 96vw); }
   .tracklist.yt-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }

@@ -1757,9 +1757,13 @@ function taskRow(id, t) {
 }
 
 function dlRow(d) {
+  const badge = d.permanent ? IC.slash : DL_ICON[d.status];
+  const cover = d.thumbnail
+    ? `<span class="dl-cover has-cover" style="background-image:url('${esc(d.thumbnail)}')"></span>`
+    : `<span class="dl-cover">${badge}</span>`;
   return `
     <div class="dl-row ${d.status}" data-path="${esc(d.path)}" title="${esc(d.err || d.title)}">
-      <span class="dl-ico">${d.permanent ? IC.slash : DL_ICON[d.status]}</span>
+      ${cover}
       <span class="dl-name">${esc(d.title)}${d.status === "error" && d.err ? `<span class="dl-err">${esc(d.err.slice(0, 140))}</span>` : ""}</span>
       <span class="dl-prog"><i style="width:${d.status === "done" ? 100 : (d.pct || 0)}%"></i></span>
       <span class="dl-pct">${d.status === "active" ? (d.pct || 0) + "%" : d.status}</span>
@@ -1951,7 +1955,7 @@ function downloadTracks(paths) {
     if (local) { PL.replacePath(p, local); linked++; continue; } // no download needed
     if (dlBlock[ytId(p)]) { blocked++; continue; } // known-unavailable: never retried
     const t = onlineIndex.get(p);
-    dlQueue.push({ path: p, id: ytId(p), title: t?.title || p, status: "queued", pct: 0 });
+    dlQueue.push({ path: p, id: ytId(p), title: t?.title || p, thumbnail: t?.thumbnail || "", status: "queued", pct: 0 });
     added++;
   }
   if (linked) { saveOnline(); renderPlaylists(); refreshView(); }
