@@ -403,6 +403,28 @@ fn platform_asset_match(name: &str) -> bool {
     }
 }
 
+/// Self-update downloads must come from GitHub (the release host) over HTTPS.
+/// The URL reaches these commands from the webview, so a compromised frontend
+/// must not be able to turn the updater into an arbitrary-file downloader.
+fn github_release_url(url: &str) -> bool {
+    let rest = match url.strip_prefix("https://") {
+        Some(r) => r,
+        None => return false,
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    host == "github.com" || host == "api.github.com" || host.ends_with(".githubusercontent.com")
+}
+
+/// `run_installer` only ever launches what `download_installer` saved — refuse
+/// any path outside the dedicated update temp dir.
+fn is_update_artifact(path: &str) -> bool {
+    let dir = std::env::temp_dir().join("musicplayer-update");
+    match (std::fs::canonicalize(path), std::fs::canonicalize(&dir)) {
+        (Ok(p), Ok(d)) => p.starts_with(&d),
+        _ => false,
+    }
+}
+
 fn platform_name() -> &'static str {
     if cfg!(target_os = "android") { "android" }
     else if cfg!(target_os = "windows") { "windows" }
@@ -416,6 +438,9 @@ fn platform_name() -> &'static str {
 #[tauri::command]
 fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http(s) links can be opened".into());
+    }
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
@@ -433,6 +458,9 @@ async fn download_apk(app: tauri::AppHandle, url: String) -> Result<String, Stri
     {
         use std::io::{Read, Write};
         use tauri::Emitter;
+        if !github_release_url(&url) {
+            return Err("update downloads are restricted to github.com".into());
+        }
         let dir = "/storage/emulated/0/Android/data/com.indernol.musicplayer/files";
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let path = format!("{dir}/update.apk");
@@ -491,6 +519,10 @@ fn install_apk(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "android")]
     {
+        // Only the APK that download_apk just saved — never an arbitrary path.
+        if path != "/storage/emulated/0/Android/data/com.indernol.musicplayer/files/update.apk" {
+            return Err("not the downloaded update APK".into());
+        }
         let ctx = ndk_context::android_context();
         let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| e.to_string())?;
         let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
@@ -519,10 +551,18 @@ async fn download_installer(app: tauri::AppHandle, url: String) -> Result<String
     }
     #[cfg(not(target_os = "android"))]
     {
+        if !github_release_url(&url) {
+            return Err("update downloads are restricted to github.com".into());
+        }
         tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
             use std::io::{Read, Write};
             use tauri::Emitter;
-            let name = url.rsplit('/').next().unwrap_or("installer.bin").to_string();
+            let raw = url.rsplit('/').next().unwrap_or("installer.bin");
+            let name: String = raw
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() || "._- ".contains(c) { c } else { '_' })
+                .collect();
+            let name = if name.trim_matches(['.', ' ']).is_empty() { "installer.bin".to_string() } else { name };
             let dir = std::env::temp_dir().join("musicplayer-update");
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             let path = dir.join(&name);
@@ -571,6 +611,9 @@ async fn download_installer(app: tauri::AppHandle, url: String) -> Result<String
 /// the flow seamless). Non-Windows desktops open the file with the OS handler.
 #[tauri::command]
 fn run_installer(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    if !is_update_artifact(&path) {
+        return Err("not a downloaded update file".into());
+    }
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new(&path).spawn().map_err(|e| format!("cannot start installer: {e}"))?;

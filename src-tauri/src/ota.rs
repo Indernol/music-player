@@ -85,6 +85,25 @@ fn get_text(url: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Manifest file names end up in filesystem joins under `ota/` — accept only
+/// plain names (letters/digits/`._-`, no separators, no `..`) so a hostile or
+/// corrupted manifest can never read or write outside that folder.
+fn safe_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+fn manifest_names_ok(m: &OtaManifest) -> bool {
+    m.modules.iter().all(|n| safe_name(n))
+        && safe_name(&m.entry)
+        && safe_name(&m.css)
+        && m.html.as_ref().map_or(true, |h| safe_name(h))
+}
+
 fn ota_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()
@@ -128,7 +147,7 @@ fn running_version(app: &tauri::AppHandle) -> String {
 pub fn ota_bundle(app: tauri::AppHandle) -> Option<OtaBundle> {
     let dir = ota_dir(&app).ok()?;
     let m = stored_manifest(&app)?;
-    if ver_cmp(&m.version, env!("CARGO_PKG_VERSION")) <= 0 {
+    if ver_cmp(&m.version, env!("CARGO_PKG_VERSION")) <= 0 || !manifest_names_ok(&m) {
         return None;
     }
     let mut modules = HashMap::new();
@@ -197,6 +216,9 @@ pub async fn ota_apply(app: tauri::AppHandle) -> Result<String, String> {
     }
     if ver_cmp(&m.version, &running_version(&app)) <= 0 {
         return Err("Already up to date".into());
+    }
+    if !manifest_names_ok(&m) {
+        return Err("manifest contains an unsafe file name".into());
     }
 
     let mut files: Vec<(String, String)> = Vec::new();

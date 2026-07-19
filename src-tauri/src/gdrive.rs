@@ -41,18 +41,17 @@ fn now() -> u64 {
 }
 
 fn pkce() -> (String, String) {
-    // verifier: 64 url-safe random-ish bytes; challenge = base64url(sha256(v)).
-    let mut seed = Vec::new();
-    seed.extend_from_slice(&now().to_le_bytes());
-    seed.extend_from_slice(&std::process::id().to_le_bytes());
-    seed.extend_from_slice(&(std::ptr::addr_of!(seed) as usize).to_le_bytes());
-    let mut v = String::new();
-    let mut h = Sha256::digest(&seed);
-    while v.len() < 64 {
-        v.push_str(&URL_SAFE_NO_PAD.encode(h));
-        h = Sha256::digest(h);
+    // verifier: 64 url-safe chars from the OS RNG; challenge = base64url(sha256(v)).
+    let mut b = [0u8; 48];
+    if getrandom::fill(&mut b).is_err() {
+        // OS RNG unavailable (should never happen) — fall back to a hashed
+        // time/pid seed rather than failing the sign-in outright.
+        let mut seed = Vec::new();
+        seed.extend_from_slice(&now().to_le_bytes());
+        seed.extend_from_slice(&std::process::id().to_le_bytes());
+        b.copy_from_slice(&Sha256::digest(&seed)[..32].repeat(2)[..48]);
     }
-    v.truncate(64);
+    let v = URL_SAFE_NO_PAD.encode(b);
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(v.as_bytes()));
     (v, challenge)
 }

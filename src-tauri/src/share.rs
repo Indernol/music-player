@@ -54,12 +54,18 @@ pub struct ShareStatus {
 }
 
 fn gen_code() -> String {
-    // 6 digits from the OS RNG-ish clock+addr entropy (no rand dep needed).
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0)
-        ^ (std::process::id().wrapping_mul(2654435761));
+    // 6 digits from the OS RNG — the code is the only thing gating the share
+    // server, so it must not be derivable from clock/pid.
+    let mut b = [0u8; 4];
+    let n = if getrandom::fill(&mut b).is_ok() {
+        u32::from_le_bytes(b)
+    } else {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0)
+            ^ (std::process::id().wrapping_mul(2654435761))
+    };
     format!("{:06}", n % 1_000_000)
 }
 
@@ -128,6 +134,11 @@ pub async fn share_start(
 }
 
 fn serve(server: Server, shared: Shared) {
+    // Brute-force guard: the 6-digit code has 1M combinations, so throttle
+    // wrong guesses hard (the loop is single-threaded — the sleep gates every
+    // request) and lock the server outright past a count no legit user hits.
+    let mut bad_codes: u32 = 0;
+    const LOCK_AFTER: u32 = 1000;
     for request in server.incoming_requests() {
         if shared.stop.load(std::sync::atomic::Ordering::Relaxed) {
             break;
@@ -145,7 +156,11 @@ fn serve(server: Server, shared: Shared) {
 
         // Everything else needs the pairing code.
         let ok = query_code(&url).map(|c| ct_eq(&c, &shared.code)).unwrap_or(false);
-        if !ok {
+        if !ok || bad_codes >= LOCK_AFTER {
+            if !ok {
+                bad_codes = bad_codes.saturating_add(1);
+                std::thread::sleep(std::time::Duration::from_millis(400));
+            }
             let _ = request.respond(Response::from_string("forbidden").with_status_code(403));
             continue;
         }

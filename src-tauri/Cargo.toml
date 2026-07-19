@@ -1,6 +1,6 @@
 [package]
 name = "music-player"
-version = "0.22.40"
+version = "0.22.41"
 edition = "2021"
 description = "Native local-first music player core"
 default-run = "music-player"
@@ -43,6 +43,7 @@ tiny_http = "0.12"
 local-ip-address = "0.6"
 # Google Drive cloud sync (src/gdrive.rs): PKCE OAuth needs SHA-256.
 sha2 = "0.10"
+getrandom = "0.3"
 # Native YouTube backend (Innertube client, NewPipe-style): powers search /
 # playlists / channels / streaming / downloads WITHOUT the yt-dlp binary —
 # mandatory on Android (yt-dlp's glibc build can't run on bionic), automatic
