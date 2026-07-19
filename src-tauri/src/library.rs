@@ -244,9 +244,16 @@ pub async fn net_image(url: String) -> Result<String, String> {
     // for minutes (the first few painted, the rest never resolved).
     let u = url.clone();
     let data = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let resp = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
+        // One shared agent: connection keep-alive to i.ytimg.com. Building a
+        // fresh agent per call cost a full TLS handshake per thumbnail
+        // (~5s each on this setup — a 100-card page took minutes).
+        static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+        let agent = AGENT.get_or_init(|| {
+            ureq::AgentBuilder::new()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+        });
+        let resp = agent
             .get(&u)
             .set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
             .call()

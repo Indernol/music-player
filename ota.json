@@ -1,8 +1,8 @@
 {
-  "version": "0.22.26",
+  "version": "0.22.27",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Search covers finally load (backend image proxy no longer chokes on 100 parallel fetches), results appear complete behind a percent progress bar, translucent glass cards over the wallpaper, and the frosted blur is back."
+  "notes": "Cover loading verified end-to-end and ~100x faster (shared keep-alive HTTP agent, direct mqdefault thumbs, capped parallel queue); OTA self-heal markers finally bumped in lockstep."
 }

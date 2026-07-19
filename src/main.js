@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.22";
+const SRC_VERSION = "0.22.27";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -252,13 +252,12 @@ async function _thumbFetch(clean) {
   }
 }
 async function netThumb(url) {
-  // i.ytimg serves WebP when the ?sqp=… params are present (and always on the
-  // /vi_webp/ path), and the Android WebView renders JPEG data: URLs but NOT
-  // WebP ones — so normalise to the plain /vi/….jpg (that's why local JPEG
-  // covers showed but YouTube ones didn't).
-  const clean = /i\.ytimg\.com\/vi(_webp)?\//.test(url)
-    ? url.split("?")[0].replace("/vi_webp/", "/vi/").replace(/\.webp$/, ".jpg")
-    : url;
+  // Any i.ytimg video thumb is normalised straight to /vi/<id>/mqdefault.jpg:
+  // plain JPEG (WebViews choke on WebP data: URLs), 320×180 (plenty for the
+  // card grids), and it exists for EVERY video — hq720 404s on non-HD uploads
+  // and each 404 + fallback used to cost an extra round-trip per card.
+  const idm = url.match(/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\//);
+  const clean = idm ? `https://i.ytimg.com/vi/${idm[1]}/mqdefault.jpg` : url;
   const c = _netThumb.get(clean);
   if (c) return c;
   return new Promise((res, rej) => { _thumbQ.push({ clean, res, rej }); _thumbPump(); });
@@ -4054,3 +4053,4 @@ async function init() {
 }
 
 init().catch(e => console.error("[init] failed:", e));
+
