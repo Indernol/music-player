@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.34";
+const SRC_VERSION = "0.22.36";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -3672,6 +3672,26 @@ async function runUpdate() {
       } catch (e) {
         taskEnd(tid, { status: "error", detail: String(e) });
         try { await invoke("open_url", { url }); flash("Opening the APK download instead…"); } catch {}
+      }
+      _apkTask = null; updateBusy = false; renderUpdateBtn();
+      return;
+    }
+    // Desktop installer builds (Windows/macOS/AppImage): download the setup
+    // in-app — progress in the Activity center — then hand it to the OS.
+    // GitHub only opens as the last-resort fallback (e.g. an old binary that
+    // doesn't know the download_installer command yet).
+    if (!IS_ANDROID && _releaseInfo?.asset_url) {
+      updateBusy = true; renderUpdateBtn();
+      const tid = taskStart(`Update v${availableVersion}`, { detail: "downloading installer… 0%" });
+      _apkTask = tid;
+      try {
+        const path = await invoke("download_installer", { url: _releaseInfo.asset_url });
+        taskEnd(tid, { detail: "downloaded — installer starting", ttl: 8000 });
+        await invoke("run_installer", { path });
+        flash("Installer launched — the app restarts updated. Your settings are kept.");
+      } catch (e) {
+        taskEnd(tid, { status: "error", detail: String(e) });
+        try { await invoke("open_url", { url }); flash("Opening the download instead…"); } catch {}
       }
       _apkTask = null; updateBusy = false; renderUpdateBtn();
       return;

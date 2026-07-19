@@ -1,5 +1,5 @@
 {
-  "version": "0.22.34",
+  "version": "0.22.36",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,11 +9,10 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Pixel-grid alignment fix for the docked layout, platform-scoped updates (a fix aimed at one platform no longer nags the others), and fresh installers for every platform.",
+  "notes": "Desktop updates are one-click now: the app downloads the installer itself (progress shown) and launches it - no more GitHub trips. Android is unaffected by this update.",
   "platforms": [
-    "linux",
     "windows",
-    "macos",
-    "android"
+    "linux",
+    "macos"
   ]
 }

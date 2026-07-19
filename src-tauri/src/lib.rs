@@ -507,6 +507,86 @@ fn install_apk(path: String) -> Result<(), String> {
     }
 }
 
+/// In-app DESKTOP self-update, step 1: download the platform installer into
+/// the temp dir, with the same "apkdl" progress events as the Android flow —
+/// no browser, no GitHub page.
+#[tauri::command]
+async fn download_installer(app: tauri::AppHandle, url: String) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = (&app, &url);
+        Err("desktop only".into())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+            use std::io::{Read, Write};
+            use tauri::Emitter;
+            let name = url.rsplit('/').next().unwrap_or("installer.bin").to_string();
+            let dir = std::env::temp_dir().join("musicplayer-update");
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let path = dir.join(&name);
+            let part = dir.join(format!("{name}.part"));
+            let resp = ureq::AgentBuilder::new()
+                .timeout_connect(std::time::Duration::from_secs(20))
+                .build()
+                .get(&url)
+                .set("User-Agent", "MusicPlayer")
+                .call()
+                .map_err(|e| e.to_string())?;
+            let total: u64 = resp.header("Content-Length").and_then(|s| s.parse().ok()).unwrap_or(0);
+            let mut reader = resp.into_reader();
+            let mut out = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+            let mut buf = vec![0u8; 256 * 1024];
+            let (mut done, mut last) = (0u64, -1i32);
+            loop {
+                let n = reader.read(&mut buf).map_err(|e| format!("download read: {e}"))?;
+                if n == 0 { break; }
+                out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+                done += n as u64;
+                if total > 0 {
+                    let pct = ((done * 100) / total) as i32;
+                    if pct != last {
+                        last = pct;
+                        let _ = app.emit("apkdl", serde_json::json!({ "pct": pct }));
+                    }
+                }
+            }
+            out.flush().ok();
+            drop(out);
+            if total > 0 && done < total {
+                let _ = std::fs::remove_file(&part);
+                return Err("download ended early".into());
+            }
+            std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
+            Ok(path.to_string_lossy().into_owned())
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+}
+
+/// Step 2: launch the downloaded installer and quit so it can replace the app
+/// (the NSIS installer closes/relaunches the app itself; exiting first keeps
+/// the flow seamless). Non-Windows desktops open the file with the OS handler.
+#[tauri::command]
+fn run_installer(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new(&path).spawn().map_err(|e| format!("cannot start installer: {e}"))?;
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            app.exit(0);
+        });
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
+    }
+}
+
 #[tauri::command]
 async fn latest_release() -> Result<ReleaseInfo, String> {
     let resp = ureq::AgentBuilder::new()
@@ -702,7 +782,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan, scan_diff, play, preload, pause, resume, stop, set_volume, set_agc, seek, status, audio_error, audio_info,
             source_version, self_update, restart_app, list_versions, switch_version,
-            latest_release, open_url, download_apk, install_apk,
+            latest_release, open_url, download_apk, install_apk, download_installer, run_installer,
             share::share_start, share::share_stop, share::share_status, share::share_connect, share::share_download,
             gdrive::gdrive_sign_in, gdrive::gdrive_sign_out, gdrive::gdrive_set_tokens, gdrive::gdrive_account, gdrive::gdrive_pull, gdrive::gdrive_push,
             ota::ota_bundle, ota::ota_check, ota::ota_apply, ota::ota_rollback,
