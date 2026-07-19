@@ -39,6 +39,12 @@ pub struct OtaManifest {
     /// aimed at one platform no longer nags every other one. Absent = all.
     #[serde(default)]
     platforms: Option<Vec<String>>,
+    /// Optional minimum NATIVE app version this frontend needs. Binaries older
+    /// than this skip the OTA (check + apply): a new UI must never land on a
+    /// backend that lacks the commands/behavior it relies on — update the app
+    /// itself first.
+    #[serde(default)]
+    min_native: Option<String>,
     #[serde(default)]
     notes: Option<String>,
 }
@@ -156,6 +162,12 @@ fn targets_this_platform(m: &OtaManifest) -> bool {
         .map_or(true, |p| p.iter().any(|x| x == this_platform()))
 }
 
+fn native_supports(m: &OtaManifest) -> bool {
+    m.min_native
+        .as_ref()
+        .map_or(true, |mn| ver_cmp(env!("CARGO_PKG_VERSION"), mn) >= 0)
+}
+
 /// Ask the repo whether a newer frontend is available.
 #[tauri::command]
 pub async fn ota_check(app: tauri::AppHandle) -> Result<OtaStatus, String> {
@@ -163,7 +175,7 @@ pub async fn ota_check(app: tauri::AppHandle) -> Result<OtaStatus, String> {
     let m: OtaManifest = serde_json::from_str(&raw).map_err(|e| format!("bad manifest: {e}"))?;
     let current = running_version(&app);
     Ok(OtaStatus {
-        available: targets_this_platform(&m) && ver_cmp(&m.version, &current) > 0,
+        available: targets_this_platform(&m) && native_supports(&m) && ver_cmp(&m.version, &current) > 0,
         version: m.version,
         current,
         notes: m.notes.unwrap_or_default(),
@@ -179,6 +191,9 @@ pub async fn ota_apply(app: tauri::AppHandle) -> Result<String, String> {
     let m: OtaManifest = serde_json::from_str(&raw).map_err(|e| format!("bad manifest: {e}"))?;
     if !targets_this_platform(&m) {
         return Err("This update does not target this platform".into());
+    }
+    if !native_supports(&m) {
+        return Err("This UI update needs a newer app version — update the app itself first".into());
     }
     if ver_cmp(&m.version, &running_version(&app)) <= 0 {
         return Err("Already up to date".into());

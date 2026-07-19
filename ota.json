@@ -1,5 +1,5 @@
 {
-  "version": "0.22.36",
+  "version": "0.22.37",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,10 +9,12 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Desktop updates are one-click now: the app downloads the installer itself (progress shown) and launches it - no more GitHub trips. Android is unaffected by this update.",
+  "notes": "THE grid fix: YouTube-style cards finally show their covers everywhere (a stray align-items collapsed the thumbnails to zero width), playback starts noticeably faster (the file tail is cached for the format probe), and UI updates now refuse to land on an app that is too old for them.",
   "platforms": [
-    "windows",
     "linux",
-    "macos"
-  ]
+    "windows",
+    "macos",
+    "android"
+  ],
+  "min_native": "0.22.35"
 }

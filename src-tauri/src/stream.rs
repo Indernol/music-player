@@ -30,6 +30,11 @@ const BACK: u64 = 256 * 1024; // kept behind the reader for small back-seeks
 const CHUNK: usize = 64 * 1024; // network read size
 const STALL: Duration = Duration::from_secs(25); // reader gives up after this
 const RETRIES: u32 = 4;
+/// End-of-file zone served from a dedicated one-shot buffer. YouTube m4a puts
+/// the moov atom at the END: the decoder probe seeks there and back, and
+/// dragging the streaming window along cost two full reconnects before any
+/// sound came out (the click-to-audio latency on phones and Windows).
+const TAIL_SZ: u64 = 512 * 1024;
 
 struct Shared {
     start: u64, // absolute offset of buf[0]
@@ -43,6 +48,9 @@ pub struct HttpStream {
     len: u64,
     pos: u64,
     shared: Arc<(Mutex<Shared>, Condvar)>,
+    url: String,
+    rr: Option<ReResolve>,
+    tail: Option<Vec<u8>>, // lazily fetched last TAIL_SZ bytes (moov probe)
 }
 
 /// googlevideo stream URLs are bound to the IP that resolved them (`ip=` query
@@ -253,8 +261,10 @@ impl HttpStream {
             Condvar::new(),
         ));
         let sh = shared.clone();
+        let url_for_tail = url.clone();
+        let rr_for_tail = rr.clone();
         thread::spawn(move || fetcher(url, len, sh, reader, rr));
-        Ok(HttpStream { len, pos: 0, shared })
+        Ok(HttpStream { len, pos: 0, shared, url: url_for_tail, rr: rr_for_tail, tail: None })
     }
 }
 
@@ -272,6 +282,30 @@ impl Read for HttpStream {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         if self.pos >= self.len {
             return Ok(0);
+        }
+        // Tail-zone reads come from a dedicated buffer so the streaming window
+        // stays parked at the front of the file (see TAIL_SZ).
+        let tail_start = self.len.saturating_sub(TAIL_SZ);
+        if self.len > TAIL_SZ && self.pos >= tail_start {
+            if self.tail.is_none() {
+                let mut u = self.url.clone();
+                let (r, _) = connect_rr(&mut u, tail_start, self.len, &self.rr)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                let mut v = Vec::with_capacity(TAIL_SZ as usize);
+                r.take(TAIL_SZ)
+                    .read_to_end(&mut v)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                self.tail = Some(v);
+            }
+            let t = self.tail.as_ref().unwrap();
+            let off = (self.pos - tail_start) as usize;
+            if off >= t.len() {
+                return Ok(0);
+            }
+            let n = out.len().min(t.len() - off);
+            out[..n].copy_from_slice(&t[off..off + n]);
+            self.pos += n as u64;
+            return Ok(n);
         }
         let (lock, cv) = &*self.shared;
         let mut g = lock.lock().unwrap();
@@ -326,6 +360,11 @@ impl Seek for HttpStream {
             ));
         }
         self.pos = (target as u64).min(self.len);
+        // Seeks into the tail zone are served from the dedicated tail buffer —
+        // don't drag the streaming window to the end of the file.
+        if self.len > TAIL_SZ && self.pos >= self.len - TAIL_SZ {
+            return Ok(self.pos);
+        }
         // Poke the fetcher so it starts repositioning before the next read.
         let (lock, cv) = &*self.shared;
         if let Ok(mut g) = lock.lock() {
