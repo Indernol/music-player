@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.39 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.40 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -1001,6 +1001,21 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
 /* Share over WiFi modal */
 .modal.share { width: min(460px, 94vw); }
 .share .modal-body { display: flex; flex-direction: column; gap: 12px; }
+/* Breathing room: buttons/fields were glued to the text above them. */
+.share .set-group { display: flex; flex-direction: column; gap: 10px; }
+.share .set-group .set-title { margin-bottom: 0; }
+.share .set-group .set-hint { margin: 0; }
+.share .btn, .share .btn-line { align-self: flex-start; margin-top: 4px; }
+.share .setup-chk { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+.share .set-row { padding: 2px 0; }
+.share-err { color: #f87171; }
+@media (max-width: 640px) {
+  /* Phone: each label sits ABOVE its full-width field — nothing crammed
+     side by side, nothing overlapping. Buttons go full-width too. */
+  .share .set-row { flex-direction: column; align-items: stretch; gap: 6px; }
+  .share .text-in, .share .num-in { width: 100%; }
+  .share .btn, .share .btn-line { align-self: stretch; text-align: center; }
+}
 .share-code-row { display: flex; align-items: center; gap: 12px; }
 .share-addr { font-family: var(--font-mono, monospace); font-size: 15px; color: var(--tx-1); margin: 4px 0; }
 .share-code { font-family: var(--font-mono, monospace); font-size: 30px; font-weight: 800; letter-spacing: .12em; color: var(--accent-2); }
@@ -1015,7 +1030,9 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   /* Topbar nav goes icon-only on phones — same buttons, same gaps. */
   .top-nav .ni-lbl { display: none; }
   .top-nav .nav-item { padding: 7px 9px; }
-  .top-drop { right: -44px; width: min(300px, 94vw); }
+  /* Phone: the Sources dropdown becomes a fixed full-width sheet under the
+     nav bar instead of an anchored popover that could overflow the screen. */
+  .top-drop { position: fixed; left: 8px; right: 8px; top: 110px; width: auto; max-height: 70vh; }
   /* Sidebar overlay sits ABOVE modals/drawers with its own full backdrop, so a
      modal opened underneath never bleeds through beside it. */
   body.side-open .sidebar {

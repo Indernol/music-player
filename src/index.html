@@ -158,6 +158,7 @@
           <div id="shareHostIdle">
             <div class="set-hint">Start a local server so another device can browse, stream and download your library + playlists.</div>
             <button id="shareHostStart" class="btn">Start sharing</button>
+            <div id="shareHostErr" class="set-hint share-err" hidden></div>
           </div>
           <div id="shareHostOn" hidden>
             <div class="share-code-row">
@@ -171,8 +172,8 @@
         </div>
 
         <div class="set-group"><div class="set-title">Connect — receive from another device</div>
-          <div class="set-row"><label>Host address <span class="set-sub">(IP shown on the host)</span></label>
-            <input type="text" id="shareHostIp" class="text-in" placeholder="192.168.1.23" autocomplete="off"></div>
+          <div class="set-row"><label>Host address <span class="set-sub">(as shown on the host)</span></label>
+            <input type="text" id="shareHostIp" class="text-in" placeholder="192.168.1.23:38291 — or just the IP" autocomplete="off"></div>
           <div class="set-row"><label>Port</label><input type="number" id="shareHostPort" class="num-in" value="0" min="0" max="65535"></div>
           <div class="set-row"><label>Code</label><input type="text" id="shareConnCode" class="text-in" placeholder="000000" inputmode="numeric" maxlength="6"></div>
           <label class="setup-chk"><input type="checkbox" id="shareSaveLocal"> Save streamed tracks locally as I play them</label>

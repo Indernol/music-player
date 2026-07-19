@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.39";
+const SRC_VERSION = "0.22.40";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -1665,7 +1665,12 @@ async function shareHostStart() {
     $("#shareHostInfo").textContent = `Sharing ${files.length} local track${files.length === 1 ? "" : "s"} + ${PL.getPlaylists().length} playlist${PL.getPlaylists().length === 1 ? "" : "s"}. Keep the app open.`;
     await refreshShareHost();
     flash(`Sharing on ${st.ip}:${st.port} — code ${st.code}`);
-  } catch (e) { flash(`Could not start sharing: ${e}`); }
+    const he = $("#shareHostErr"); if (he) { he.hidden = true; he.textContent = ""; }
+  } catch (e) {
+    const he = $("#shareHostErr");
+    if (he) { he.hidden = false; he.textContent = `Could not start sharing: ${e}`; }
+    flash(`Could not start sharing: ${e}`);
+  }
   finally { btn.disabled = false; btn.textContent = "Start sharing"; }
 }
 async function shareHostStop() { try { await invoke("share_stop"); } catch {} refreshShareHost(); flash("Stopped sharing"); }
@@ -1691,10 +1696,17 @@ async function shareSaveRemote(t) {
 }
 async function shareConnect() {
   if (!IS_NATIVE) { flash("Connecting needs the native app"); return; }
-  const host = $("#shareHostIp").value.trim();
-  const port = Number($("#shareHostPort").value) || 0;
-  const code = $("#shareConnCode").value.trim();
-  if (!host || !port || !code) { $("#shareConnStatus").textContent = "Fill host, port and code."; return; }
+  // Smart input: the host shows "192.168.1.23 : 38291" — accept that whole
+  // string (with or without spaces) pasted into the address field and split
+  // out the port automatically; the code keeps digits only.
+  let host = $("#shareHostIp").value.trim().replace(/\s+/g, "");
+  let port = Number($("#shareHostPort").value) || 0;
+  const hp = host.match(/^(.+?):(\d{2,5})$/);
+  if (hp) { host = hp[1]; port = Number(hp[2]); $("#shareHostIp").value = host; $("#shareHostPort").value = port; }
+  const code = $("#shareConnCode").value.trim().replace(/\D/g, "");
+  if (!host) { $("#shareConnStatus").textContent = "Enter the host address shown on the other device."; return; }
+  if (!port) { $("#shareConnStatus").textContent = "Enter the port (the number after the “:” on the host)."; return; }
+  if (code.length !== 6) { $("#shareConnStatus").textContent = "Enter the 6-digit code shown on the host."; return; }
   const btn = $("#shareConnect"); btn.disabled = true; btn.textContent = "Connecting…";
   $("#shareConnStatus").textContent = "Connecting…";
   try {

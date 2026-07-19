@@ -1,5 +1,5 @@
 {
-  "version": "0.22.39",
+  "version": "0.22.40",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Big scrolling performance fix: long lists are virtualized (only the visible rows exist in the page), so fast scrolling through a 2000-track library stays smooth instead of dropping to a slideshow.",
+  "notes": "Share over WiFi cleanup: proper spacing, stacked full-width fields on phones, paste the whole address (ip:port) in one field, visible error messages, and the Sources panel no longer overflows small screens.",
   "platforms": [
     "linux",
     "windows",
