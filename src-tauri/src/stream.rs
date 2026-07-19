@@ -119,6 +119,27 @@ fn with_query(url: &str, extra: &str) -> String {
     if url.contains('?') { format!("{url}&{extra}") } else { format!("{url}?{extra}") }
 }
 
+// One agent per stream: keep-alive/TLS-session reuse makes the moov-probe tail
+// fetch and mid-play reconnects noticeably faster than a fresh handshake each
+// time (part of the click-to-audio latency on phones/Windows).
+thread_local! {
+    static STREAM_AGENT: std::cell::RefCell<Option<(String, ureq::Agent)>> = const { std::cell::RefCell::new(None) };
+}
+fn agent_for(url: &str) -> ureq::Agent {
+    let host = url.split('/').nth(2).unwrap_or("").to_string();
+    STREAM_AGENT.with(|c| {
+        let mut c = c.borrow_mut();
+        if let Some((h, a)) = c.as_ref() {
+            if *h == host {
+                return a.clone();
+            }
+        }
+        let a = media_agent(url);
+        *c = Some((host, a.clone()));
+        a
+    })
+}
+
 fn connect(url: &str, pos: u64, len: u64) -> Result<(Box<dyn Read + Send>, Option<u64>), String> {
     // googlevideo 403s an HTTP `Range` header it didn't issue — this is exactly
     // why streaming failed while the native DOWNLOADER (a plain GET) worked. So
@@ -132,7 +153,7 @@ fn connect(url: &str, pos: u64, len: u64) -> Result<(Box<dyn Read + Send>, Optio
         ranged = with_query(url, &format!("range={pos}-{end}"));
         &ranged
     };
-    let resp = media_agent(url)
+    let resp = agent_for(url)
         .get(target)
         .set("User-Agent", YT_UA)
         .call()

@@ -256,7 +256,21 @@ impl AudioController {
                     AudioCmd::PlayUrl(url, gain, epoch, rr) => {
                         let new_sink = Arc::new(Sink::connect_new(stream.mixer()));
                         new_sink.set_volume(*vol_t.lock().unwrap());
-                        append_url(&new_sink, &url, gain, agc_on, &err_t, rr);
+                        append_url(&new_sink, &url, gain, agc_on, &err_t, rr.clone());
+                        // A failed append leaves the sink EMPTY → silence with a
+                        // "playing" UI (the pause-then-resume bug). Retry once
+                        // with a FRESH URL: skips land on cached stream links
+                        // that googlevideo sometimes rejects transiently.
+                        if new_sink.empty() {
+                            if let Some(rr2) = rr.clone() {
+                                if let Ok(fresh) = rr2() {
+                                    if fresh != url {
+                                        eprintln!("[audio] stream append failed — retrying with a fresh URL");
+                                        append_url(&new_sink, &fresh, gain, agc_on, &err_t, rr);
+                                    }
+                                }
+                            }
+                        }
                         new_sink.play();
                         *sink_t.lock().unwrap() = (epoch, Some(new_sink));
                     }

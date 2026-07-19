@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.37";
+const SRC_VERSION = "0.22.38";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -2590,7 +2590,11 @@ function startPolling() {
       const j = nextIndex(curIndex);
       if (j >= 0 && _drainSkips < 4) {
         if (!playedReal) _drainSkips++;
-        history.push(curIndex); await hardPlay(j);
+        // First dry drain: retry THE SAME track once with a fresh stream —
+        // exactly what pause-then-resume used to fix by hand (the skip landed
+        // on a stream that failed to open). Only then give up and advance.
+        if (!playedReal && _drainSkips === 1) { await hardPlay(curIndex); }
+        else { history.push(curIndex); await hardPlay(j); }
       } else if (j >= 0) {
         playing = false; setPlayIcon(false); updatePlayingRow(); mediaPlayback();
         _drainSkips = 0;

@@ -1,5 +1,5 @@
 {
-  "version": "0.22.37",
+  "version": "0.22.38",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "THE grid fix: YouTube-style cards finally show their covers everywhere (a stray align-items collapsed the thumbnails to zero width), playback starts noticeably faster (the file tail is cached for the format probe), and UI updates now refuse to land on an app that is too old for them.",
+  "notes": "Skipping onto a streamed track can no longer land in silence: failed stream opens retry with a fresh URL automatically (backend + player), and connection reuse makes playback start faster.",
   "platforms": [
     "linux",
     "windows",
