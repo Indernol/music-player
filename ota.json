@@ -1,8 +1,8 @@
 {
-  "version": "0.22.24",
+  "version": "0.22.25",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Song covers actually load: bare mqdefault URLs (the form WebKitGTK/WebViews refuse to paint) are proxied to data URLs on desktop too, the backend now serves the same ?sqp= URLs as playlists, and empty thumbs show a music-note placeholder."
+  "notes": "All YouTube covers now go through the data:-URL proxy on desktop too (network background-images are unreliable on WebKitGTK/NVIDIA), and the desktop launcher disables the broken DMABUF renderer."
 }

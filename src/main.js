@@ -264,16 +264,18 @@ function proxyCovers(root) {
     else el.src = src;
   });
   // background-image covers (songs, videos, playlists, artist avatar,
-  // now-playing, download rows) — all fixed-height boxes, the recipe that
-  // provably paints on the old WebView. Android proxies EVERY remote cover;
-  // desktop only the bare /vi/<id>/mqdefault.jpg form — WebKitGTK refuses to
-  // paint those too (the ?sqp= URLs are fine natively), and old backends
-  // still emit them for song cards.
+  // now-playing, download rows) — all fixed-height boxes. EVERY remote cover
+  // is proxied to a data: URL on EVERY platform: network background-images
+  // are unreliable across the engines this app actually runs on (old Android
+  // WebView blocks them all; the user's desktop WebKitGTK — NVIDIA/Wayland,
+  // broken EGL in the container — stopped painting them too, whatever the URL
+  // form). data: URLs are the one path that provably renders everywhere
+  // (local covers, now-playing art). net_image caches per URL, so a page of
+  // results costs one fetch per unique thumb.
   scope.querySelectorAll(".art.has-cover, .yc-thumb, .pc-thumb, .ac-avatar, .pd-cover, .pd-thumb, .np-art.has-cover, .ov-art.has-cover, .dl-cover.has-cover").forEach(el => {
     const m = String(el.style.backgroundImage || "").match(/url\(['"]?(https:\/\/[^'")]+)['"]?\)/);
     if (!m || el.dataset.proxied === m[1]) return;
     const src = m[1];
-    if (!IS_ANDROID && !/i\.ytimg\.com\/vi(_webp)?\/[^?]+$/.test(src)) return;
     el.dataset.proxied = src;
     netThumb(src).then(d => { el.style.backgroundImage = `url("${d}")`; }).catch(() => { delete el.dataset.proxied; });
   });
