@@ -1,8 +1,8 @@
 {
-  "version": "0.22.22",
+  "version": "0.22.23",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Video covers use the same proven recipe as playlist covers, phones show search results as a list by default, and the results page can no longer pan sideways."
+  "notes": "Search: video covers finally render on WebKit/old WebViews (JS-pinned heights, no aspect-ratio), clear Playlists/Songs section headers, and playlist cards no longer claim a fake '12 tracks' count."
 }

@@ -283,7 +283,12 @@ body.bg-light.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(255,255,255,.7); }
   position: relative; height: 118px; border-radius: 9px; overflow: hidden;
   background: var(--bg-3) center / cover no-repeat;
 }
-@supports (aspect-ratio: 16/9) { .yc-thumb { height: auto; aspect-ratio: 16/9; } }
+/* NO aspect-ratio here, not even behind @supports: WebKitGTK (desktop) and
+   old WebViews PARSE aspect-ratio (so @supports matches) but compute a
+   0-height for stretch-sized flex children → the cover AND the duration badge
+   vanish while fixed-size boxes (playlist thumbs) keep painting. The exact
+   16:9 height is pinned in JS per card (fixThumbHeights); this 118px is only
+   the pre-measure placeholder. */
 .yc-dur {
   position: absolute; right: 6px; bottom: 6px; padding: 1px 5px; border-radius: 5px;
   background: rgba(0, 0, 0, .82); color: #fff; font-size: 11px; font-weight: 700;
@@ -966,11 +971,11 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .np-drawer { width: min(var(--np-w, 330px), 96vw); }
   /* Explicit columns (no auto-fill guesswork on older WebViews): always 2-up. */
   .tracklist.yt-grid { grid-template-columns: 1fr 1fr; }
-  /* Old-engine fallback height matched to the 2-up card width (card ≈
+  /* Pre-measure placeholder matched to the 2-up card width (card ≈
      (100vw − paddings − gap) / 2, thumb = card − 2×8px padding, ×9/16).
-     Engines with aspect-ratio keep the exact 16:9 from the base rule. */
+     The exact height is then pinned per card by fixThumbHeights() — never
+     aspect-ratio (see .yc-thumb base rule). */
   .yc-thumb { height: calc((50vw - 46px) * 0.5625); }
-  @supports (aspect-ratio: 16/9) { .yc-thumb { height: auto; } }
   .pl-card-grid { grid-template-columns: 1fr; }
   /* The results toolbar (view toggle, Videos/Playlists, Prev/Next) had
      flex-shrink:0 and clipped off the right edge — full line + wrap instead. */

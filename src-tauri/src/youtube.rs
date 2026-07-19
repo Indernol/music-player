@@ -593,7 +593,10 @@ pub async fn yt_search_playlists(
                         .unwrap_or("")
                         .to_string(),
                     thumbnail: best_thumb(&v),
-                    count: v["playlist_count"].as_u64().or_else(|| v["n_entries"].as_u64()).unwrap_or(0),
+                    // NEVER fall back to n_entries: on a flat-extracted page it
+                    // is the size of the slice WE requested (every search hit
+                    // claimed "12 tracks"), not the playlist's real length.
+                    count: v["playlist_count"].as_u64().unwrap_or(0),
                     url,
                 })
             })
@@ -743,7 +746,10 @@ pub async fn yt_channel_playlists(
                         .unwrap_or("")
                         .to_string(),
                     thumbnail: best_thumb(&v),
-                    count: v["playlist_count"].as_u64().or_else(|| v["n_entries"].as_u64()).unwrap_or(0),
+                    // NEVER fall back to n_entries: on a flat-extracted page it
+                    // is the size of the slice WE requested (every search hit
+                    // claimed "12 tracks"), not the playlist's real length.
+                    count: v["playlist_count"].as_u64().unwrap_or(0),
                     url,
                 })
             })

@@ -1152,11 +1152,31 @@ function prependPlaylistList(pls) {
   const host = $("#trackList");
   const wrap = document.createElement("div");
   wrap.className = "pl-card-row";
-  wrap.innerHTML = `<div class="list-sep">${IC.list} Playlists</div>` + pls.map(playlistCardHtml).join("");
+  wrap.innerHTML = `<div class="list-sep">${IC.list} Playlists (${pls.length})</div>` + pls.map(playlistCardHtml).join("")
+    + (view.length ? `<div class="list-sep">${IC.music} Songs (${view.length})</div>` : "");
   host.insertAdjacentElement("afterbegin", wrap);
   wirePlaylistCards(wrap, pls);
   proxyCovers(wrap);
 }
+// WebKitGTK (desktop) and some WebViews pass @supports(aspect-ratio) yet lay
+// out stretch-sized flex children at 0 height → video covers (and the duration
+// badge inside them) silently vanish while the playlists' fixed-size boxes
+// keep painting. Pin every thumb to a measured pixel height instead — the
+// fixed-size box is the one recipe that renders on every engine we've met.
+function fixThumbHeights(root) {
+  (root || document).querySelectorAll(".yc-thumb").forEach(el => {
+    const w = el.clientWidth;
+    if (w) el.style.height = Math.round(w * 9 / 16) + "px";
+  });
+}
+let _thumbRz = 0;
+window.addEventListener("resize", () => {
+  clearTimeout(_thumbRz);
+  _thumbRz = setTimeout(() => {
+    const host = $("#trackList");
+    if (host && host.classList.contains("yt-grid")) fixThumbHeights(host);
+  }, 120);
+});
 // Mini-YouTube card grid: 16:9 thumbnail + duration badge + channel + views,
 // hover ▶ plays instantly. Cards keep the .track class + data-path/data-idx so
 // the existing delegation (select, double-click, context menu) works untouched.
@@ -1184,10 +1204,15 @@ function renderYtGrid(fresh, owned, playlists = []) {
     </div>`;
   };
   const plHtml = playlists.length
-    ? `<div class="list-sep">${IC.list} Playlists</div>` + `<div class="pl-card-grid">` + playlists.map(playlistCardHtml).join("") + `</div>`
+    ? `<div class="list-sep">${IC.list} Playlists (${playlists.length})</div>` + `<div class="pl-card-grid">` + playlists.map(playlistCardHtml).join("") + `</div>`
+    : "";
+  // An explicit "Songs" header whenever both kinds are on screen — without it
+  // the playlist cards and the video cards read as one continuous blob.
+  const songSep = playlists.length && (fresh.length || owned.length)
+    ? `<div class="list-sep">${IC.music} Songs (${fresh.length + owned.length})</div>`
     : "";
   host.innerHTML =
-    plHtml +
+    plHtml + songSep +
     fresh.map((t, i) => card(t, i, false)).join("") +
     (owned.length
       ? `<div class="list-sep">${IC.check} Already in your library</div>` + owned.map((t, i) => card(t, fresh.length + i, true)).join("")
@@ -1195,6 +1220,7 @@ function renderYtGrid(fresh, owned, playlists = []) {
   if (playlists.length) wirePlaylistCards(host, playlists);
   updatePlayingRow();
   proxyCovers(host);
+  fixThumbHeights(host);
 }
 // The channel header (avatar, name, mode toggle, "Download all"), pinned above
 // the results on page 1 once yt_channel resolves.
