@@ -1,8 +1,8 @@
 {
-  "version": "0.22.28",
+  "version": "0.22.29",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Smarter layout: playlists-only sidebar, Library/Recent/Share/Sources moved to the top bar, YouTube search drops the library column header, buttery rAF wheel scrolling, faster long lists, strict CSP, and one-tap APK updates via the new release."
+  "notes": "Navigation gets its own dedicated bar (Library, Recent, Share, Sources), fully separated from the search and sort toolbar."
 }
