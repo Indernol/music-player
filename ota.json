@@ -1,8 +1,8 @@
 {
-  "version": "0.22.25",
+  "version": "0.22.26",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "All YouTube covers now go through the data:-URL proxy on desktop too (network background-images are unreliable on WebKitGTK/NVIDIA), and the desktop launcher disables the broken DMABUF renderer."
+  "notes": "Search covers finally load (backend image proxy no longer chokes on 100 parallel fetches), results appear complete behind a percent progress bar, translucent glass cards over the wallpaper, and the frosted blur is back."
 }

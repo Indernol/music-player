@@ -221,16 +221,20 @@ function refreshView() { if (active.type === "source") openSource(active.id); el
 // covers (i.ytimg…) are proxied through the Rust backend into inline data: URLs
 // (which DO render, like local covers). Desktop loads them natively → no-op.
 const _netThumb = new Map();
-async function netThumb(url) {
-  // i.ytimg serves WebP when the ?sqp=… params are present (and always on the
-  // /vi_webp/ path), and the Android WebView renders JPEG data: URLs but NOT
-  // WebP ones — so normalise to the plain /vi/….jpg (that's why local JPEG
-  // covers showed but YouTube ones didn't).
-  const clean = /i\.ytimg\.com\/vi(_webp)?\//.test(url)
-    ? url.split("?")[0].replace("/vi_webp/", "/vi/").replace(/\.webp$/, ".jpg")
-    : url;
-  const c = _netThumb.get(clean);
-  if (c) return c;
+// Only a handful of net_image fetches in flight at once: each call occupies a
+// backend worker, and a 100-card search page firing them all simultaneously
+// used to starve the pool — the first covers painted, the rest never resolved.
+const _thumbQ = [];
+let _thumbBusy = 0;
+const THUMB_PARALLEL = 6;
+function _thumbPump() {
+  while (_thumbBusy < THUMB_PARALLEL && _thumbQ.length) {
+    const job = _thumbQ.shift();
+    _thumbBusy++;
+    _thumbFetch(job.clean).then(job.res, job.rej).finally(() => { _thumbBusy--; _thumbPump(); });
+  }
+}
+async function _thumbFetch(clean) {
   try {
     const d = await invoke("net_image", { url: clean });
     _netThumb.set(clean, d);
@@ -246,6 +250,18 @@ async function netThumb(url) {
     _netThumb.set(clean, d);
     return d;
   }
+}
+async function netThumb(url) {
+  // i.ytimg serves WebP when the ?sqp=… params are present (and always on the
+  // /vi_webp/ path), and the Android WebView renders JPEG data: URLs but NOT
+  // WebP ones — so normalise to the plain /vi/….jpg (that's why local JPEG
+  // covers showed but YouTube ones didn't).
+  const clean = /i\.ytimg\.com\/vi(_webp)?\//.test(url)
+    ? url.split("?")[0].replace("/vi_webp/", "/vi/").replace(/\.webp$/, ".jpg")
+    : url;
+  const c = _netThumb.get(clean);
+  if (c) return c;
+  return new Promise((res, rej) => { _thumbQ.push({ clean, res, rej }); _thumbPump(); });
 }
 function proxyCovers(root) {
   const scope = root || document;
@@ -1185,13 +1201,31 @@ window.addEventListener("resize", () => {
 // Mini-YouTube card grid: 16:9 thumbnail + duration badge + channel + views,
 // hover ▶ plays instantly. Cards keep the .track class + data-path/data-idx so
 // the existing delegation (select, double-click, context menu) works untouched.
-function renderYtGrid(fresh, owned, playlists = []) {
+let _gridSeq = 0;
+async function renderYtGrid(fresh, owned, playlists = []) {
   view = [...fresh, ...owned];
   updateCount();
   const host = $("#trackList");
   $("#listHead").style.display = "none";
   host.classList.add("yt-grid");
   if (!view.length && !playlists.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.music}</div>No results.</div>`; return; }
+  // The results should appear COMPLETE: preload every cover into the proxy
+  // cache behind a percent bar, then inject the finished grid in one go.
+  const seq = ++_gridSeq;
+  const urls = IS_NATIVE ? [...new Set([...playlists.map(p => p.thumbnail), ...view.map(t => t.thumbnail)].filter(Boolean))] : [];
+  if (urls.length) {
+    let done = 0;
+    host.innerHTML = `<div class="yt-loading"><div class="yt-prog"><div class="yt-prog-fill" id="ytProgFill"></div></div><div class="yt-prog-txt" id="ytProgTxt">Loading covers… 0%</div></div>`;
+    await Promise.all(urls.map(u => netThumb(u).catch(() => {}).then(() => {
+      done++;
+      if (seq !== _gridSeq) return;
+      const pct = Math.round(done / urls.length * 100);
+      const f = $("#ytProgFill"), t = $("#ytProgTxt");
+      if (f) f.style.width = pct + "%";
+      if (t) t.textContent = `Loading covers… ${pct}%`;
+    })));
+    if (seq !== _gridSeq) return; // a newer search/render took over meanwhile
+  }
   const nowPath = curIndex >= 0 ? queue[curIndex] : null;
   const card = (t, i, own) => {
     const vs = fmtViews(t.views);

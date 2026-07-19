@@ -239,23 +239,31 @@ pub async fn net_image(url: String) -> Result<String, String> {
     if let Some(v) = cache.lock().unwrap().get(&url) {
         return Ok(v.clone());
     }
-    let resp = ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .get(&url)
-        .set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
-        .call()
-        .map_err(|e| e.to_string())?;
-    let mime = resp.header("Content-Type").unwrap_or("image/jpeg").to_string();
-    let mut bytes = Vec::new();
-    resp.into_reader()
-        .take(6 * 1024 * 1024)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.is_empty() {
-        return Err("empty image".into());
-    }
-    let data = format!("data:{};base64,{}", mime, STANDARD.encode(&bytes));
+    // ureq is BLOCKING: run it off the async workers. A search page fires ~100
+    // of these at once — inline they starved the tokio pool and covers stalled
+    // for minutes (the first few painted, the rest never resolved).
+    let u = url.clone();
+    let data = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let resp = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .get(&u)
+            .set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
+            .call()
+            .map_err(|e| e.to_string())?;
+        let mime = resp.header("Content-Type").unwrap_or("image/jpeg").to_string();
+        let mut bytes = Vec::new();
+        resp.into_reader()
+            .take(6 * 1024 * 1024)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.is_empty() {
+            return Err("empty image".into());
+        }
+        Ok(format!("data:{};base64,{}", mime, STANDARD.encode(&bytes)))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     cache.lock().unwrap().insert(url, data.clone());
     Ok(data)
 }
