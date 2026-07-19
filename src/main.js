@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.32";
+const SRC_VERSION = "0.22.33";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -499,9 +499,34 @@ function sortTracks(list) {
 }
 
 // ─── Track list ───
+// ─── Pinned tracks (library + playlists) ───
+// Pins live in settings under "pins": { lib: [paths], "pl:<id>": [paths] }.
+// Pinned tracks float to the top of their view, in pin order, after sorting.
+function pinContextKey() {
+  if (active.type === "playlist") return "pl:" + active.id;
+  if (active.type === "library") return "lib";
+  return null;
+}
+function pinsFor(key) { const m = S().pins || {}; return Array.isArray(m[key]) ? m[key] : []; }
+function setPins(key, arr) {
+  const m = { ...(S().pins || {}) };
+  if (arr.length) m[key] = arr; else delete m[key];
+  SETTINGS.setSetting("pins", m);
+}
+let _pinSet = new Set();
+function applyPins(list) {
+  const key = pinContextKey();
+  const order = key ? pinsFor(key) : [];
+  _pinSet = new Set(order);
+  if (!order.length) return list;
+  const pos = new Map(order.map((p, i) => [p, i]));
+  const pinned = list.filter(t => pos.has(t.path)).sort((a, b) => pos.get(a.path) - pos.get(b.path));
+  return pinned.length ? [...pinned, ...list.filter(t => !pos.has(t.path))] : list;
+}
+
 function renderTracks(list, presorted = false) {
   const src = filterBlocked(list);
-  view = presorted ? [...src] : sortTracks([...src]);
+  view = applyPins(presorted ? [...src] : sortTracks([...src]));
   list = view;
   updateCount();
   const host = $("#trackList");
@@ -512,8 +537,9 @@ function renderTracks(list, presorted = false) {
   host.innerHTML = list.map((t, i) => {
     const isNow = nowPath === t.path;
     const blk = isBlocked(t.path);
-    return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
-      <div class="tk-idx"><span class="idx-num">${i + 1}</span><span class="idx-play">${IC.play}</span></div>
+    const pin = _pinSet.has(t.path);
+    return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""} ${pin ? "pinned" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
+      <div class="tk-idx">${pin ? `<span class="idx-num idx-pin">${IC.pin}</span>` : `<span class="idx-num">${i + 1}</span>`}<span class="idx-play">${IC.play}</span></div>
       ${artCell(t)}
       <div class="meta"><div class="t">${blk ? "🚫 " : ""}${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
       <div class="album">${esc(t.album)}</div>
@@ -649,6 +675,12 @@ function openContextMenu(x, y) {
     (paths.every(isBlocked)
       ? `<div class="ctx-item" data-block="off">${ic(IC.play)}Unblock ${nsfx}</div>`
       : `<div class="ctx-item" data-block="on">${ic(IC.slash)}Block ${nsfx} (hide + can't play)</div>`) +
+    // ── pin to top (library + playlist views) ──
+    (pinContextKey()
+      ? (paths.every(p => pinsFor(pinContextKey()).includes(p))
+        ? `<div class="ctx-item" data-pin="off">${ic(IC.pin)}Unpin ${nsfx}</div>`
+        : `<div class="ctx-item" data-pin="on">${ic(IC.pin)}Pin ${nsfx} to top</div>`)
+      : "") +
     `<div class="ctx-sep"></div>` +
     `<div class="ctx-label">Add ${nsfx} to</div>` +
     pls.map(p => `<div class="ctx-item" data-add="${p.id}">${ic(IC.note)}${esc(p.name)}</div>`).join("") +
@@ -665,6 +697,17 @@ function openContextMenu(x, y) {
     if (on && curIndex >= 0 && paths.includes(queue[curIndex])) next();
     selected.clear(); refreshView();
     flash(on ? `Blocked ${nsfx}` : `Unblocked ${nsfx}`);
+  });
+
+  menu.querySelector("[data-pin]")?.addEventListener("click", (e) => {
+    const on = e.currentTarget.dataset.pin === "on";
+    const key = pinContextKey();
+    closeCtx();
+    if (!key) return;
+    const cur = pinsFor(key);
+    setPins(key, on ? [...paths.filter(p => !cur.includes(p)), ...cur] : cur.filter(p => !paths.includes(p)));
+    selected.clear(); refreshView();
+    flash(on ? `Pinned ${nsfx} to top` : `Unpinned ${nsfx}`);
   });
 
   menu.querySelector('[data-rm="pl"]')?.addEventListener("click", () => {

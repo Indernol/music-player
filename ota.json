@@ -1,8 +1,8 @@
 {
-  "version": "0.22.32",
+  "version": "0.22.33",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Layout sizing fix: the docked Now Playing panel only reserves side space on wide windows; on narrower ones it floats over the content so the UI is never crushed."
+  "notes": "Settings joins the nav bar, tracks can be pinned to the top of the library or any playlist (right-click), and every panel now sits on the same 8px grid."
 }
