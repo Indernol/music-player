@@ -34,6 +34,11 @@ pub struct OtaManifest {
     /// Optional `index.html` so DOM/markup changes can ship over the air too.
     #[serde(default)]
     html: Option<String>,
+    /// Optional platform scoping ("linux" / "windows" / "macos" / "android"):
+    /// when present, platforms NOT listed skip this update entirely — a fix
+    /// aimed at one platform no longer nags every other one. Absent = all.
+    #[serde(default)]
+    platforms: Option<Vec<String>>,
     #[serde(default)]
     notes: Option<String>,
 }
@@ -141,6 +146,16 @@ pub fn ota_bundle(app: tauri::AppHandle) -> Option<OtaBundle> {
     })
 }
 
+fn this_platform() -> &'static str {
+    if cfg!(target_os = "android") { "android" } else { std::env::consts::OS }
+}
+
+fn targets_this_platform(m: &OtaManifest) -> bool {
+    m.platforms
+        .as_ref()
+        .map_or(true, |p| p.iter().any(|x| x == this_platform()))
+}
+
 /// Ask the repo whether a newer frontend is available.
 #[tauri::command]
 pub async fn ota_check(app: tauri::AppHandle) -> Result<OtaStatus, String> {
@@ -148,7 +163,7 @@ pub async fn ota_check(app: tauri::AppHandle) -> Result<OtaStatus, String> {
     let m: OtaManifest = serde_json::from_str(&raw).map_err(|e| format!("bad manifest: {e}"))?;
     let current = running_version(&app);
     Ok(OtaStatus {
-        available: ver_cmp(&m.version, &current) > 0,
+        available: targets_this_platform(&m) && ver_cmp(&m.version, &current) > 0,
         version: m.version,
         current,
         notes: m.notes.unwrap_or_default(),
@@ -162,6 +177,9 @@ pub async fn ota_check(app: tauri::AppHandle) -> Result<OtaStatus, String> {
 pub async fn ota_apply(app: tauri::AppHandle) -> Result<String, String> {
     let raw = get_text(&format!("{RAW_BASE}/ota.json"))?;
     let m: OtaManifest = serde_json::from_str(&raw).map_err(|e| format!("bad manifest: {e}"))?;
+    if !targets_this_platform(&m) {
+        return Err("This update does not target this platform".into());
+    }
     if ver_cmp(&m.version, &running_version(&app)) <= 0 {
         return Err("Already up to date".into());
     }

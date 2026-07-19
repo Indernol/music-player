@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.33 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.34 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -682,7 +682,9 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
    the drawer floats over the content instead (like on phones). The nav bar
    resizes itself the same way, so the drawer never covers it. */
 @media (min-width: 980px) {
-  body.np-docked.np-open .app { margin-right: calc(min(var(--np-w, 330px), 92vw) + 16px); }
+  /* .app already carries 8px padding-right — its margin only needs npw+8 so
+     the main panel's right edge lands EXACTLY on the nav bar's (npw+16). */
+  body.np-docked.np-open .app { margin-right: calc(min(var(--np-w, 330px), 92vw) + 8px); }
   body.np-docked.np-open .nav-bar { margin-right: calc(min(var(--np-w, 330px), 92vw) + 16px + var(--safe-right, 0px)); }
 }
 body.np-docked .np-drawer { box-shadow: none; border-color: var(--bd); }
