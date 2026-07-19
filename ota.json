@@ -1,8 +1,8 @@
 {
-  "version": "0.22.30",
+  "version": "0.22.31",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "The navigation bar is now a standalone panel at the very top of the window, fully independent from the sidebar, main view and now-playing panels."
+  "notes": "The top navigation bar resizes itself automatically when the docked Now Playing panel is open, instead of being covered by it."
 }
