@@ -11,23 +11,7 @@
     <aside class="sidebar">
       <div class="brand"><span class="brand-ic" data-ic="headphones"></span> <span>Music Player</span></div>
 
-      <button id="navLibrary" class="nav-item active"><span class="ni-ico" data-ic="disc"></span> Library</button>
-      <button id="navHistory" class="nav-item"><span class="ni-ico" data-ic="clock"></span> Recently played</button>
-      <button id="navShare" class="nav-item"><span class="ni-ico" data-ic="globe"></span> Share over WiFi</button>
-
-      <input id="sideFilter" type="search" placeholder="Filter sources & playlists…" autocomplete="off" class="side-filter">
-
-      <div class="side-section" id="secSources">
-        <div class="ss-head">
-          <span class="ss-title ss-toggle" data-coll="collSources" title="Click to collapse/expand"><span class="ss-caret">▾</span> Sources</span>
-          <button id="rescanBtn" class="icon-btn" title="Check all folders for new songs" data-ic="refresh"></button>
-        </div>
-        <div class="ss-body">
-          <button id="pickBtn" class="btn btn-block"><span data-ic="folder"></span> Add folder…</button>
-          <button id="manualBtn" class="btn-line"><span data-ic="pencil"></span> Enter a path manually</button>
-          <div class="src-list" id="sourcesList"></div>
-        </div>
-      </div>
+      <input id="sideFilter" type="search" placeholder="Filter playlists…" autocomplete="off" class="side-filter">
 
       <div class="side-section grow" id="secPlaylists">
         <div class="ss-head"><span class="ss-title ss-toggle" data-coll="collPlaylists" title="Click to collapse/expand"><span class="ss-caret">▾</span> Playlists</span></div>
@@ -49,6 +33,23 @@
           <input id="search" type="search" placeholder="Search library — Enter to search YouTube (videos + playlists)" autocomplete="off">
         </div>
         <span id="count" class="count"></span>
+        <nav class="top-nav" id="topNav">
+          <button id="navLibrary" class="nav-item active" title="Library"><span class="ni-ico" data-ic="disc"></span><span class="ni-lbl">Library</span></button>
+          <button id="navHistory" class="nav-item" title="Recently played"><span class="ni-ico" data-ic="clock"></span><span class="ni-lbl">Recent</span></button>
+          <button id="navShare" class="nav-item" title="Share over WiFi"><span class="ni-ico" data-ic="globe"></span><span class="ni-lbl">Share</span></button>
+          <div class="top-drop-wrap">
+            <button id="navSources" class="nav-item" title="Music sources (folders)"><span class="ni-ico" data-ic="folder"></span><span class="ni-lbl">Sources</span></button>
+            <div id="srcDrop" class="top-drop" hidden>
+              <div class="ss-head" id="secSources">
+                <span class="ss-title">Sources</span>
+                <button id="rescanBtn" class="icon-btn" title="Check all folders for new songs" data-ic="refresh"></button>
+              </div>
+              <button id="pickBtn" class="btn btn-block"><span data-ic="folder"></span> Add folder…</button>
+              <button id="manualBtn" class="btn-line"><span data-ic="pencil"></span> Enter a path manually</button>
+              <div class="src-list" id="sourcesList"></div>
+            </div>
+          </div>
+        </nav>
         <button id="settingsBtn" class="icon-btn top-gear" title="Settings" data-ic="gear"></button>
         <span class="sort-ico" data-ic="filter" title="Sort"></span>
         <select id="sortSel" class="sel sm-sel sort-sel" title="Sort order">

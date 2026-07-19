@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.27 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.28 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -257,6 +257,27 @@ body.bg-light.has-bg .vh-sub { text-shadow: 0 1px 6px rgba(255,255,255,.7); }
 /* overflow-x explicit: with only overflow-y set, overflow-x computes to auto —
    any too-wide child let the whole results page pan sideways on phones. */
 .tracklist { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 12px 16px; }
+/* Long library lists: skip layout/paint of off-screen rows (1800+ tracks). */
+.tracklist:not(.yt-grid) .track { content-visibility: auto; contain-intrinsic-size: auto 44px; }
+
+/* ─── Topbar navigation (Library / Recent / Share / Sources) ───
+   Moved out of the sidebar — the sidebar is playlists-only now. Same nav-item
+   look, laid out inline with uniform gaps; labels drop on narrow screens. */
+.top-nav { display: flex; align-items: center; gap: 6px; }
+.top-nav .nav-item { display: inline-flex; align-items: center; gap: 6px; padding: 7px 11px; border-radius: 9px; margin: 0; width: auto; }
+.top-nav .ni-lbl { font-size: 12.5px; }
+.top-drop-wrap { position: relative; }
+.top-drop {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 70;
+  width: 300px; max-height: 60vh; overflow-y: auto;
+  background: var(--bg-2); border: 1px solid var(--bd-2); border-radius: 12px;
+  padding: 12px; display: flex; flex-direction: column; gap: 8px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .45);
+}
+body.has-bg .top-drop {
+  background: rgba(10, 10, 15, calc(var(--panel-alpha, 85) / 100));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
 
 /* ─── Mini-YouTube card grid (YouTube search results, Settings-free toggle) ─── */
 .tracklist.yt-grid {
@@ -957,6 +978,10 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .side-toggle { display: inline-grid; place-items: center; }
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
+  /* Topbar nav goes icon-only on phones — same buttons, same gaps. */
+  .top-nav .ni-lbl { display: none; }
+  .top-nav .nav-item { padding: 7px 9px; }
+  .top-drop { right: -44px; width: min(300px, 94vw); }
   /* Sidebar overlay sits ABOVE modals/drawers with its own full backdrop, so a
      modal opened underneath never bleeds through beside it. */
   body.side-open .sidebar {

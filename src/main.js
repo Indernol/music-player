@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.27";
+const SRC_VERSION = "0.22.28";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -1152,6 +1152,9 @@ function renderOnlineResults() {
       for (let i = fresh.length; i < view.length; i++) host.querySelector(`.track[data-idx="${i}"]`)?.classList.add("owned");
     }
     if (pls.length) prependPlaylistList(pls); // list view: playlists as rows on top
+    // The "# TITLE ALBUM ⏱" columns belong to the local library table — they
+    // don't line up with (or apply to) YouTube results and playlist cards.
+    $("#listHead").style.display = "none";
   }
   injectArtistCard();
 }
@@ -1188,6 +1191,27 @@ function fixThumbHeights(root) {
     const w = el.clientWidth;
     if (w) el.style.height = Math.round(w * 9 / 16) + "px";
   });
+}
+// ─── Wheel smoothing ───
+// WebKitGTK applies wheel deltas as hard jumps ("it teleports then glides").
+// Ease the scroll position toward an accumulated target with rAF instead.
+// Touch devices keep native momentum; reduced-motion users keep raw jumps.
+function smoothWheel(el) {
+  if (!el || IS_TOUCH || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  let target = 0, raf = 0;
+  el.addEventListener("wheel", e => {
+    if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    const step = e.deltaMode === 1 ? e.deltaY * 18 : e.deltaY;
+    target = Math.max(0, Math.min(el.scrollHeight - el.clientHeight, (raf ? target : el.scrollTop) + step));
+    if (!raf) tick();
+  }, { passive: false });
+  function tick() {
+    const cur = el.scrollTop, d = target - cur;
+    if (Math.abs(d) < 1) { el.scrollTop = target; raf = 0; return; }
+    el.scrollTop = cur + d * 0.24;
+    raf = requestAnimationFrame(tick);
+  }
 }
 let _thumbRz = 0;
 window.addEventListener("resize", () => {
@@ -2591,13 +2615,14 @@ function initSmoothScroll() {
 function applyUiPrefs() {
   const s = S();
   $("#navHistory").hidden = !(Number(s.historyLimit) > 0);
-  $("#secSources").hidden = !s.uiSources;
+  // Sources now live in a topbar dropdown — hiding the section hides its button.
+  const srcWrap = document.querySelector(".top-drop-wrap");
+  if (srcWrap) srcWrap.hidden = !s.uiSources;
   $("#pickBtn").hidden = !s.uiSrcButtons;
   $("#manualBtn").hidden = !s.uiSrcButtons;
   $("#secPlaylists").hidden = !s.uiPlaylists;
   $("#importBtn").hidden = !s.uiImportBtn;
   $("#sortSel").hidden = !s.uiSortSel;
-  $("#secSources").classList.toggle("collapsed", !!s.collSources);
   $("#secPlaylists").classList.toggle("collapsed", !!s.collPlaylists);
   document.body.classList.toggle("np-docked", !!s.npDocked);
   $("#npPin").classList.toggle("active", !!s.npDocked);
@@ -3957,6 +3982,23 @@ async function init() {
   $("#plDetailModal").addEventListener("click", e => { if (e.target.id === "plDetailModal") closePlaylistDetail(); });
   $("#plDetailImport").addEventListener("click", () => importPlaylistDetail(true));
   $("#navShare").addEventListener("click", openShare);
+  // Sources dropdown (topbar): toggle on click, close on outside click / Esc.
+  $("#navSources")?.addEventListener("click", e => {
+    e.stopPropagation();
+    const d = $("#srcDrop");
+    d.hidden = !d.hidden;
+    $("#navSources").classList.toggle("active", !d.hidden);
+  });
+  document.addEventListener("click", e => {
+    const d = $("#srcDrop");
+    if (!d || d.hidden) return;
+    if (!e.target.closest(".top-drop-wrap")) { d.hidden = true; $("#navSources").classList.remove("active"); }
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") { const d = $("#srcDrop"); if (d && !d.hidden) { d.hidden = true; $("#navSources").classList.remove("active"); } }
+  });
+  smoothWheel($("#trackList"));
+  smoothWheel(document.querySelector(".sidebar"));
   $("#shareClose").addEventListener("click", () => $("#shareModal").hidden = true);
   $("#shareModal").addEventListener("click", e => { if (e.target.id === "shareModal") $("#shareModal").hidden = true; });
   $("#shareHostStart").addEventListener("click", shareHostStart);
