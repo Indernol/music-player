@@ -263,14 +263,17 @@ function proxyCovers(root) {
     if (IS_ANDROID && /^https?:\/\//.test(src)) netThumb(src).then(d => { el.src = d; }).catch(() => { el.src = src; });
     else el.src = src;
   });
-  if (!IS_ANDROID) return;
   // background-image covers (songs, videos, playlists, artist avatar,
   // now-playing, download rows) — all fixed-height boxes, the recipe that
-  // provably paints on the old WebView.
+  // provably paints on the old WebView. Android proxies EVERY remote cover;
+  // desktop only the bare /vi/<id>/mqdefault.jpg form — WebKitGTK refuses to
+  // paint those too (the ?sqp= URLs are fine natively), and old backends
+  // still emit them for song cards.
   scope.querySelectorAll(".art.has-cover, .yc-thumb, .pc-thumb, .ac-avatar, .pd-cover, .pd-thumb, .np-art.has-cover, .ov-art.has-cover, .dl-cover.has-cover").forEach(el => {
     const m = String(el.style.backgroundImage || "").match(/url\(['"]?(https:\/\/[^'")]+)['"]?\)/);
     if (!m || el.dataset.proxied === m[1]) return;
     const src = m[1];
+    if (!IS_ANDROID && !/i\.ytimg\.com\/vi(_webp)?\/[^?]+$/.test(src)) return;
     el.dataset.proxied = src;
     netThumb(src).then(d => { el.style.backgroundImage = `url("${d}")`; }).catch(() => { delete el.dataset.proxied; });
   });

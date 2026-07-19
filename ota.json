@@ -1,8 +1,8 @@
 {
-  "version": "0.22.23",
+  "version": "0.22.24",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Search: video covers finally render on WebKit/old WebViews (JS-pinned heights, no aspect-ratio), clear Playlists/Songs section headers, and playlist cards no longer claim a fake '12 tracks' count."
+  "notes": "Song covers actually load: bare mqdefault URLs (the form WebKitGTK/WebViews refuse to paint) are proxied to data URLs on desktop too, the backend now serves the same ?sqp= URLs as playlists, and empty thumbs show a music-note placeholder."
 }

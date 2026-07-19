@@ -434,8 +434,16 @@ fn run_ytdlp(cfg: &YtCfg, args: &[&str]) -> Result<String, String> {
 
 fn track_from_json(v: &Value) -> Option<OnlineTrack> {
     let id = v["id"].as_str()?.to_string();
-    // mqdefault always exists, no extra request needed to find the "best" thumb.
-    let thumbnail = format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg");
+    // Prefer the extractor's own thumbnail URL (hq720.jpg?sqp=…): the bare
+    // hand-built /vi/<id>/mqdefault.jpg form is exactly the one that never
+    // painted on the user's engines (Android WebView AND desktop WebKitGTK),
+    // while the ?sqp= form — what playlist cards use — renders everywhere.
+    // Same alignment as v0.22.14 did for the rustypipe path. mqdefault stays
+    // as the fallback when the flat entry carries no thumbnails array.
+    let mut thumbnail = best_thumb(v);
+    if thumbnail.is_empty() {
+        thumbnail = format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg");
+    }
     Some(OnlineTrack {
         title: v["title"].as_str().unwrap_or("Untitled").to_string(),
         artist: v["uploader"]
