@@ -1,4 +1,4 @@
-/* MP_CSS 0.22.31 — version marker read by the main.js OTA self-heal (ota_apply
+/* MP_CSS 0.22.32 — version marker read by the main.js OTA self-heal (ota_apply
    fetches css and modules separately, so this file alone can be a stale CDN
    copy). Keep in sync with ota.json + SRC_VERSION on every OTA release. */
 :root {
@@ -670,10 +670,14 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 .nx-note { font-size: 12px; color: var(--tx-3); padding: 6px 4px; }
 /* Docked mode: the panel behaves like a third layout column — the app content
    shrinks instead of being overlapped. */
-body.np-docked.np-open .app { margin-right: calc(min(var(--np-w, 330px), 92vw) + 18px); }
-/* The standalone nav bar resizes itself the same way, so the docked
-   now-playing drawer never covers it. */
-body.np-docked.np-open .nav-bar { margin-right: calc(min(var(--np-w, 330px), 92vw) + 18px + var(--safe-right, 0px)); }
+/* Docked drawer reserves layout space ONLY when the window is wide enough to
+   afford it — on narrower windows reserving ~350px crushed the whole UI, so
+   the drawer floats over the content instead (like on phones). The nav bar
+   resizes itself the same way, so the drawer never covers it. */
+@media (min-width: 980px) {
+  body.np-docked.np-open .app { margin-right: calc(min(var(--np-w, 330px), 92vw) + 18px); }
+  body.np-docked.np-open .nav-bar { margin-right: calc(min(var(--np-w, 330px), 92vw) + 18px + var(--safe-right, 0px)); }
+}
 body.np-docked .np-drawer { box-shadow: none; border-color: var(--bd); }
 #npPin.active { color: var(--accent-2); background: var(--bg-3); }
 .dlg-msg { font-size: 13px; color: var(--tx-2); line-height: 1.5; padding: 10px 0 2px; white-space: pre-line; }

@@ -1,8 +1,8 @@
 {
-  "version": "0.22.31",
+  "version": "0.22.32",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "The top navigation bar resizes itself automatically when the docked Now Playing panel is open, instead of being covered by it."
+  "notes": "Layout sizing fix: the docked Now Playing panel only reserves side space on wide windows; on narrower ones it floats over the content so the UI is never crushed."
 }

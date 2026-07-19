@@ -2759,7 +2759,7 @@ dependencies = [
 
 [[package]]
 name = "music-player"
-version = "0.22.31"
+version = "0.22.32"
 dependencies = [
  "base64 0.22.1",
  "discord-rich-presence",
