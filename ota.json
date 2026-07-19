@@ -1,5 +1,5 @@
 {
-  "version": "0.22.38",
+  "version": "0.22.39",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Skipping onto a streamed track can no longer land in silence: failed stream opens retry with a fresh URL automatically (backend + player), and connection reuse makes playback start faster.",
+  "notes": "Big scrolling performance fix: long lists are virtualized (only the visible rows exist in the page), so fast scrolling through a 2000-track library stays smooth instead of dropping to a slideshow.",
   "platforms": [
     "linux",
     "windows",

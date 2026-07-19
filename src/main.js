@@ -20,7 +20,7 @@ const IS_ANDROID = IS_NATIVE && /android/i.test(navigator.userAgent);
 // running old code (and "check update" says up-to-date forever — exactly the
 // "covers still broken after updating" trap). Detect the mismatch and re-apply
 // from scratch, once per version, so a mixed bundle always heals itself.
-const SRC_VERSION = "0.22.38";
+const SRC_VERSION = "0.22.39";
 // style.css carries a "MP_CSS <version>" marker: modules and css are fetched
 // separately by ota_apply, so the CSS alone can be a stale cached copy (the
 // version-const check above can't see that).
@@ -524,6 +524,55 @@ function applyPins(list) {
   return pinned.length ? [...pinned, ...list.filter(t => !pos.has(t.path))] : list;
 }
 
+function _rowHtml(t, i, nowPath) {
+  const isNow = nowPath === t.path;
+  const blk = isBlocked(t.path);
+  const pin = _pinSet.has(t.path);
+  return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""} ${pin ? "pinned" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
+    <div class="tk-idx">${pin ? `<span class="idx-num idx-pin">${IC.pin}</span>` : `<span class="idx-num">${i + 1}</span>`}<span class="idx-play">${IC.play}</span></div>
+    ${artCell(t)}
+    <div class="meta"><div class="t">${blk ? "🚫 " : ""}${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
+    <div class="album">${esc(t.album)}</div>
+    <span class="dur">${fmtDur(t.duration_secs)}</span>
+    <button class="more" title="More" data-more="${i}">⋯</button>
+  </div>`;
+}
+
+// ─── Virtualized list ───
+// Rendering 1800+ rows at once made fast scrolling collapse to a few fps:
+// every frame laid out and painted the entire list. Long lists render ONLY
+// the on-screen window (± VIRT_BUF rows) between two spacer divs, re-sliced
+// on scroll inside a rAF. Delegation, selection, playing-row and lazy covers
+// all operate on the rendered rows, so they keep working unchanged.
+const VIRT_MIN = 250, VIRT_BUF = 30, VIRT_SLACK = 8;
+let _virt = null; // { rowH, start, end, raf }
+function _virtSlice() {
+  const v = _virt; if (!v) return;
+  const host = $("#trackList");
+  const top = host.scrollTop, vh = host.clientHeight || 600;
+  const vpStart = Math.floor(top / v.rowH);
+  const vpEnd = Math.ceil((top + vh) / v.rowH);
+  // Hysteresis: the rendered slice is VIRT_BUF rows wider than the viewport
+  // on each side, and is only rebuilt once the viewport gets within
+  // VIRT_SLACK rows of its edge — not on every scrolled pixel.
+  if (v.start >= 0) {
+    const safeLo = v.start === 0 ? 0 : v.start + VIRT_SLACK;
+    const safeHi = v.end >= view.length ? view.length : v.end - VIRT_SLACK;
+    if (vpStart >= safeLo && vpEnd <= safeHi) return; // comfortably inside
+  }
+  const start = Math.max(0, vpStart - VIRT_BUF);
+  const end = Math.min(view.length, vpEnd + VIRT_BUF);
+  if (start === v.start && end === v.end) return;
+  v.start = start; v.end = end;
+  const nowPath = curIndex >= 0 ? queue[curIndex] : null;
+  host.innerHTML =
+    `<div class="virt-pad" style="height:${start * v.rowH}px"></div>` +
+    view.slice(start, end).map((t, k) => _rowHtml(t, start + k, nowPath)).join("") +
+    `<div class="virt-pad" style="height:${Math.max(0, view.length - end) * v.rowH}px"></div>`;
+  hydrateCovers();
+  proxyCovers(host);
+}
+
 function renderTracks(list, presorted = false) {
   const src = filterBlocked(list);
   view = applyPins(presorted ? [...src] : sortTracks([...src]));
@@ -532,21 +581,23 @@ function renderTracks(list, presorted = false) {
   const host = $("#trackList");
   host.classList.remove("yt-grid"); // leave mini-YouTube card mode
   $("#listHead").style.display = list.length ? "" : "none";
+  _virt = null;
   if (!list.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.music}</div>Nothing here yet.</div>`; return; }
   const nowPath = curIndex >= 0 ? queue[curIndex] : null;
-  host.innerHTML = list.map((t, i) => {
-    const isNow = nowPath === t.path;
-    const blk = isBlocked(t.path);
-    const pin = _pinSet.has(t.path);
-    return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""} ${pin ? "pinned" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
-      <div class="tk-idx">${pin ? `<span class="idx-num idx-pin">${IC.pin}</span>` : `<span class="idx-num">${i + 1}</span>`}<span class="idx-play">${IC.play}</span></div>
-      ${artCell(t)}
-      <div class="meta"><div class="t">${blk ? "🚫 " : ""}${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
-      <div class="album">${esc(t.album)}</div>
-      <span class="dur">${fmtDur(t.duration_secs)}</span>
-      <button class="more" title="More" data-more="${i}">⋯</button>
-    </div>`;
-  }).join("");
+  // Online results keep the full render: separators/playlist cards are
+  // injected between rows there and the list is small anyway.
+  if (list.length >= VIRT_MIN && active.type !== "online") {
+    // Seed two rows to measure the real row pitch (compact mode changes it).
+    host.innerHTML = list.slice(0, 2).map((t, i) => _rowHtml(t, i, nowPath)).join("");
+    const rows = host.querySelectorAll(".track");
+    const pitch = rows.length > 1
+      ? rows[1].offsetTop - rows[0].offsetTop
+      : (rows[0]?.offsetHeight || 56);
+    _virt = { rowH: Math.max(24, pitch), start: -1, end: -1, raf: 0 };
+    _virtSlice();
+  } else {
+    host.innerHTML = list.map((t, i) => _rowHtml(t, i, nowPath)).join("");
+  }
 
   // Rows use event delegation (wired once in init) — attaching thousands of
   // per-row listeners on every render made big libraries stutter.
@@ -557,6 +608,11 @@ function renderTracks(list, presorted = false) {
 
 function wireTrackList() {
   const host = $("#trackList");
+  // Virtualized lists re-slice their window on scroll (one rAF max in flight).
+  host.addEventListener("scroll", () => {
+    if (!_virt || _virt.raf) return;
+    _virt.raf = requestAnimationFrame(() => { if (_virt) { _virt.raf = 0; _virtSlice(); } });
+  }, { passive: true });
   host.addEventListener("click", (e) => {
     const playBtn = e.target.closest("[data-play]");
     if (playBtn) { e.stopPropagation(); playFrom(Number(playBtn.dataset.play)); return; }
@@ -4162,5 +4218,6 @@ async function init() {
 }
 
 init().catch(e => console.error("[init] failed:", e));
+
 
 
