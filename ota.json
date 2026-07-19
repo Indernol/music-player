@@ -1,8 +1,8 @@
 {
-  "version": "0.22.29",
+  "version": "0.22.30",
   "entry": "main.js",
   "modules": ["main.js", "playlists.js", "settings.js", "store.js"],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Navigation gets its own dedicated bar (Library, Recent, Share, Sources), fully separated from the search and sort toolbar."
+  "notes": "The navigation bar is now a standalone panel at the very top of the window, fully independent from the sidebar, main view and now-playing panels."
 }
