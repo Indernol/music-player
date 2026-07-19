@@ -106,8 +106,14 @@ fn check_bin(path: &str) -> Result<String, String> {
 /// on removable media (host path and its /run/host view inside a container),
 /// then linuxbrew. This survives the user renaming folders on the drive.
 fn scan_bins() -> Vec<String> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
     let mut c = vec!["yt-dlp".to_string(), format!("{home}/.local/bin/yt-dlp")];
+    if cfg!(target_os = "windows") {
+        c.push("yt-dlp.exe".to_string()); // PATH lookup
+        c.push(format!("{home}\\AppData\\Local\\MusicPlayer\\bin\\yt-dlp.exe"));
+    }
     if let Ok(rd) = std::fs::read_dir(format!("{home}/Desktop")) {
         for e in rd.filter_map(Result::ok) {
             c.push(e.path().join("bin/yt-dlp").to_string_lossy().into_owned());
@@ -152,17 +158,21 @@ fn install_bin() -> Result<String, String> {
     if let Some((p, _)) = detect_bin() {
         return Ok(p);
     }
-    let home = std::env::var("HOME").map_err(|_| "no HOME directory".to_string())?;
-    let asset = match std::env::consts::ARCH {
-        "x86_64" => "yt-dlp_linux",
-        "aarch64" => "yt-dlp_linux_aarch64",
-        "arm" => "yt-dlp_linux_armv7l",
-        other => return Err(format!("no prebuilt yt-dlp for this CPU ({other})")),
+    // HOME is a Linux/macOS thing; Windows GUI apps get USERPROFILE.
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "no home directory".to_string())?;
+    let (asset, dir, dest_name) = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => ("yt-dlp.exe", format!("{home}\\AppData\\Local\\MusicPlayer\\bin"), "yt-dlp.exe"),
+        ("macos", _) => ("yt-dlp_macos", format!("{home}/.local/bin"), "yt-dlp"),
+        ("linux", "x86_64") => ("yt-dlp_linux", format!("{home}/.local/bin"), "yt-dlp"),
+        ("linux", "aarch64") => ("yt-dlp_linux_aarch64", format!("{home}/.local/bin"), "yt-dlp"),
+        ("linux", "arm") => ("yt-dlp_linux_armv7l", format!("{home}/.local/bin"), "yt-dlp"),
+        (os, arch) => return Err(format!("no prebuilt yt-dlp for {os}/{arch}")),
     };
     let url = format!("https://github.com/yt-dlp/yt-dlp/releases/latest/download/{asset}");
-    let dir = format!("{home}/.local/bin");
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
-    let dest = format!("{dir}/yt-dlp");
+    let dest = std::path::Path::new(&dir).join(dest_name).to_string_lossy().into_owned();
     let tmp = format!("{dest}.part"); // download aside, rename in — never a half file
     dbg_log(&format!("installing yt-dlp from {url}"));
     let resp = ureq::get(&url).call().map_err(|e| format!("download failed: {e}"))?;
@@ -203,6 +213,12 @@ fn install_ffmpeg() -> Result<String, String> {
     use std::sync::OnceLock;
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    // johnvansickle ships LINUX static builds only — downloading one on
+    // Windows/macOS produced an unusable binary (and re-downloaded it on
+    // every call). Fail with an actionable message instead.
+    if !cfg!(target_os = "linux") {
+        return Err("automatic ffmpeg install is Linux-only — install ffmpeg (ffmpeg.org) and make sure it is on PATH".into());
+    }
     let home = std::env::var("HOME").map_err(|_| "no HOME directory".to_string())?;
     let dir = format!("{home}/.local/bin");
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;

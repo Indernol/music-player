@@ -151,8 +151,20 @@ async fn resolve_stream_url(
     if let Some(u) = youtube::cached_url(yt, id) {
         return Ok(u);
     }
-    let res = if ytnative::forced() {
-        ytnative::stream_url(id).await
+    // Windows: yt-dlp.exe cold-starts (PyInstaller unpack + antivirus scan)
+    // cost seconds PER attempt — and resolve() tries up to 4 clients — while
+    // most installs have no yt-dlp at all. The in-process rustypipe resolver
+    // (the ANDROID_VR path that already carries Android) answers instantly,
+    // so Windows prefers it and keeps yt-dlp as the fallback.
+    let prefer_native = ytnative::forced() || cfg!(target_os = "windows");
+    let res = if prefer_native {
+        match ytnative::stream_url(id).await {
+            Ok(u) => Ok(u),
+            Err(e) if !ytnative::forced() => {
+                youtube::resolve(yt, cfg, id).map_err(|ne| format!("{e} | {ne}"))
+            }
+            Err(e) => Err(e),
+        }
     } else {
         match youtube::resolve(yt, cfg, id) {
             Ok(u) => Ok(u),
