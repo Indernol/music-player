@@ -892,6 +892,7 @@ function openContextMenu(x, y) {
   const pls = PL.getPlaylists();
   const nOnline = paths.filter(isOnline).length;
   const inPlaylist = active.type === "playlist";
+  const inLibrary = active.type === "library";
   const nLocal = paths.map(localFileFor).filter(Boolean).length;
   const nsfx = paths.length > 1 ? paths.length + " tracks" : "track";
   menu.innerHTML =
@@ -899,7 +900,11 @@ function openContextMenu(x, y) {
     (nOnline ? `<div class="ctx-item" data-dl="1">${ic(IC.save)}Download ${nOnline > 1 ? nOnline + " tracks" : "track"} locally</div>` : "") +
     (paths.length === 1 && localFileFor(paths[0]) ? `<div class="ctx-item" data-reveal="1">${ic(IC.folder)}Open file location</div>` : "") +
     // ── removal / deletion ──
-    ((inPlaylist || nLocal) ? `<div class="ctx-sep"></div>` : "") +
+    // An online track in the library has no local file to delete and no playlist
+    // to leave, so without this there would be no way to get rid of one — and
+    // they arrive on their own now, adopted from playlists.
+    ((inPlaylist || nLocal || (inLibrary && nOnline)) ? `<div class="ctx-sep"></div>` : "") +
+    (inLibrary && nOnline ? `<div class="ctx-item" data-rm="lib">${ic(IC.minus)}Remove ${nOnline > 1 ? nOnline + " online tracks" : "online track"} from library</div>` : "") +
     (inPlaylist ? `<div class="ctx-item" data-rm="pl">${ic(IC.minus)}Remove from this playlist</div>` : "") +
     (nLocal ? `<div class="ctx-item ctx-danger" data-rm="local">${ic(IC.trash)}Delete local file${nLocal > 1 ? "s" : ""}${inPlaylist ? " (keep in playlist)" : ""}</div>` : "") +
     (inPlaylist && nLocal ? `<div class="ctx-item ctx-danger" data-rm="both">${ic(IC.trash)}Remove from playlist + delete local</div>` : "") +
@@ -943,6 +948,23 @@ function openContextMenu(x, y) {
     flash(on ? `Pinned ${nsfx} to top` : `Unpinned ${nsfx}`);
   });
 
+  menu.querySelector('[data-rm="lib"]')?.addEventListener("click", async () => {
+    closeCtx();
+    const online = paths.filter(isOnline);
+    // A track still referenced by a playlist would simply be re-adopted the
+    // next time the library is opened, so say that instead of pretending.
+    const stillLinked = online.filter(p => PL.getPlaylists().some(pl => pl.paths.includes(p)));
+    if (stillLinked.length && !await askConfirm(
+      `Remove ${online.length > 1 ? online.length + " online tracks" : "this online track"} from your library?`,
+      `${stillLinked.length === online.length ? "They are" : `${stillLinked.length} of them are`} still in a playlist, so ${stillLinked.length > 1 ? "they" : "it"} will come back the next time you open your library. Remove ${stillLinked.length > 1 ? "them" : "it"} from the playlist too to keep ${stillLinked.length > 1 ? "them" : "it"} out.`,
+      "Remove")) return;
+    const drop = new Set(online);
+    library = library.filter(t => !drop.has(t.path));
+    selected.clear();
+    await saveLibrary();
+    showLibrary();
+    flash(`Removed ${online.length > 1 ? online.length + " online tracks" : "1 online track"} from library`);
+  });
   menu.querySelector('[data-rm="pl"]')?.addEventListener("click", () => {
     closeCtx();
     for (const p of paths) PL.removeFromPlaylist(active.id, p);
@@ -2563,10 +2585,34 @@ async function dlPump() {
   else if (ok) flash(`${ok} track${ok === 1 ? "" : "s"} saved locally`);
 }
 
+// Your Library means everything you have, not everything you downloaded. Online
+// tracks sitting in playlists are adopted into the library so they show up here
+// without ever being saved as mp3. Adoption is one-way on purpose: dropping a
+// track from a playlist should not make it disappear from your library.
+// Cheap when there is nothing new, so it can run on every open and self-heal
+// after imports, follows and playlist edits without hooking each of them.
+function adoptPlaylistOnline() {
+  const have = new Set(library.map(t => t.path));
+  const add = [];
+  for (const pl of PL.getPlaylists()) {
+    for (const p of pl.paths) {
+      if (!isOnline(p) || have.has(p)) continue;
+      const t = onlineIndex.get(p);
+      if (!t) continue; // unresolved id — nothing to show yet
+      have.add(p);
+      add.push(t);
+    }
+  }
+  if (!add.length) return 0;
+  library = library.concat(add);
+  return add.length;
+}
+
 function showLibrary() {
   active = { type: "library", id: "" };
   markActive();
   selected.clear();
+  if (adoptPlaylistOnline()) saveLibrary();
   const artists = new Set(library.map(t => t.artist)).size;
   const nOnline = library.filter(t => isOnline(t.path)).length;
   // The library behaves like a playlist you cannot delete: same header, same
