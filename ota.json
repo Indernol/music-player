@@ -1,5 +1,5 @@
 {
-  "version": "0.22.44",
+  "version": "0.22.45",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Save locally is now always visible on Your Library, instead of appearing only when the library happens to hold online tracks — a button that disappears reads as missing rather than as nothing-to-do. It shows the mp3 count when there is something to fetch, and otherwise says so on click.",
+  "notes": "Fixes drag-to-reorder on long lists. Auto-scrolling during a drag makes the virtual list rebuild its rows, which destroyed the row being dragged: the drag highlight and the insertion line vanished mid-gesture, and if the source row was rebuilt away the cleanup never ran, leaving stray marks behind. The drag now tracks positions instead of DOM nodes, repaints itself after every rebuild, and always cleans up — including on Escape or a drop outside the list.",
   "platforms": [
     "linux",
     "windows",

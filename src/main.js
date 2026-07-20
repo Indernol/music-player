@@ -560,11 +560,28 @@ function canReorder() {
 
 // Drag state. `from` is a VIEW index; it is translated through _plSrc.idx only
 // at drop time, so the live re-slicing of the virtual list cannot invalidate it.
-let _drag = null; // { from, overEl, after, scrollRaf }
+// Both indices are VIEW indices, never element references: a long list is
+// virtualized, and auto-scrolling during a drag makes _virtSlice() rewrite the
+// host's innerHTML, destroying every row — including the one being dragged.
+// Indices survive that; DOM nodes do not. `view` itself is never mutated
+// mid-drag, so an index stays valid for the whole gesture.
+let _drag = null; // { from, overIdx, after }
 
 function _clearDropMark() {
   document.querySelectorAll("#trackList .drop-before, #trackList .drop-after")
     .forEach(el => el.classList.remove("drop-before", "drop-after"));
+}
+
+function _rowByIdx(i) {
+  return i == null ? null : document.querySelector(`#trackList .track[data-idx="${i}"]`);
+}
+
+// Re-apply the drag decorations after the virtual list has rebuilt its rows.
+function _repaintDrag() {
+  if (!_drag) return;
+  _clearDropMark();
+  _rowByIdx(_drag.from)?.classList.add("dragging");
+  if (_drag.overIdx != null) _rowByIdx(_drag.overIdx)?.classList.add(_drag.after ? "drop-after" : "drop-before");
 }
 
 // Rows outside the rendered window do not exist in the DOM, so a long list can
@@ -576,7 +593,7 @@ function _dragAutoScroll(host, clientY) {
   let dy = 0;
   if (clientY < r.top + EDGE) dy = -Math.ceil((r.top + EDGE - clientY) / 3);
   else if (clientY > r.bottom - EDGE) dy = Math.ceil((clientY - (r.bottom - EDGE)) / 3);
-  if (!dy) { if (_drag) _drag.scrollRaf = 0; return; }
+  if (!dy) return;
   host.scrollTop += dy;
 }
 
@@ -584,7 +601,7 @@ function wireReorder(host) {
   host.addEventListener("dragstart", (e) => {
     const row = e.target.closest(".track");
     if (!row || !canReorder()) return;
-    _drag = { from: Number(row.dataset.idx), overEl: null, after: false, scrollRaf: 0 };
+    _drag = { from: Number(row.dataset.idx), overIdx: null, after: false };
     row.classList.add("dragging");
     // Firefox refuses to start a drag unless some data is set.
     try { e.dataTransfer.setData("text/plain", row.dataset.path || ""); } catch {}
@@ -598,22 +615,22 @@ function wireReorder(host) {
     _dragAutoScroll(host, e.clientY);
     const row = e.target.closest(".track");
     if (!row || row.classList.contains("dragging")) return;
+    const idx = Number(row.dataset.idx);
+    if (!Number.isInteger(idx)) return;
     const r = row.getBoundingClientRect();
     const after = e.clientY > r.top + r.height / 2;
-    if (_drag.overEl === row && _drag.after === after) return;
+    if (_drag.overIdx === idx && _drag.after === after) return;
     _clearDropMark();
-    _drag.overEl = row; _drag.after = after;
+    _drag.overIdx = idx; _drag.after = after;
     row.classList.add(after ? "drop-after" : "drop-before");
   });
 
   host.addEventListener("drop", (e) => {
     if (!_drag) return;
     e.preventDefault();
-    const target = _drag.overEl;
-    const from = _drag.from, after = _drag.after;
+    const from = _drag.from, after = _drag.after, overIdx = _drag.overIdx;
     _endDrag();
-    if (!target || !canReorder()) return;
-    const overIdx = Number(target.dataset.idx);
+    if (overIdx == null || !canReorder()) return;
     if (!Number.isInteger(overIdx) || overIdx === from) return;
 
     const map = _plSrc.idx;
@@ -639,7 +656,13 @@ function wireReorder(host) {
     }
   });
 
-  host.addEventListener("dragend", _endDrag);
+  // dragend fires on the SOURCE row, so a re-slice that removed it would leave
+  // the gesture state stuck (stale drop marks, next click misread as a drag).
+  // Listen on the document instead — that fires regardless of what happened to
+  // the row, including when the drag is cancelled with Escape or dropped
+  // outside the list.
+  document.addEventListener("dragend", _endDrag);
+  document.addEventListener("drop", (e) => { if (_drag) { e.preventDefault(); _endDrag(); } });
 }
 
 function _endDrag() {
@@ -695,6 +718,8 @@ function _virtSlice() {
     `<div class="virt-pad" style="height:${Math.max(0, view.length - end) * v.rowH}px"></div>`;
   hydrateCovers();
   proxyCovers(host);
+  // These rows replaced the ones that carried the drag decorations.
+  _repaintDrag();
 }
 
 // The column headers and the sort row belong to the track list: both must
