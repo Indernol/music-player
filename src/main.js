@@ -2553,7 +2553,11 @@ function showLibrary() {
     subtitle: `${library.length} songs · ${artists} artist${artists === 1 ? "" : "s"} · ${folders.length} folder${folders.length === 1 ? "" : "s"}${nOnline ? ` · ${nOnline} online` : ""}`,
     actions:
       `<button id="libUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
-      (nOnline ? `<button id="libDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nOnline} mp3)</button>` : ""),
+      // Always shown, unlike on a playlist: the library is the home view, and a
+      // control that vanishes whenever nothing is downloadable reads as missing
+      // rather than as "nothing to do". With no online tracks it stays enabled
+      // and says so on click.
+      `<button id="libDlBtn" class="btn-line sm"${nOnline ? "" : ` title="Nothing to download — everything here is already local"`}>${ic(IC.save)} Save locally${nOnline ? ` (${nOnline} mp3)` : ""}</button>`,
   });
   $("#libUrlBtn")?.addEventListener("click", addUrlToLibrary);
   $("#libDlBtn")?.addEventListener("click", downloadLibraryOnline);
