@@ -2265,7 +2265,7 @@ function dlRow(d) {
     ? `<span class="dl-cover has-cover" style="background-image:url('${esc(d.thumbnail)}')"></span>`
     : `<span class="dl-cover">${badge}</span>`;
   return `
-    <div class="dl-row ${d.status}" data-path="${esc(d.path)}" title="${esc(d.err || d.title)}">
+    <div class="dl-row ${d.status}" data-path="${esc(d.path)}" data-id="${esc(d.id)}" title="${esc(d.err || d.title)}">
       ${cover}
       <span class="dl-name">${esc(d.title)}${d.status === "error" && d.err ? `<span class="dl-err">${esc(d.err.slice(0, 140))}</span>` : ""}</span>
       <span class="dl-prog"><i style="width:${d.status === "done" ? 100 : (d.pct || 0)}%"></i></span>
@@ -2346,7 +2346,8 @@ function dlProgress(id, pct) {
   const d = dlQueue.find(x => x.status === "active" && x.id === id);
   if (!d) return;
   d.pct = Math.max(0, Math.min(100, pct));
-  const row = $("#dlList")?.querySelector(".dl-row.active");
+  // Multiple rows can be active at once — route the update to the matching id.
+  const row = [...($("#dlList")?.querySelectorAll(".dl-row.active") || [])].find(r => r.dataset.id === id);
   if (row) { row.querySelector(".dl-prog i").style.width = d.pct + "%"; row.querySelector(".dl-pct").textContent = d.pct + "%"; }
 }
 function dlCancel(path) {
@@ -2359,8 +2360,8 @@ function dlStop() {
   if (dlQueue.some(d => d.status === "queued" || d.status === "active")) {
     dlStopAll = true;
     dlQueue.forEach(d => { if (d.status === "queued") d.status = "canceled"; });
-    const act = dlQueue.find(d => d.status === "active");
-    if (act) invoke("yt_cancel", { id: act.id }).catch(() => {});
+    // Multiple downloads can be in flight at once — cancel every active one.
+    for (const act of dlQueue.filter(d => d.status === "active")) invoke("yt_cancel", { id: act.id }).catch(() => {});
     dlRender();
   } else {
     // Clear: drop finished downloads AND finished background tasks.
@@ -2470,7 +2471,16 @@ function downloadTracks(paths) {
   if (!dlRunning) dlPump();
 }
 let _dlErrShown = false;
+// Bounded worker pool: up to S().dlConcurrency runners each pick the next
+// "queued" item and drive it exactly like the old sequential pump did — same
+// health check, same local-link shortcut, same storage cap, same transient
+// retry/cooldown ladder, now shared across the whole pool instead of one
+// track at a time. MAX_DL_WORKERS caps the pool at the highest selectable
+// setting (4); each runner re-reads dlConcurrency before every pickup so a
+// mid-batch change is honored (lazily) without restarting the batch.
+const MAX_DL_WORKERS = 4;
 async function dlPump() {
+  if (dlRunning) return; // no-op if a pump is already driving the queue
   dlRunning = true;
   dlStopAll = false;
   _dlErrShown = false;
@@ -2487,92 +2497,126 @@ async function dlPump() {
     return;
   }
 
-  let dir = "", ok = 0, cooldownIdx = 0, consecTransient = 0;
+  let dir = "", ok = 0, cooldownIdx = 0, consecTransient = 0, capHit = false;
   dlNotice = "";
   // Storage cap: skip new downloads once the target folder passes the limit.
   const capMb = Math.max(0, Number(S().storageCapMb) || 0);
-  let capHit = false;
-  for (;;) {
-    const d = dlQueue.find(x => x.status === "queued");
-    if (!d || dlStopAll) break;
-    // The library may have grown mid-batch (rescans): link instead of downloading.
-    const local = libraryLocalFor(d.id);
-    if (local) {
-      d.status = "done"; d.pct = 100;
-      PL.replacePath(d.path, local);
+  // Pool-wide pause for the rate-limit cooldown ladder: while `cooling` is
+  // true, no runner picks up a new item, but whatever is already in flight
+  // is left to finish — exactly like the old single-track cooldown, just
+  // scoped to every runner instead of the lone active download.
+  let cooling = false;
+  async function runCooldown() {
+    if (cooling) return; // another runner is already driving this countdown
+    cooling = true;
+    const COOLDOWNS = [120, 300, 600, 1200];
+    const wait = COOLDOWNS[Math.min(cooldownIdx, COOLDOWNS.length - 1)];
+    cooldownIdx++;
+    consecTransient = 0;
+    for (let s = wait; s > 0 && !dlStopAll; s--) {
+      dlNotice = `⏸ YouTube rate-limit — resuming in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
       dlRender();
-      continue;
+      await sleep(1000);
     }
-    // Enforce the storage cap before spending bandwidth on a new file.
-    if (capMb && IS_NATIVE) {
-      try {
-        const dlDir = dir || S().downloadDir || (IS_ANDROID ? ANDROID_MUSIC_DIR + "/MusicPlayer" : "");
-        if (dlDir) {
-          const bytes = await invoke("folder_size", { path: dlDir });
-          if (bytes >= capMb * 1024 * 1024) {
-            capHit = true;
-            for (const x of dlQueue) if (x.status === "queued") { x.status = "error"; x.permanent = true; x.err = "storage cap reached"; }
-            break;
-          }
-        }
-      } catch {}
-    }
-    d.status = "active"; d.pct = 0; dlRender();
-    try {
-      const file = await invoke("yt_download", { id: d.id, dir: S().downloadDir || "", quality: S().downloadQuality || "best" });
-      d.status = "done"; d.pct = 100; ok++; cooldownIdx = 0; consecTransient = 0;
-      dir = file.slice(0, file.lastIndexOf("/"));
-      PL.replacePath(d.path, file); // playlists now point at the local file
-    } catch (e) {
-      const msg = String(e);
-      if (msg.includes("canceled") || dlStopAll) { d.status = "canceled"; }
-      else if (dlTransientErr(msg)) {
-        // Rate-limit-style refusal or network blip: never abandon the track —
-        // requeue it at the BACK so one stubborn video doesn't block the
-        // batch, and retry it later.
-        d.tries = (d.tries || 0) + 1;
-        consecTransient++;
-        console.warn("[download transient]", d.id, `try ${d.tries}`, msg);
-        if (d.tries >= 4) { d.status = "error"; d.err = `${msg} (after ${d.tries} tries)`; }
-        else {
-          d.status = "queued"; d.err = msg;
-          const at = dlQueue.indexOf(d);
-          if (at >= 0) { dlQueue.splice(at, 1); dlQueue.push(d); }
-        }
-      } else {
-        // Final refusal (copyright claim, private/deleted, geo/age/premium…):
-        // mark it, remember it forever, move on — no retry, no cooldown.
-        d.status = "error"; d.permanent = true; d.err = msg;
-        dlBlock[d.id] = msg; saveDlBlock();
-        console.error("[download final]", d.id, msg);
-        // Surface the reason once (permission / storage errors are otherwise
-        // buried in the downloads panel — the #1 "downloads don't work" cause).
-        if (!_dlErrShown) { _dlErrShown = true; flash(`Download failed: ${msg.slice(0, 120)}`); }
-      }
-    }
+    dlNotice = "";
     dlRender();
-    if (dlStopAll) break;
+    cooling = false;
+  }
 
-    if (consecTransient >= 3) {
-      // Three different tracks refused in a row = real rate limit. Pause
-      // (progressively longer, capped at 20 min, repeated as needed) — after
-      // any success the ladder resets to short waits.
-      const COOLDOWNS = [120, 300, 600, 1200];
-      const wait = COOLDOWNS[Math.min(cooldownIdx, COOLDOWNS.length - 1)];
-      cooldownIdx++;
-      consecTransient = 0;
-      for (let s = wait; s > 0 && !dlStopAll; s--) {
-        dlNotice = `⏸ YouTube rate-limit — resuming in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-        dlRender();
-        await sleep(1000);
+  async function runner() {
+    for (;;) {
+      if (dlStopAll) return;
+      if (cooling) { await sleep(300); continue; }
+      const limit = Math.max(1, Math.min(MAX_DL_WORKERS, Number(S().dlConcurrency) || 3));
+      const activeNow = dlQueue.filter(x => x.status === "active").length;
+      if (activeNow >= limit) { await sleep(300); continue; } // pool at its configured cap
+      const d = dlQueue.find(x => x.status === "queued");
+      if (!d) {
+        if (activeNow === 0) return; // nothing left, nothing in flight: this runner is done
+        await sleep(300); continue; // an in-flight item may still requeue on a transient error
       }
-      dlNotice = "";
+      // Claim it synchronously (no await above this line since the concurrency
+      // check) so two runners can never grab the same queued item.
+      d.status = "active"; d.pct = 0;
+      // The library may have grown mid-batch (rescans): link instead of downloading.
+      const local = libraryLocalFor(d.id);
+      if (local) {
+        d.status = "done"; d.pct = 100;
+        PL.replacePath(d.path, local);
+        dlRender();
+        continue;
+      }
+      // Enforce the storage cap before spending bandwidth on a new file.
+      if (capMb && IS_NATIVE) {
+        try {
+          const dlDir = dir || S().downloadDir || (IS_ANDROID ? ANDROID_MUSIC_DIR + "/MusicPlayer" : "");
+          if (dlDir) {
+            const bytes = await invoke("folder_size", { path: dlDir });
+            if (bytes >= capMb * 1024 * 1024) {
+              capHit = true;
+              d.status = "error"; d.permanent = true; d.err = "storage cap reached";
+              for (const x of dlQueue) if (x.status === "queued") { x.status = "error"; x.permanent = true; x.err = "storage cap reached"; }
+              dlRender();
+              continue;
+            }
+          }
+        } catch {}
+      }
+      if (dlStopAll) { d.status = "canceled"; dlRender(); continue; }
       dlRender();
-    } else if (dlQueue.some(x => x.status === "queued")) {
-      // Polite pacing between tracks (the script sleeps 2-5s for the same reason).
-      await sleep(1200 + Math.random() * 1800);
+      try {
+        const file = await invoke("yt_download", { id: d.id, dir: S().downloadDir || "", quality: S().downloadQuality || "best" });
+        d.status = "done"; d.pct = 100; ok++; cooldownIdx = 0; consecTransient = 0;
+        dir = file.slice(0, file.lastIndexOf("/"));
+        PL.replacePath(d.path, file); // playlists now point at the local file
+      } catch (e) {
+        const msg = String(e);
+        if (msg.includes("canceled") || dlStopAll) { d.status = "canceled"; }
+        else if (dlTransientErr(msg)) {
+          // Rate-limit-style refusal or network blip: never abandon the track —
+          // requeue it at the BACK so one stubborn video doesn't block the
+          // batch, and retry it later.
+          d.tries = (d.tries || 0) + 1;
+          consecTransient++;
+          console.warn("[download transient]", d.id, `try ${d.tries}`, msg);
+          if (d.tries >= 4) { d.status = "error"; d.err = `${msg} (after ${d.tries} tries)`; }
+          else {
+            d.status = "queued"; d.err = msg;
+            const at = dlQueue.indexOf(d);
+            if (at >= 0) { dlQueue.splice(at, 1); dlQueue.push(d); }
+          }
+        } else {
+          // Final refusal (copyright claim, private/deleted, geo/age/premium…):
+          // mark it, remember it forever, move on — no retry, no cooldown.
+          d.status = "error"; d.permanent = true; d.err = msg;
+          dlBlock[d.id] = msg; saveDlBlock();
+          console.error("[download final]", d.id, msg);
+          // Surface the reason once (permission / storage errors are otherwise
+          // buried in the downloads panel — the #1 "downloads don't work" cause).
+          if (!_dlErrShown) { _dlErrShown = true; flash(`Download failed: ${msg.slice(0, 120)}`); }
+        }
+      }
+      dlRender();
+      if (dlStopAll) return;
+
+      if (consecTransient >= 3) {
+        // Three transient refusals in a row across the pool = real rate limit.
+        // Pause every runner (progressively longer, capped at 20 min, repeated
+        // as needed) — after any success the ladder resets to short waits.
+        await runCooldown();
+      } else if (dlQueue.some(x => x.status === "queued")) {
+        // Polite pacing between tracks (the script sleeps 2-5s for the same reason).
+        await sleep(1200 + Math.random() * 1800);
+      }
     }
   }
+
+  // Always spawn the max pool size; each runner's own concurrency check
+  // (re-read every pickup) is what actually throttles active downloads to
+  // S().dlConcurrency, so raising/lowering the setting mid-batch takes
+  // effect at the next pickup instead of waiting for a fresh dlPump() call.
+  await Promise.all(Array.from({ length: MAX_DL_WORKERS }, runner));
+
   if (dir) {
     if (!folders.includes(dir)) folders.push(dir);
     await rescanFolder(dir); // picks up the new files with proper tags
@@ -3597,6 +3641,9 @@ function openSettings() {
       <div class="set-row"><label>Download quality</label>
         <select id="setDlQuality" class="sel sm-sel">${[["best","Best available"],["320","320 kbps"],["256","256 kbps"],["192","192 kbps"],["128","128 kbps (smallest)"]].map(([v,l]) => `<option value="${v}" ${(s.downloadQuality||"best")===v?"selected":""}>${l}</option>`).join("")}</select></div>
       <div class="set-hint">Applies to single tracks and whole-playlist downloads. Lower = smaller files. On desktop with yt-dlp it caps the mp3 bitrate; the built-in engine picks the closest audio stream.</div>
+      <div class="set-row"><label>Simultaneous downloads</label>
+        <select id="setDlConcurrency" class="sel sm-sel">${[1,2,3,4].map(v => `<option value="${v}" ${(Number(s.dlConcurrency) || 3) === v ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      <div class="set-hint">More parallel downloads clear a big queue faster, but raise the chance YouTube rate-limits you.</div>
       <div class="set-row"><label>Storage cap <span class="set-sub">(max MB of audio per source folder · 0 = unlimited)</span></label><input type="number" id="setStorageCap" class="num-in" min="0" max="1000000" step="500" value="${s.storageCapMb ?? 0}"></div>
       <div class="set-hint" id="setStorageUse">When the download folder reaches this size, new downloads are skipped so it never overflows.</div>
       <div class="set-row"><label>Tick “Save locally” by default when importing</label><input type="checkbox" id="setAutoSave" ${s.autoSaveImports ? "checked" : ""}></div>
@@ -3782,6 +3829,7 @@ function openSettings() {
   $("#setIncPl")?.addEventListener("change", e => SETTINGS.setSetting("ytIncludePlaylists", e.target.checked));
   $("#setPlPrev")?.addEventListener("change", e => SETTINGS.setSetting("playlistPreviewCount", Math.max(1, Math.min(200, Number(e.target.value) || 25))));
   $("#setDlQuality")?.addEventListener("change", e => SETTINGS.setSetting("downloadQuality", e.target.value));
+  $("#setDlConcurrency")?.addEventListener("change", e => SETTINGS.setSetting("dlConcurrency", Math.max(1, Math.min(4, Number(e.target.value) || 3))));
   $("#setStorageCap")?.addEventListener("change", e => SETTINGS.setSetting("storageCapMb", Math.max(0, Number(e.target.value) || 0)));
   $("#setShowBlocked")?.addEventListener("change", e => { SETTINGS.setSetting("showBlocked", e.target.checked); refreshView(); });
   // Account & cloud sync

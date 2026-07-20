@@ -1,5 +1,5 @@
 {
-  "version": "0.22.48",
+  "version": "0.22.49",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Updates can now be fully automatic on every install — not just source-tree ones. Pick Automatic in Settings → Updates: instant (OTA) updates apply themselves when the app launches, and when a new native version ships, Android downloads the APK and hands it to the system installer by itself (you just tap Install — Android requires that), while desktop installer builds download and run the setup on their own. Notify me keeps the old behavior: an Update button and nothing moves without you.",
+  "notes": "Downloads now run in parallel: a new Settings → Downloads option, \"Simultaneous downloads\" (1–4, default 3), lets several tracks fetch at once instead of one at a time — a big queue of 400+ tracks clears much faster. Everything else about downloads behaves the same: the storage cap, retry-on-rate-limit, and blocked-track rules all still apply, just shared across the parallel downloads instead of a single one. Turn it down to 1 if you'd rather stay conservative with YouTube's rate limits.",
   "platforms": [
     "linux",
     "windows",

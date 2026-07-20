@@ -81,6 +81,7 @@ const DEFAULTS = {
   ytIncludePlaylists: true, // search bar also returns YouTube playlists
   playlistPreviewCount: 25, // tracks shown in the playlist detail window (1..200)
   downloadQuality: "best",  // mp3/m4a bitrate cap: best | 320 | 256 | 192 | 128
+  dlConcurrency: 3,      // simultaneous invoke("yt_download") calls the queue pump runs (1-4)
   storageCapMb: 0,       // max MB of audio a source folder may hold (0 = unlimited)
   showBlocked: false,    // reveal blocked tracks (greyed) instead of hiding them
   gdriveClientId: "",    // user's Google OAuth Client ID (Desktop app)

@@ -20,3 +20,4 @@ Thumbs.db
 
 # Private dev notes — never push to GitHub
 CLAUDE.md
+.foreman/
