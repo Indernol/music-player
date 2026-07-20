@@ -215,11 +215,19 @@ fn install_ffmpeg() -> Result<String, String> {
     use std::sync::OnceLock;
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    // Windows: yt-dlp's own static FFmpeg builds. Landing next to yt-dlp.exe
+    // matters — yt-dlp auto-detects binaries in its own folder, so downloads
+    // convert to mp3 without any PATH or --ffmpeg-location cooperation.
+    // Without this, EVERY Windows download died at postprocessing ("ffmpeg
+    // not found") and the silent fallback engine littered raw m4a/mp4/webm.
+    if cfg!(target_os = "windows") {
+        return install_ffmpeg_windows();
+    }
     // johnvansickle ships LINUX static builds only — downloading one on
-    // Windows/macOS produced an unusable binary (and re-downloaded it on
-    // every call). Fail with an actionable message instead.
+    // macOS produced an unusable binary (and re-downloaded it on every
+    // call). Fail with an actionable message instead.
     if !cfg!(target_os = "linux") {
-        return Err("automatic ffmpeg install is Linux-only — install ffmpeg (ffmpeg.org) and make sure it is on PATH".into());
+        return Err("automatic ffmpeg install is Linux/Windows-only — install ffmpeg (ffmpeg.org) and make sure it is on PATH".into());
     }
     let home = std::env::var("HOME").map_err(|_| "no HOME directory".to_string())?;
     let dir = format!("{home}/.local/bin");
@@ -274,13 +282,63 @@ fn install_ffmpeg() -> Result<String, String> {
     Ok(ff)
 }
 
+/// Windows twin of the Linux path below: fetch yt-dlp's static FFmpeg build
+/// (zip) and drop ffmpeg.exe + ffprobe.exe next to yt-dlp.exe. Windows 10+
+/// ships bsdtar as tar.exe, which extracts zip natively — no zip crate.
+fn install_ffmpeg_windows() -> Result<String, String> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "no home directory".to_string())?;
+    let dir = format!("{home}\\AppData\\Local\\MusicPlayer\\bin");
+    let ff = format!("{dir}\\ffmpeg.exe");
+    if check_bin(&ff).is_ok() {
+        return Ok(ff);
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
+    let url = "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip";
+    let tmp = std::env::temp_dir().join("mp-ffmpeg.zip");
+    let ex = std::env::temp_dir().join("mp-ffmpeg-extract");
+    dbg_log(&format!("installing ffmpeg from {url}"));
+    let resp = ureq::get(url).call().map_err(|e| format!("ffmpeg download failed: {e}"))?;
+    {
+        let mut reader = resp.into_reader();
+        let mut f = std::fs::File::create(&tmp).map_err(|e| format!("cannot write {tmp:?}: {e}"))?;
+        std::io::copy(&mut reader, &mut f).map_err(|e| format!("ffmpeg download interrupted: {e}"))?;
+    }
+    let _ = std::fs::remove_dir_all(&ex);
+    std::fs::create_dir_all(&ex).map_err(|e| e.to_string())?;
+    let ok = sys_cmd("tar")
+        .arg("-xf")
+        .arg(&tmp)
+        .arg("-C")
+        .arg(&ex)
+        .status()
+        .map_err(|e| format!("cannot run tar to unpack ffmpeg: {e}"))?
+        .success();
+    if !ok {
+        return Err("tar failed to extract ffmpeg".into());
+    }
+    for name in ["ffmpeg.exe", "ffprobe.exe"] {
+        if let Some(found) = find_named(&ex, name) {
+            let dest = format!("{dir}\\{name}");
+            std::fs::copy(&found, &dest).map_err(|e| format!("cannot install {name}: {e}"))?;
+        }
+    }
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_dir_all(&ex);
+    check_bin(&ff).map_err(|e| format!("installed ffmpeg did not run: {e}"))?;
+    dbg_log(&format!("ffmpeg installed at {ff}"));
+    Ok(ff)
+}
+
 /// Ensure an ffmpeg is reachable for mp3 conversion: if none sits next to the
 /// yt-dlp binary and none is on PATH, fetch a static build. Best-effort — on
 /// failure the download itself reports the missing ffmpeg.
 fn ensure_ffmpeg(bin: &str) {
+    let ffname = if cfg!(target_os = "windows") { "ffmpeg.exe" } else { "ffmpeg" };
     let near = std::path::Path::new(bin)
         .parent()
-        .map(|p| p.join("ffmpeg").exists())
+        .map(|p| p.join(ffname).exists())
         .unwrap_or(false);
     if near || check_bin("ffmpeg").is_ok() {
         return;
@@ -1106,8 +1164,9 @@ fn download_attempt(
     }
     // The standalone yt-dlp ships next to ffmpeg (same bin/ folder) — point at
     // it explicitly since the container PATH has no ffmpeg for the mp3 convert.
+    // Windows binaries carry .exe — checking bare "ffmpeg" there always missed.
     if let Some(parent) = std::path::Path::new(bin).parent() {
-        if parent.join("ffmpeg").exists() {
+        if parent.join("ffmpeg").exists() || parent.join("ffmpeg.exe").exists() {
             cmd.arg("--ffmpeg-location").arg(parent);
         }
     }
@@ -1139,8 +1198,13 @@ fn download_attempt(
         "--no-warnings",
         "--no-simulate",
         "--newline",
+        // --print implies --quiet, which silently swallowed ALL progress
+        // output; --progress forces it back on. And in the template,
+        // "download:" is yt-dlp's TYPE prefix (consumed, never printed) —
+        // the parser below needs a LITERAL marker, hence dlp|.
+        "--progress",
         "--progress-template",
-        "download:%(progress._percent_str)s",
+        "download:dlp|%(progress._percent_str)s",
         "--print",
         "after_move:filepath",
         &page,
@@ -1170,7 +1234,7 @@ fn download_attempt(
     let mut last_pct = -1i32;
     for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
         let l = line.trim();
-        if let Some(p) = l.strip_prefix("download:") {
+        if let Some(p) = l.strip_prefix("dlp|") {
             let pct = p.trim().trim_end_matches('%').parse::<f32>().unwrap_or(0.0) as i32;
             if pct != last_pct {
                 last_pct = pct;

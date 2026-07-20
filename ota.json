@@ -1,5 +1,5 @@
 {
-  "version": "0.22.51",
+  "version": "0.22.52",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "The Now Playing panel now pushes the WHOLE app aside — search bar, track list, everything — whenever the window has room for it, instead of floating over your content. The decision comes from the real window width (no more CSS breakpoints, which Windows display scaling quietly broke), and the panel caps itself at about a third of the window so the track list always keeps a usable share. Too narrow for both? It floats like on phones. Downloads also got a second speed boost: on top of 0.22.49's simultaneous downloads (Settings → Downloads, 1–4 at once), the app itself (update it to v0.22.51) now fetches each track over 4 parallel connections, sidestepping YouTube's per-connection throttling.",
+  "notes": "Downloads on Windows are truly fixed this time: the app now installs FFmpeg by itself (update the app to v0.22.52), so every track converts to a real mp3 with embedded artwork instead of silently piling up raw m4a/mp4 files while the counter told you stories. Download progress bars also work for the first time ever with yt-dlp — the old progress parsing never matched what yt-dlp actually prints, so bars sat at 0% and teleported to 100 — and each bar now only moves forward (no more jumping back between the audio and artwork phases). All the recent speed work still applies: up to 4 tracks at once, 4 connections per track.",
   "platforms": [
     "linux",
     "windows",

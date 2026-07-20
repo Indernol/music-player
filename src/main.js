@@ -2345,7 +2345,10 @@ function dlRender() {
 function dlProgress(id, pct) {
   const d = dlQueue.find(x => x.status === "active" && x.id === id);
   if (!d) return;
-  d.pct = Math.max(0, Math.min(100, pct));
+  // Monotonic per track: yt-dlp reports several download phases (audio, then
+  // the thumbnail for embedding), each 0→100 — without the clamp the bar
+  // visibly jumped backwards between phases.
+  d.pct = Math.max(d.pct || 0, Math.max(0, Math.min(100, pct)));
   // Multiple rows can be active at once — route the update to the matching id.
   const row = [...($("#dlList")?.querySelectorAll(".dl-row.active") || [])].find(r => r.dataset.id === id);
   if (row) { row.querySelector(".dl-prog i").style.width = d.pct + "%"; row.querySelector(".dl-pct").textContent = d.pct + "%"; }
