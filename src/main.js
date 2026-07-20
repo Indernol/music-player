@@ -3658,6 +3658,7 @@ function openSettings() {
     <div class="set-group"><div class="set-title">Updates</div>
       <div class="set-row"><label>When a new version is available</label>
         <select id="setUpdMode" class="sel sm-sel wide">
+          <option value="auto" ${s.updateMode === "auto" ? "selected" : ""}>Automatic</option>
           <option value="ask" ${s.updateMode === "ask" ? "selected" : ""}>Notify me</option>
           <option value="off" ${s.updateMode === "off" ? "selected" : ""}>Don't check</option>
         </select></div>
@@ -3669,8 +3670,8 @@ function openSettings() {
       <div class="set-hint" id="setAudioInfo">Audio output: checking…</div>
       <div class="set-hint" id="setEngineInfo"></div>
       <div class="set-hint" id="setUpdHint">${IS_ANDROID
-        ? "Checks GitHub for the newest APK for Android. “Update” opens the download — install it to update. Android and desktop versions update independently."
-        : "Checks GitHub for the newest release for your platform. “Update” opens the installer download."}</div>
+        ? "Automatic: instant updates apply on launch, and new APKs download themselves — Android only asks you to tap Install (that prompt can't be skipped). Notify me: shows an Update button instead. Android and desktop versions update independently."
+        : "Automatic: instant updates apply on launch, and new installers download and run themselves. Notify me: shows an Update button instead."}</div>
       <div class="set-row" id="setVerRow" hidden><label>Switch / downgrade version</label>
         <span class="dir-pick">
           <select id="setVerSel" class="sel sm-sel wide"><option value="">Loading versions…</option></select>
@@ -3950,9 +3951,17 @@ function verCmp(a, b) {
 }
 let _releaseInfo = null; // { version, asset_url, page_url, platform }
 let _otaMode = false;    // an instant (no-reinstall) frontend update is available
+let _updChecked = false; // first check of the session = the boot check
 async function checkUpdate(manual = false) {
   if (!IS_NATIVE) return;
   if (!manual && S().updateMode === "off") return;
+  // Auto mode applies the OTA only on the BOOT check — it reloads the app, so
+  // a later background check must not yank a playing session; those show the
+  // Update button instead. Release installs (below) are safe to auto-run any
+  // time: the download runs in the background and Android's install prompt /
+  // the desktop installer only appears once it's ready.
+  const atBoot = !_updChecked; _updChecked = true;
+  const autoMode = S().updateMode === "auto" && !manual;
   // Prefer an over-the-air frontend update: it applies instantly, no reinstall,
   // on every platform. Only fall back to the APK/installer path (native code
   // changes) when no OTA is offered.
@@ -3961,6 +3970,7 @@ async function checkUpdate(manual = false) {
     if (ota && ota.available) {
       _otaMode = true; availableVersion = ota.version; _releaseInfo = null;
       renderUpdateBtn();
+      if (autoMode && atBoot) { runUpdate(); return; }
       if (manual) flash(`Instant update available: v${ota.current} → v${ota.version}`);
       return;
     }
@@ -3975,7 +3985,7 @@ async function checkUpdate(manual = false) {
   if (hasSourceTree) {
     if (src && cur && src !== cur) {
       availableVersion = src; _releaseInfo = null;
-      if (S().updateMode === "auto" && !manual) { runUpdate(); return; }
+      if (autoMode) { runUpdate(); return; }
       if (manual) flash(`Update available: v${cur} → v${src}`);
     } else {
       availableVersion = ""; if (manual) flash(`Up to date (v${cur})`);
@@ -3986,6 +3996,10 @@ async function checkUpdate(manual = false) {
       _releaseInfo = rel;
       if (rel.version && cur && verCmp(rel.version, cur) > 0) {
         availableVersion = rel.version;
+        // Auto mode: Android downloads the APK and pops the system installer,
+        // desktop installer builds download and launch the setup — same
+        // hands-off behavior the source-tree path has always had.
+        if (autoMode) { renderUpdateBtn(); runUpdate(); return; }
         if (manual) flash(`Update available for ${rel.platform}: v${cur} → v${rel.version}`);
       } else {
         availableVersion = ""; if (manual) flash(`Up to date (v${cur})`);

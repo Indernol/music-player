@@ -1,5 +1,5 @@
 {
-  "version": "0.22.47",
+  "version": "0.22.48",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "The nav bar now always steps aside when the Now Playing panel is open — floating or docked, any window width — so its buttons never end up buried under the panel (this hit Windows hardest, where display scaling shrank the CSS viewport below the old breakpoint). Right-clicking the playing track — in the bottom bar, the Now Playing panel, or an Up next row — now opens the same menu as a playlist row: download, block, delete, add to playlist. Windows downloads no longer fail with 'environment variable not found' (native fix — update the app itself for that one).",
+  "notes": "Updates can now be fully automatic on every install — not just source-tree ones. Pick Automatic in Settings → Updates: instant (OTA) updates apply themselves when the app launches, and when a new native version ships, Android downloads the APK and hands it to the system installer by itself (you just tap Install — Android requires that), while desktop installer builds download and run the setup on their own. Notify me keeps the old behavior: an Update button and nothing moves without you.",
   "platforms": [
     "linux",
     "windows",
