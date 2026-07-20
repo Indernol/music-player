@@ -208,9 +208,23 @@ body.compact-top .topbar { --topbar-pad: 7px; gap: 8px; }
 body.compact-top .search-wrap input { padding-top: 6px; padding-bottom: 6px; }
 body.compact-top .top-gear, body.compact-top .icon-btn { width: 26px; height: 26px; }
 .tk-idx .idx-play svg { width: 11px; height: 11px; }
-.search-wrap { position: relative; flex: 1; max-width: 440px; }
-.search-ico { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); font-size: 13px; opacity: .6; pointer-events: none; }
-.search-wrap input { width: 100%; padding-left: 32px; }
+/* Search is the primary action of the top bar, so it sits centred and carries
+   real weight instead of hugging the left edge. The sibling controls are the
+   burger (hidden on desktop) and the selection counter (empty unless you are
+   selecting), so auto margins centre it against the view for real. */
+.search-wrap { position: relative; flex: 1 1 560px; max-width: min(620px, 62vw); margin-inline: auto; }
+.search-ico { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 14px; opacity: .75; pointer-events: none; transition: opacity .12s, color .12s; }
+.search-wrap input {
+  width: 100%; padding-left: 38px; padding-top: 10px; padding-bottom: 10px;
+  font-size: 13.5px; border-radius: 11px;
+  background: var(--bg-3); border: 1px solid var(--bd);
+  transition: border-color .14s, background .14s, box-shadow .14s;
+}
+.search-wrap input::placeholder { opacity: .72; }
+.search-wrap input:hover { border-color: var(--bd-2); }
+.search-wrap input:focus { background: var(--bg-2); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 92, 246, .22); outline: none; }
+.search-wrap:focus-within .search-ico { opacity: 1; color: var(--accent); }
+body.compact-top .search-wrap input { border-radius: 9px; }
 .count { color: var(--tx-3); font-size: 12px; font-weight: 600; white-space: nowrap; }
 
 /* Inline SVG icon inside a button / menu-item label */
@@ -1064,6 +1078,10 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .track, .list-head { grid-template-columns: 26px 40px minmax(0, 1fr) 52px 28px; }
   .track .album, .list-head .lh-album { display: none; }
   .count { display: none; }
+  /* Phone: the burger reappears beside the field, so centring would squeeze it.
+     Let the search take whatever width is left instead. */
+  .search-wrap { max-width: none; margin-inline: 0; flex: 1 1 auto; }
+  .list-tools { padding-inline: 12px; margin-inline: 6px; }
   /* minmax(0,...) lets the side cells shrink below their content so the track
      title ellipsises instead of the "now playing" cell growing and overlapping
      the centred transport controls (the shuffle-over-artwork bug). */

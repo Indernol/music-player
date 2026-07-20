@@ -1,5 +1,5 @@
 {
-  "version": "0.22.42",
+  "version": "0.22.43",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Drag a song to reorder it inside a playlist — grab any row and drop it where you want; long lists auto-scroll while you drag. Dragging is offered only when the view still shows the playlist's own order, so a sorted, filtered or pinned list cannot be reordered into a surprise. The permanent track counter next to the search box is gone (the count is already in each view's subtitle), and the sort selector moved down beside the column headers it applies to.",
+  "notes": "Your Library is now a first-class playlist: same header, an Add from URL button, Save locally when it holds online tracks, and drag-to-reorder like any playlist. Follow is deliberately absent — following mirrors an upstream playlist and the library has no upstream. It still cannot be renamed or deleted. The search field is centred and given real weight, with a focus ring and a wider box.",
   "platforms": [
     "linux",
     "windows",

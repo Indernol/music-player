@@ -532,15 +532,18 @@ function applyPins(list) {
 // also survives two traps: openPlaylist drops unresolvable paths with
 // .filter(Boolean) (so view index ≠ paths index), and allowDup lets the same
 // path appear twice (so indexOf alone would move the wrong copy).
-let _plSrc = null; // { id, idx: [pathsIndexForViewRow0, ...] } | null
+// The library is reorderable on the same terms as a playlist: its backing array
+// is persisted whole by saveLibrary(), so moving an entry IS the saved order —
+// no extra setting to keep in sync.
+let _plSrc = null; // { kind: "playlist"|"library", id, idx: [srcIndexForViewRow0, ...] } | null
 
-function _computePlSrc(pl) {
+function _computeOrderMap(paths) {
   const nextFrom = new Map();
   const idx = [];
   let prev = -1;
   for (const t of view) {
     const from = nextFrom.get(t.path) || 0;
-    const i = pl.paths.indexOf(t.path, from);
+    const i = paths.indexOf(t.path, from);
     if (i < 0 || i <= prev) return null; // unmappable or reordered → no drag
     nextFrom.set(t.path, i + 1);
     idx.push(i);
@@ -549,7 +552,11 @@ function _computePlSrc(pl) {
   return idx;
 }
 
-function canReorder() { return !!_plSrc && active.type === "playlist" && _plSrc.id === active.id; }
+function canReorder() {
+  if (!_plSrc) return false;
+  if (_plSrc.kind === "playlist") return active.type === "playlist" && _plSrc.id === active.id;
+  return active.type === "library";
+}
 
 // Drag state. `from` is a VIEW index; it is translated through _plSrc.idx only
 // at drop time, so the live re-slicing of the virtual list cannot invalidate it.
@@ -618,8 +625,18 @@ function wireReorder(host) {
     const beforeAnchor = realFrom < anchor ? anchor - 1 : anchor;
     const to = after ? beforeAnchor + 1 : beforeAnchor;
     if (to === realFrom) return;
-    PL.reorderPlaylist(active.id, realFrom, to);
-    openPlaylist(active.id);
+    if (_plSrc.kind === "playlist") {
+      PL.reorderPlaylist(active.id, realFrom, to);
+      openPlaylist(active.id);
+    } else {
+      // Same splice-out-then-in semantics as reorderPlaylist, so the index
+      // maths above holds for both.
+      const [moved] = library.splice(realFrom, 1);
+      if (moved === undefined) return;
+      library.splice(to, 0, moved);
+      saveLibrary();
+      showLibrary();
+    }
   });
 
   host.addEventListener("dragend", _endDrag);
@@ -699,10 +716,15 @@ function renderTracks(list, presorted = false) {
   // when hidden rows sit between them puts the track somewhere the user cannot
   // see, which reads as a bug even though the index maths is right.
   _plSrc = null;
-  if (active.type === "playlist" && !$("#search").value.trim()) {
-    const pl = PL.getPlaylists().find(p => p.id === active.id);
-    const idx = pl ? _computePlSrc(pl) : null;
-    if (idx) _plSrc = { id: active.id, idx };
+  if (!$("#search").value.trim()) {
+    if (active.type === "playlist") {
+      const pl = PL.getPlaylists().find(p => p.id === active.id);
+      const idx = pl ? _computeOrderMap(pl.paths) : null;
+      if (idx) _plSrc = { kind: "playlist", id: active.id, idx };
+    } else if (active.type === "library") {
+      const idx = _computeOrderMap(library.map(t => t.path));
+      if (idx) _plSrc = { kind: "library", id: "", idx };
+    }
   }
   updateCount();
   const host = $("#trackList");
@@ -2521,8 +2543,50 @@ function showLibrary() {
   markActive();
   selected.clear();
   const artists = new Set(library.map(t => t.artist)).size;
-  setViewHead({ icon: IC.disc, title: "Your Library", subtitle: `${library.length} songs · ${artists} artist${artists === 1 ? "" : "s"} · ${folders.length} folder${folders.length === 1 ? "" : "s"}` });
+  const nOnline = library.filter(t => isOnline(t.path)).length;
+  // The library behaves like a playlist you cannot delete: same header, same
+  // actions, same drag-to-reorder. "Follow" is deliberately absent — following
+  // mirrors an upstream playlist, and the library has no upstream to mirror.
+  setViewHead({
+    icon: IC.disc,
+    title: "Your Library",
+    subtitle: `${library.length} songs · ${artists} artist${artists === 1 ? "" : "s"} · ${folders.length} folder${folders.length === 1 ? "" : "s"}${nOnline ? ` · ${nOnline} online` : ""}`,
+    actions:
+      `<button id="libUrlBtn" class="btn-line sm" title="Add a YouTube video or playlist by URL">${ic(IC.link)} Add from URL</button>` +
+      (nOnline ? `<button id="libDlBtn" class="btn-line sm">${ic(IC.save)} Save locally (${nOnline} mp3)</button>` : ""),
+  });
+  $("#libUrlBtn")?.addEventListener("click", addUrlToLibrary);
+  $("#libDlBtn")?.addEventListener("click", downloadLibraryOnline);
   renderTracks(library);
+}
+
+// "Add from URL" for the library. Mirrors addByUrl(), but the destination is
+// the library array itself instead of a playlist's paths.
+async function addUrlToLibrary() {
+  if (!IS_NATIVE) { flash("Adding by URL needs the native app"); return; }
+  const url = await askText("Add from URL", { placeholder: "YouTube video or playlist URL", ok: "Add" });
+  if (!url) return;
+  flash("Fetching…");
+  try {
+    const res = await invoke("yt_playlist", { url: url.trim() });
+    const tracks = (res.tracks || []).map(onlineFromResult);
+    if (!tracks.length) { flash("Nothing found at that URL"); return; }
+    tracks.forEach(t => onlineIndex.set(t.path, t));
+    const have = new Set(library.map(t => t.path));
+    const fresh = tracks.filter(t => !have.has(t.path));
+    library = library.concat(fresh);
+    saveOnline();
+    await saveLibrary();
+    if (active.type === "library") showLibrary();
+    flash(fresh.length ? `Added ${fresh.length} track${fresh.length === 1 ? "" : "s"}` : "Already in your library");
+  } catch (e) { flash(`Could not add: ${e}`); }
+}
+
+async function downloadLibraryOnline() {
+  const online = library.filter(t => isOnline(t.path)).map(t => t.path);
+  if (!online.length) { flash("Everything in your library is already local"); return; }
+  if (!await askConfirm("Save these locally?", `${online.length} track${online.length === 1 ? "" : "s"} will be downloaded as mp3 (already-downloaded ones are skipped).`, "Download")) return;
+  downloadTracks(online);
 }
 function markActive() {
   $("#navLibrary").classList.toggle("active", active.type === "library");
