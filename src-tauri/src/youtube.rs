@@ -299,7 +299,14 @@ fn install_ffmpeg_windows() -> Result<String, String> {
     let tmp = std::env::temp_dir().join("mp-ffmpeg.zip");
     let ex = std::env::temp_dir().join("mp-ffmpeg-extract");
     dbg_log(&format!("installing ffmpeg from {url}"));
-    let resp = ureq::get(url).call().map_err(|e| format!("ffmpeg download failed: {e}"))?;
+    // Connect/read timeouts (NOT an overall cap — the zip is ~160 MB): if
+    // github.com is blackholed, fail fast instead of hanging every download
+    // start behind the install lock.
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(15))
+        .timeout_read(std::time::Duration::from_secs(60))
+        .build();
+    let resp = agent.get(url).call().map_err(|e| format!("ffmpeg download failed: {e}"))?;
     {
         let mut reader = resp.into_reader();
         let mut f = std::fs::File::create(&tmp).map_err(|e| format!("cannot write {tmp:?}: {e}"))?;
