@@ -1,5 +1,5 @@
 {
-  "version": "0.22.49",
+  "version": "0.22.50",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Downloads now run in parallel: a new Settings → Downloads option, \"Simultaneous downloads\" (1–4, default 3), lets several tracks fetch at once instead of one at a time — a big queue of 400+ tracks clears much faster. Everything else about downloads behaves the same: the storage cap, retry-on-rate-limit, and blocked-track rules all still apply, just shared across the parallel downloads instead of a single one. Turn it down to 1 if you'd rather stay conservative with YouTube's rate limits.",
+  "notes": "The Now Playing panel now pushes the WHOLE app aside — search bar, track list, everything — whenever the window has room for it, instead of floating over your content. The decision comes from the real window width (no more CSS breakpoints, which Windows display scaling quietly broke), and the panel caps itself at about a third of the window so the track list always keeps a usable share. Too narrow for both? It floats like on phones. Resizing the panel or the window re-decides on the fly. Also in this train: simultaneous downloads (1–4, default 3) from 0.22.49 — set Settings → Downloads → Simultaneous downloads.",
   "platforms": [
     "linux",
     "windows",

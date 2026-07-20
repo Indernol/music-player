@@ -3068,14 +3068,25 @@ function applyUiPrefs() {
 
 // ─── Now Playing panel: big artwork + track info + up-next queue ───
 let npOpen = false;
+// Push vs float is decided from the REAL width left over next to the drawer —
+// not from a CSS breakpoint (those are in CSS px and lied under Windows
+// display scaling, leaving the drawer glued over the content). Whenever the
+// sidebar + a usable track list still fit (~430px), the whole app shrinks
+// around the drawer; only truly narrow windows keep the phone-style overlay.
+function updateNpPush() {
+  const eff = Math.min(Number(S().npW) || 330, Math.max(window.innerWidth * 0.34, 260));
+  document.body.classList.toggle("np-push", npOpen && window.innerWidth - eff >= 430);
+}
 function toggleNpPanel(force) {
   npOpen = force !== undefined ? force : !npOpen;
   if (npOpen && dlOpen) { dlOpen = false; dlRender(); }
   $("#npPanel").hidden = !npOpen;
   document.body.classList.toggle("np-open", npOpen);
+  updateNpPush();
   SETTINGS.setSetting("uiNpOpen", npOpen);
   if (npOpen) renderNpPanel();
 }
+window.addEventListener("resize", updateNpPush);
 function renderNpPanel() {
   if (!npOpen) return;
   const path = curIndex >= 0 ? queue[curIndex] : null;
@@ -4341,6 +4352,7 @@ function wireResizer(handle, { min, max, def, setting, cssVar, widthFrom }) {
       el.classList.remove("dragging");
       document.body.classList.remove("rs-dragging");
       if (lastW) SETTINGS.setSetting(setting, lastW);
+      updateNpPush(); // a new width can tip the drawer between push and overlay
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
@@ -4349,6 +4361,7 @@ function wireResizer(handle, { min, max, def, setting, cssVar, widthFrom }) {
   el.addEventListener("dblclick", () => {
     root.setProperty(cssVar, `${def}px`);
     SETTINGS.setSetting(setting, def);
+    updateNpPush(); // a new width can tip the drawer between push and overlay
     flash("Panel width reset");
   });
 }

@@ -663,7 +663,11 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
   /* 8px inset like every other panel — it was 10px, leaving the drawer 2px
      off-grid from the nav bar and the app panels. */
   position: fixed; top: 8px; right: calc(8px + var(--safe-right, 0px)); bottom: 118px; z-index: 79;
-  width: min(var(--np-w, 330px), 92vw);
+  /* Effective width: the user's chosen width, capped to roughly a third of
+     the viewport so that when the drawer pushes the layout aside (np-push)
+     the track list keeps a usable share of the window. The 260px floor keeps
+     the drawer itself readable on mid-size windows. */
+  width: var(--np-eff, min(var(--np-w, 330px), 92vw));
   background: var(--bg-1); border: 1px solid var(--bd-2); border-radius: var(--r);
   padding: 14px 16px; display: flex; flex-direction: column; gap: 7px;
   box-shadow: -14px 0 44px rgba(0, 0, 0, .5);
@@ -693,23 +697,19 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
 .nx-meta .s { font-size: 11px; color: var(--tx-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nx-dur { font-size: 11px; color: var(--tx-3); font-variant-numeric: tabular-nums; }
 .nx-note { font-size: 12px; color: var(--tx-3); padding: 6px 4px; }
-/* Docked mode: the panel behaves like a third layout column — the app content
-   shrinks instead of being overlapped. */
-/* Docked drawer reserves layout space ONLY when the window is wide enough to
-   afford it — on narrower windows reserving ~350px crushed the whole UI, so
-   the drawer floats over the content instead (like on phones). The nav bar
-   resizes itself the same way, so the drawer never covers it. */
-@media (min-width: 980px) {
-  /* .app already carries 8px padding-right — its margin only needs npw+8 so
-     the main panel's right edge lands EXACTLY on the nav bar's (npw+16). */
-  body.np-docked.np-open .app { margin-right: calc(min(var(--np-w, 330px), 92vw) + 8px); }
-}
+/* Open drawer: compute the effective width once — chosen width capped at a
+   third of the viewport (260px floor so the drawer stays readable). */
+body.np-open { --np-eff: min(var(--np-w, 330px), max(34vw, 260px)); }
+/* Push mode — set by JS from the REAL available width (no fixed breakpoint:
+   media queries in CSS px lied under Windows display scaling). When there is
+   room for sidebar + a usable track list, the drawer becomes a true third
+   column and the WHOLE app shrinks around it; otherwise it floats over the
+   content like on phones. */
+body.np-push .app { margin-right: calc(var(--np-eff, 330px) + 8px); }
 /* The drawer starts at top:8px — the same row as the nav bar — so the nav bar
-   ALWAYS steps aside when the drawer is open, docked or floating: a covered
-   nav bar is unclickable. Not gated on the 980px breakpoint: with Windows
-   display scaling (125%+) the CSS viewport often sits below it, which left the
-   nav bar buried under the drawer on Windows while Linux looked fine. */
-body.np-open .nav-bar { margin-right: calc(min(var(--np-w, 330px), 92vw) + 16px + var(--safe-right, 0px)); }
+   ALWAYS steps aside when the drawer is open, pushed or floating: a covered
+   nav bar is unclickable. */
+body.np-open .nav-bar { margin-right: calc(var(--np-eff, 330px) + 16px + var(--safe-right, 0px)); }
 body.np-docked .np-drawer { box-shadow: none; border-color: var(--bd); }
 #npPin.active { color: var(--accent-2); background: var(--bg-3); }
 .dlg-msg { font-size: 13px; color: var(--tx-2); line-height: 1.5; padding: 10px 0 2px; white-space: pre-line; }
@@ -1101,8 +1101,8 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
      Put the bar on its own full-width line below title + %, so nothing overlaps. */
   .dl-row { flex-wrap: wrap; row-gap: 6px; }
   .dl-prog { order: 10; flex: 1 1 100%; }
-  body.np-docked.np-open .app { margin-right: 0; }
-  /* Phones: the drawer is a temporary overlay — the nav bar keeps its width. */
+  /* Phones: the drawer is a temporary overlay — nothing reserves space. */
+  body.np-push .app { margin-right: 0; }
   body.np-open .nav-bar { margin-right: calc(8px + var(--safe-right, 0px)); }
   .np-drawer { width: min(var(--np-w, 330px), 96vw); }
   /* Explicit columns (no auto-fill guesswork on older WebViews): always 2-up. */
