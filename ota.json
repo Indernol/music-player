@@ -1,5 +1,5 @@
 {
-  "version": "0.22.50",
+  "version": "0.22.51",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "The Now Playing panel now pushes the WHOLE app aside — search bar, track list, everything — whenever the window has room for it, instead of floating over your content. The decision comes from the real window width (no more CSS breakpoints, which Windows display scaling quietly broke), and the panel caps itself at about a third of the window so the track list always keeps a usable share. Too narrow for both? It floats like on phones. Resizing the panel or the window re-decides on the fly. Also in this train: simultaneous downloads (1–4, default 3) from 0.22.49 — set Settings → Downloads → Simultaneous downloads.",
+  "notes": "The Now Playing panel now pushes the WHOLE app aside — search bar, track list, everything — whenever the window has room for it, instead of floating over your content. The decision comes from the real window width (no more CSS breakpoints, which Windows display scaling quietly broke), and the panel caps itself at about a third of the window so the track list always keeps a usable share. Too narrow for both? It floats like on phones. Downloads also got a second speed boost: on top of 0.22.49's simultaneous downloads (Settings → Downloads, 1–4 at once), the app itself (update it to v0.22.51) now fetches each track over 4 parallel connections, sidestepping YouTube's per-connection throttling.",
   "platforms": [
     "linux",
     "windows",

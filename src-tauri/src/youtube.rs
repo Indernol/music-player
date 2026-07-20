@@ -1125,6 +1125,11 @@ fn download_attempt(
         "-x",
         "--audio-format",
         "mp3",
+        // YouTube throttles PER CONNECTION (often to double-digit KB/s);
+        // fetching 4 fragments in parallel multiplies real-world throughput
+        // far more than any queue-level parallelism can.
+        "--concurrent-fragments",
+        "4",
         // Keep the artwork + title/artist inside the mp3 itself.
         "--embed-thumbnail",
         "--embed-metadata",
