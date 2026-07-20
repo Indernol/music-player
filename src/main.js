@@ -3075,7 +3075,9 @@ let npOpen = false;
 // around the drawer; only truly narrow windows keep the phone-style overlay.
 function updateNpPush() {
   const eff = Math.min(Number(S().npW) || 330, Math.max(window.innerWidth * 0.34, 260));
-  document.body.classList.toggle("np-push", npOpen && window.innerWidth - eff >= 430);
+  // ≥700px matches the phone-overlay CSS breakpoint: below it the class would
+  // be set only for the stylesheet to neutralize it — don't set it at all.
+  document.body.classList.toggle("np-push", npOpen && window.innerWidth >= 700 && window.innerWidth - eff >= 430);
 }
 function toggleNpPanel(force) {
   npOpen = force !== undefined ? force : !npOpen;
