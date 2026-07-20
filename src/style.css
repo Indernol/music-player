@@ -703,8 +703,13 @@ body.bg-light.has-bg .ov-art, body.bg-light.has-bg .np-art { background: rgba(0,
   /* .app already carries 8px padding-right — its margin only needs npw+8 so
      the main panel's right edge lands EXACTLY on the nav bar's (npw+16). */
   body.np-docked.np-open .app { margin-right: calc(min(var(--np-w, 330px), 92vw) + 8px); }
-  body.np-docked.np-open .nav-bar { margin-right: calc(min(var(--np-w, 330px), 92vw) + 16px + var(--safe-right, 0px)); }
 }
+/* The drawer starts at top:8px — the same row as the nav bar — so the nav bar
+   ALWAYS steps aside when the drawer is open, docked or floating: a covered
+   nav bar is unclickable. Not gated on the 980px breakpoint: with Windows
+   display scaling (125%+) the CSS viewport often sits below it, which left the
+   nav bar buried under the drawer on Windows while Linux looked fine. */
+body.np-open .nav-bar { margin-right: calc(min(var(--np-w, 330px), 92vw) + 16px + var(--safe-right, 0px)); }
 body.np-docked .np-drawer { box-shadow: none; border-color: var(--bd); }
 #npPin.active { color: var(--accent-2); background: var(--bg-3); }
 .dlg-msg { font-size: 13px; color: var(--tx-2); line-height: 1.5; padding: 10px 0 2px; white-space: pre-line; }
@@ -1097,7 +1102,8 @@ input::placeholder { color: var(--tx-3); opacity: 1; }
   .dl-row { flex-wrap: wrap; row-gap: 6px; }
   .dl-prog { order: 10; flex: 1 1 100%; }
   body.np-docked.np-open .app { margin-right: 0; }
-  body.np-docked.np-open .nav-bar { margin-right: calc(8px + var(--safe-right, 0px)); }
+  /* Phones: the drawer is a temporary overlay — the nav bar keeps its width. */
+  body.np-open .nav-bar { margin-right: calc(8px + var(--safe-right, 0px)); }
   .np-drawer { width: min(var(--np-w, 330px), 96vw); }
   /* Explicit columns (no auto-fill guesswork on older WebViews): always 2-up. */
   .tracklist.yt-grid { grid-template-columns: 1fr 1fr; }

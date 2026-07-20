@@ -1,5 +1,5 @@
 {
-  "version": "0.22.46",
+  "version": "0.22.47",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Your Library now means everything you have, not everything you downloaded: online tracks sitting in your playlists show up in the library too, streamed, with no mp3 required. Adoption is one-way — removing a song from a playlist does not make it vanish from your library. A new right-click action removes online tracks from the library, and it warns you when one is still in a playlist and would simply come back.",
+  "notes": "The nav bar now always steps aside when the Now Playing panel is open — floating or docked, any window width — so its buttons never end up buried under the panel (this hit Windows hardest, where display scaling shrank the CSS viewport below the old breakpoint). Right-clicking the playing track — in the bottom bar, the Now Playing panel, or an Up next row — now opens the same menu as a playlist row: download, block, delete, add to playlist. Windows downloads no longer fail with 'environment variable not found' (native fix — update the app itself for that one).",
   "platforms": [
     "linux",
     "windows",

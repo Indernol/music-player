@@ -3070,7 +3070,19 @@ function renderNpPanel() {
           <span class="nx-dur">${fmtDur(tr.duration_secs)}</span></div>`;
       }).join("")
     : `<div class="nx-note">Queue is empty — play something.</div>`;
-  host.querySelectorAll("[data-qi]").forEach(el => el.addEventListener("click", () => { history.push(curIndex); hardPlay(Number(el.dataset.qi)); }));
+  host.querySelectorAll("[data-qi]").forEach(el => {
+    el.addEventListener("click", () => { history.push(curIndex); hardPlay(Number(el.dataset.qi)); });
+    // Up-next rows get the standard track menu too — same as a playlist row.
+    el.addEventListener("contextmenu", (e) => {
+      const p = queue[Number(el.dataset.qi)];
+      if (!p) return;
+      e.preventDefault();
+      selected.clear(); selected.add(p);
+      anchorIdx = view.findIndex(t => t.path === p);
+      refreshSelectionUI();
+      openContextMenu(e.clientX, e.clientY);
+    });
+  });
 }
 
 // ─── Desktop media integration (MPRIS) ───
@@ -4445,6 +4457,21 @@ async function init() {
   $("#sortSel").addEventListener("change", e => { sortMode = e.target.value; SETTINGS.setSetting("sortMode", sortMode); refreshView(); });
 
   document.querySelector(".now").addEventListener("click", () => toggleNpPanel());
+  // Right-clicking the playing track (bottom bar or the Now Playing panel)
+  // selects it and opens the SAME context menu as a playlist row — so the
+  // current track can be downloaded/blocked/deleted without hunting for its
+  // row in the list.
+  const ctxOnPlaying = (e) => {
+    const p = curIndex >= 0 ? queue[curIndex] : null;
+    if (!p) return;
+    e.preventDefault();
+    selected.clear(); selected.add(p);
+    anchorIdx = view.findIndex(t => t.path === p);
+    refreshSelectionUI();
+    openContextMenu(e.clientX, e.clientY);
+  };
+  document.querySelector(".now").addEventListener("contextmenu", ctxOnPlaying);
+  for (const sel of ["#ovArt", "#ovTitle", "#ovSub", "#ovMeta"]) $(sel).addEventListener("contextmenu", ctxOnPlaying);
   $("#npClose").addEventListener("click", () => toggleNpPanel(false));
   $("#npPin").addEventListener("click", () => { SETTINGS.setSetting("npDocked", !S().npDocked); applyUiPrefs(); });
   document.querySelectorAll(".ss-toggle").forEach(el => el.addEventListener("click", () => {

@@ -72,7 +72,9 @@ pub struct YtCfg {
 /// Append yt-dlp failures to a persistent log so real error causes can be
 /// inspected after the fact (~/.local/share/com.indernol.musicplayer/yt.log).
 pub fn dbg_log(msg: &str) {
-    if let Ok(home) = std::env::var("HOME") {
+    // HOME || USERPROFILE: without the fallback, Windows never wrote this log,
+    // which is exactly where download failures needed to be inspected.
+    if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
         let dir = format!("{home}/.local/share/com.indernol.musicplayer");
         let _ = std::fs::create_dir_all(&dir);
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -906,10 +908,15 @@ fn resolve_download_dir(dir: &str) -> Result<String, String> {
     // an uninstall). Desktop keeps ~/Music/MusicPlayer.
     #[cfg(target_os = "android")]
     let default = "/storage/emulated/0/Music/MusicPlayer".to_string();
+    // HOME is a Linux/macOS thing; Windows GUI apps get USERPROFILE. Failing
+    // here killed EVERY download on Windows ("environment variable not found")
+    // even when the user had picked an explicit download folder.
     #[cfg(not(target_os = "android"))]
-    let default = format!("{}/Music/MusicPlayer", std::env::var("HOME").map_err(|e| e.to_string())?);
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "no home directory".to_string())?;
     #[cfg(not(target_os = "android"))]
-    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let default = format!("{home}/Music/MusicPlayer");
     #[cfg(target_os = "android")]
     let home = std::env::var("HOME").unwrap_or_else(|_| "/storage/emulated/0".into());
     let resolved = if dir.is_empty() {

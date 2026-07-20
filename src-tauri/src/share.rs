@@ -358,7 +358,9 @@ pub async fn share_download(
 ) -> Result<String, String> {
     use tauri::Emitter;
     let dir = if dir.trim().is_empty() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".into());
         if cfg!(target_os = "android") {
             "/storage/emulated/0/Music/MusicPlayer".to_string()
         } else {
