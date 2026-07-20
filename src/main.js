@@ -524,11 +524,118 @@ function applyPins(list) {
   return pinned.length ? [...pinned, ...list.filter(t => !pos.has(t.path))] : list;
 }
 
+// ─── Drag-to-reorder (playlists only) ───
+// A row can only be moved when the rendered order still mirrors the playlist's
+// own `paths` order. Rather than testing sort/pins/search separately, we map
+// every visible row back to a distinct index in pl.paths and require that map
+// to be strictly increasing — one invariant that covers all three at once, and
+// also survives two traps: openPlaylist drops unresolvable paths with
+// .filter(Boolean) (so view index ≠ paths index), and allowDup lets the same
+// path appear twice (so indexOf alone would move the wrong copy).
+let _plSrc = null; // { id, idx: [pathsIndexForViewRow0, ...] } | null
+
+function _computePlSrc(pl) {
+  const nextFrom = new Map();
+  const idx = [];
+  let prev = -1;
+  for (const t of view) {
+    const from = nextFrom.get(t.path) || 0;
+    const i = pl.paths.indexOf(t.path, from);
+    if (i < 0 || i <= prev) return null; // unmappable or reordered → no drag
+    nextFrom.set(t.path, i + 1);
+    idx.push(i);
+    prev = i;
+  }
+  return idx;
+}
+
+function canReorder() { return !!_plSrc && active.type === "playlist" && _plSrc.id === active.id; }
+
+// Drag state. `from` is a VIEW index; it is translated through _plSrc.idx only
+// at drop time, so the live re-slicing of the virtual list cannot invalidate it.
+let _drag = null; // { from, overEl, after, scrollRaf }
+
+function _clearDropMark() {
+  document.querySelectorAll("#trackList .drop-before, #trackList .drop-after")
+    .forEach(el => el.classList.remove("drop-before", "drop-after"));
+}
+
+// Rows outside the rendered window do not exist in the DOM, so a long list can
+// only be traversed by scrolling. Nudge the viewport while the pointer sits
+// near an edge; the scroll handler re-slices and materialises the next rows.
+function _dragAutoScroll(host, clientY) {
+  const r = host.getBoundingClientRect();
+  const EDGE = 60;
+  let dy = 0;
+  if (clientY < r.top + EDGE) dy = -Math.ceil((r.top + EDGE - clientY) / 3);
+  else if (clientY > r.bottom - EDGE) dy = Math.ceil((clientY - (r.bottom - EDGE)) / 3);
+  if (!dy) { if (_drag) _drag.scrollRaf = 0; return; }
+  host.scrollTop += dy;
+}
+
+function wireReorder(host) {
+  host.addEventListener("dragstart", (e) => {
+    const row = e.target.closest(".track");
+    if (!row || !canReorder()) return;
+    _drag = { from: Number(row.dataset.idx), overEl: null, after: false, scrollRaf: 0 };
+    row.classList.add("dragging");
+    // Firefox refuses to start a drag unless some data is set.
+    try { e.dataTransfer.setData("text/plain", row.dataset.path || ""); } catch {}
+    e.dataTransfer.effectAllowed = "move";
+  });
+
+  host.addEventListener("dragover", (e) => {
+    if (!_drag) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    _dragAutoScroll(host, e.clientY);
+    const row = e.target.closest(".track");
+    if (!row || row.classList.contains("dragging")) return;
+    const r = row.getBoundingClientRect();
+    const after = e.clientY > r.top + r.height / 2;
+    if (_drag.overEl === row && _drag.after === after) return;
+    _clearDropMark();
+    _drag.overEl = row; _drag.after = after;
+    row.classList.add(after ? "drop-after" : "drop-before");
+  });
+
+  host.addEventListener("drop", (e) => {
+    if (!_drag) return;
+    e.preventDefault();
+    const target = _drag.overEl;
+    const from = _drag.from, after = _drag.after;
+    _endDrag();
+    if (!target || !canReorder()) return;
+    const overIdx = Number(target.dataset.idx);
+    if (!Number.isInteger(overIdx) || overIdx === from) return;
+
+    const map = _plSrc.idx;
+    const realFrom = map[from];
+    const anchor = map[overIdx];
+    if (realFrom === undefined || anchor === undefined) return;
+    // reorderPlaylist splices the item OUT first, so every index above it
+    // shifts down by one. Compensate before choosing the insertion point.
+    const beforeAnchor = realFrom < anchor ? anchor - 1 : anchor;
+    const to = after ? beforeAnchor + 1 : beforeAnchor;
+    if (to === realFrom) return;
+    PL.reorderPlaylist(active.id, realFrom, to);
+    openPlaylist(active.id);
+  });
+
+  host.addEventListener("dragend", _endDrag);
+}
+
+function _endDrag() {
+  _clearDropMark();
+  document.querySelectorAll("#trackList .dragging").forEach(el => el.classList.remove("dragging"));
+  _drag = null;
+}
+
 function _rowHtml(t, i, nowPath) {
   const isNow = nowPath === t.path;
   const blk = isBlocked(t.path);
   const pin = _pinSet.has(t.path);
-  return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""} ${pin ? "pinned" : ""}" data-path="${esc(t.path)}" data-idx="${i}">
+  return `<div class="track ${isNow ? "playing" : ""} ${selected.has(t.path) ? "selected" : ""} ${blk ? "blocked" : ""} ${pin ? "pinned" : ""}"${canReorder() ? ' draggable="true"' : ""} data-path="${esc(t.path)}" data-idx="${i}">
     <div class="tk-idx">${pin ? `<span class="idx-num idx-pin">${IC.pin}</span>` : `<span class="idx-num">${i + 1}</span>`}<span class="idx-play">${IC.play}</span></div>
     ${artCell(t)}
     <div class="meta"><div class="t">${blk ? "🚫 " : ""}${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div>
@@ -573,14 +680,34 @@ function _virtSlice() {
   proxyCovers(host);
 }
 
+// The column headers and the sort row belong to the track list: both must
+// vanish together for views that are not a track list (YouTube card grids,
+// playlist-detail panes, empty states), or the sorter floats over unrelated UI.
+function showListChrome(on) {
+  $("#listHead").style.display = on ? "" : "none";
+  const t = $("#listTools");
+  if (t) t.style.display = on && !t.hidden ? "" : "none";
+}
+
 function renderTracks(list, presorted = false) {
   const src = filterBlocked(list);
   view = applyPins(presorted ? [...src] : sortTracks([...src]));
   list = view;
+  // Decide up front whether these rows are drag-reorderable: _rowHtml reads it
+  // while building the markup, so it has to be settled before we render.
+  // A filtered view is excluded on purpose — dropping between two visible rows
+  // when hidden rows sit between them puts the track somewhere the user cannot
+  // see, which reads as a bug even though the index maths is right.
+  _plSrc = null;
+  if (active.type === "playlist" && !$("#search").value.trim()) {
+    const pl = PL.getPlaylists().find(p => p.id === active.id);
+    const idx = pl ? _computePlSrc(pl) : null;
+    if (idx) _plSrc = { id: active.id, idx };
+  }
   updateCount();
   const host = $("#trackList");
   host.classList.remove("yt-grid"); // leave mini-YouTube card mode
-  $("#listHead").style.display = list.length ? "" : "none";
+  showListChrome(!!list.length);
   _virt = null;
   if (!list.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.music}</div>Nothing here yet.</div>`; return; }
   const nowPath = curIndex >= 0 ? queue[curIndex] : null;
@@ -613,6 +740,7 @@ function wireTrackList() {
     if (!_virt || _virt.raf) return;
     _virt.raf = requestAnimationFrame(() => { if (_virt) { _virt.raf = 0; _virtSlice(); } });
   }, { passive: true });
+  wireReorder(host);
   host.addEventListener("click", (e) => {
     const playBtn = e.target.closest("[data-play]");
     if (playBtn) { e.stopPropagation(); playFrom(Number(playBtn.dataset.play)); return; }
@@ -655,8 +783,10 @@ function updatePlayingRow() {
 }
 
 function updateCount() {
+  // Only the selection count is shown. The permanent "N tracks" readout was
+  // redundant with the per-view subtitle and just crowded the search bar.
   const n = selected.size;
-  $("#count").textContent = n ? `${n} selected` : `${view.length} track${view.length === 1 ? "" : "s"}`;
+  $("#count").textContent = n ? `${n} selected` : "";
 }
 function refreshSelectionUI() {
   document.querySelectorAll("#trackList .track").forEach(el => el.classList.toggle("selected", selected.has(el.dataset.path)));
@@ -1253,7 +1383,7 @@ function renderOnlineResults() {
     if (pls.length) prependPlaylistList(pls); // list view: playlists as rows on top
     // The "# TITLE ALBUM ⏱" columns belong to the local library table — they
     // don't line up with (or apply to) YouTube results and playlist cards.
-    $("#listHead").style.display = "none";
+    showListChrome(false);
   }
   injectArtistCard();
 }
@@ -1328,7 +1458,7 @@ async function renderYtGrid(fresh, owned, playlists = []) {
   view = [...fresh, ...owned];
   updateCount();
   const host = $("#trackList");
-  $("#listHead").style.display = "none";
+  showListChrome(false);
   host.classList.add("yt-grid");
   if (!view.length && !playlists.length) { host.innerHTML = `<div class="empty"><div class="empty-ico">${IC.music}</div>No results.</div>`; return; }
   // The results should appear COMPLETE: preload every cover into the proxy
@@ -1407,7 +1537,7 @@ function injectArtistCard() {
 function renderArtistPlaylists() {
   const host = $("#trackList");
   host.classList.remove("yt-grid");
-  $("#listHead").style.display = "none";
+  showListChrome(false);
   host.innerHTML = ytArtistPls.length
     ? ytArtistPls.map((p, i) => `<div class="ac-pl" data-acpl="${i}" title="${esc(p.url)}"><span class="ac-pl-t">${esc(p.title)}</span><span class="ac-pl-a">${esc(p.author || "")}</span></div>`).join("")
     : `<div class="empty"><div class="empty-ico">${IC.music}</div>No public playlists on this channel.</div>`;
@@ -1459,7 +1589,7 @@ async function searchOnline(q, page = 0) {
   markActive();
   selected.clear();
   setViewHead({ icon: IC.globe, title: "YouTube", subtitle: `Searching “${q}” — page ${ytPage + 1}… (you can keep browsing)` });
-  $("#listHead").style.display = "none";
+  showListChrome(false);
   $("#trackList").classList.remove("yt-grid");
   $("#trackList").innerHTML = `<div class="empty"><div class="empty-ico">${IC.radio}</div>Searching YouTube… Feel free to browse — the result lands in the Activity badge.</div>`;
   const tid = taskStart(`Search “${q}”`, { detail: `page ${ytPage + 1}` });
@@ -2737,7 +2867,17 @@ function applyUiPrefs() {
   $("#manualBtn").hidden = !s.uiSrcButtons;
   $("#secPlaylists").hidden = !s.uiPlaylists;
   $("#importBtn").hidden = !s.uiImportBtn;
+  // Hide the whole row, not just the select: the sort icon lives beside it now,
+  // so hiding the select alone would leave a stray icon on an empty strip.
+  // Derive the inline display from the column headers so toggling the setting
+  // applies at once without waiting for the next render, and without showing
+  // the row on views that have no track list.
   $("#sortSel").hidden = !s.uiSortSel;
+  const lt = $("#listTools");
+  if (lt) {
+    lt.hidden = !s.uiSortSel;
+    lt.style.display = (!s.uiSortSel || $("#listHead").style.display === "none") ? "none" : "";
+  }
   $("#secPlaylists").classList.toggle("collapsed", !!s.collPlaylists);
   document.body.classList.toggle("np-docked", !!s.npDocked);
   $("#npPin").classList.toggle("active", !!s.npDocked);

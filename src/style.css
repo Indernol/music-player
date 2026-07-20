@@ -828,6 +828,26 @@ body.bg-light.has-bg #extInput { background: rgba(0,0,0,.05); }
 .list-head .lh-idx { text-align: center; }
 .list-head .lh-dur { text-align: left; }
 
+/* ─── Sort control, moved out of the top bar ─── */
+/* It used to sit next to the search field, where it competed with the search
+   box for attention on narrow windows. Right-aligned just above the column
+   headers it reads as belonging to the list it sorts. */
+.list-tools[hidden] { display: none; }
+.list-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 24px 8px; margin: 0 12px; }
+.list-tools .sort-sel { max-width: 190px; }
+
+/* ─── Drag to reorder (playlists in their own order only) ─── */
+/* Rows get the grab affordance only when they are actually draggable, so the
+   cursor never promises a move the view cannot honour (sorted/filtered/pinned). */
+.track[draggable="true"] { cursor: grab; }
+.track[draggable="true"]:active { cursor: grabbing; }
+.track.dragging { opacity: .45; }
+/* The insertion line is drawn with an inset shadow rather than a border so the
+   row keeps its exact height and the list does not jump while dragging. */
+.track.drop-before { box-shadow: inset 0 2px 0 0 var(--accent); }
+.track.drop-after  { box-shadow: inset 0 -2px 0 0 var(--accent); }
+@media (prefers-reduced-motion: reduce) { .track.dragging { opacity: .6; } }
+
 /* ─── Album art covers + density + settings additions ─── */
 .art.has-cover, .np-art.has-cover { background-size: cover !important; background-position: center; color: transparent; }
 .btn-line { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: 100%; background: transparent; border: 1px solid var(--bd); color: var(--tx-2); padding: 8px 12px; border-radius: 9px; cursor: pointer; font-size: 12px; font-weight: 700; line-height: 1; transition: border-color .12s, color .12s, background .12s, transform .1s; }
