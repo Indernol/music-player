@@ -151,7 +151,15 @@ function wallPos() { const now = clock.pausedAt !== null ? clock.pausedAt : perf
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function fmtDur(s) { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), x = String(s % 60).padStart(2, "0"); return `${m}:${x}`; }
 function baseName(p) { return String(p || "").split("/").filter(Boolean).pop() || p; }
-function inFolder(t, f) { return t.path === f || t.path.startsWith(f.endsWith("/") ? f : f + "/"); }
+function inFolder(t, f) {
+  // Normalize \ → / (and drop any trailing slash) before comparing: on Windows
+  // both the source folder and the scanned track paths are stored with
+  // backslashes ("D:\music", "D:\music\song.mp3"), so the old startsWith(f+"/")
+  // never matched and every source showed 0 songs. Separator-agnostic now.
+  const norm = s => String(s || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  const tp = norm(t.path), fp = norm(f);
+  return tp === fp || tp.startsWith(fp + "/");
+}
 function trackByPath(p) { return library.find(t => t.path === p) || onlineIndex.get(p) || view.find(t => t.path === p) || null; }
 function gainFor(t) { if (!normalize) return 1.0; const g = t && Number(t.gain); return Number.isFinite(g) && g > 0 ? g : 1.0; }
 function artColor(s) { let h = 0; for (const c of String(s || "?")) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${h % 360} 42% 40%)`; }

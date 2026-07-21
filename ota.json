@@ -1,5 +1,5 @@
 {
-  "version": "0.22.52",
+  "version": "0.22.53",
   "entry": "main.js",
   "modules": [
     "main.js",
@@ -9,7 +9,7 @@
   ],
   "css": "style.css",
   "html": "index.html",
-  "notes": "Downloads on Windows are truly fixed this time: the app now installs FFmpeg by itself (update the app to v0.22.52), so every track converts to a real mp3 with embedded artwork instead of silently piling up raw m4a/mp4 files while the counter told you stories. Download progress bars also work for the first time ever with yt-dlp — the old progress parsing never matched what yt-dlp actually prints, so bars sat at 0% and teleported to 100 — and each bar now only moves forward (no more jumping back between the audio and artwork phases). All the recent speed work still applies: up to 4 tracks at once, 4 connections per track.",
+  "notes": "Fixed: a local source folder on Windows showed 0 songs even when it was full of music. The folder-membership check compared paths with forward slashes, but Windows stores them with backslashes (D:\\music\\song.mp3), so nothing ever matched — your library still listed the tracks, but clicking the source showed it empty and its count read 0. The check is now separator-agnostic, so Windows source folders list their songs and their counts are correct.",
   "platforms": [
     "linux",
     "windows",
